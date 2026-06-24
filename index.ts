@@ -22,8 +22,6 @@ const button = makeButton(renderer, {
   },
 });
 
-// renderer.setBackgroundColor("red");
-
 renderer.root.add(
   Box(
     { width: "100%", height: "100%", borderStyle: "rounded", padding: 1 },
