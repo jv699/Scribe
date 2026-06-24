@@ -24,7 +24,7 @@ const button = makeButton(renderer, {
 
 renderer.root.add(
   Box(
-    { width: "100%", height: "100%", borderStyle: "rounded", padding: 1 },
+    { width: "100%", height: "100%", padding: 1 },
     Text({ content: consts.logoBloody }),
     Input({ placeholder: "Enter your name..." }),
   ),
