@@ -1,21 +1,13 @@
-import {
-  createCliRenderer,
-  Box,
-  TextRenderable,
-  Input,
-  createTimeline,
-  engine,
-} from "@opentui/core";
+import { createCliRenderer, Box, Text, SelectRenderable } from "@opentui/core";
 import { makeButton } from "./ui.ts";
 import * as consts from "./consts.ts";
+import { main } from "bun";
 
 const renderer = await createCliRenderer({
   exitOnCtrlC: true,
 });
 
-engine.attach(renderer);
-
-renderer.console.show();
+// renderer.console.show();
 // renderer.toggleDebugOverlay();
 
 renderer.setTerminalTitle("Scribe");
@@ -31,28 +23,22 @@ const button = makeButton(renderer, {
   },
 });
 
-const logo = new TextRenderable(renderer, {
-  content: consts.logoBloody,
-  fg: "#333333",
+const mainMenu = new SelectRenderable(renderer, {
+  width: 30,
+  height: 8,
+  options: [
+    { name: "Create New Campaign", description: "test desc" },
+    { name: "Option 2", description: "test" },
+  ],
 });
 
-createTimeline()
-  .add(logo, {
-    duration: 10000,
-    ease: "outExpo",
-    onUpdate: (anim) => {
-      const steps = 5;
-      const stepped = Math.round(anim.progress * steps) / steps;
-      const dim = { r: 51, g: 51, b: 51 };
-      const bright = { r: 255, g: 255, b: 255 };
-      const r = Math.round(dim.r + (bright.r - dim.r) * stepped);
-      const g = Math.round(dim.g + (bright.g - dim.g) * stepped);
-      const b = Math.round(dim.b + (bright.b - dim.b) * stepped);
-      logo.fg = `#${[r, g, b].map((c) => c.toString(16).padStart(2, "0")).join("")}`;
-      renderer.requestRender();
-    },
-  })
-  .play();
+const menuPanel = Box(
+  {
+    borderStyle: "single",
+    borderColor: "#666",
+  },
+  mainMenu,
+)
 
 renderer.root.add(
   Box(
@@ -64,8 +50,10 @@ renderer.root.add(
       alignItems: "center",
     },
     Box({ flexGrow: 0.5 }),
-    logo,
-    Input({ placeholder: "Enter your name..." }),
+    Text({ content: consts.logoBloody }),
+    menuPanel,
     Box({ flexGrow: 2 }),
   ),
 );
+
+mainMenu.focus();
