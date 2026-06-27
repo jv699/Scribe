@@ -1,4 +1,4 @@
-import { createCliRenderer, Box, Text, SelectRenderable } from "@opentui/core";
+import { createCliRenderer, Box, Text, SelectRenderable, SelectRenderableEvents, type SelectOption } from "@opentui/core";
 import { makeButton } from "./ui.ts";
 import * as consts from "./consts.ts";
 import { main } from "bun";
@@ -7,7 +7,7 @@ const renderer = await createCliRenderer({
   exitOnCtrlC: true,
 });
 
-// renderer.console.show();
+renderer.console.show();
 // renderer.toggleDebugOverlay();
 
 renderer.setTerminalTitle("Scribe");
@@ -15,13 +15,6 @@ renderer.setTerminalTitle("Scribe");
 //get theme
 const mode = await renderer.waitForThemeMode(1000);
 console.log(mode);
-
-const button = makeButton(renderer, {
-  label: "Click me!",
-  onClick: () => {
-    console.log("test");
-  },
-});
 
 const mainMenu = new SelectRenderable(renderer, {
   width: 30,
@@ -37,11 +30,13 @@ const mainMenu = new SelectRenderable(renderer, {
 
 const menuPanel = Box(
   {
-    borderStyle: "single",
-    borderColor: "#666",
   },
   mainMenu,
 );
+
+mainMenu.on(SelectRenderableEvents.ITEM_SELECTED, (index: number, option: SelectOption) => {
+  console.log(`Selected index ${index}: ${option.name}`)
+});
 
 renderer.root.add(
   Box(
