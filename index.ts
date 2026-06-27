@@ -25,11 +25,14 @@ const button = makeButton(renderer, {
 
 const mainMenu = new SelectRenderable(renderer, {
   width: 30,
-  height: 8,
+  height: 2,
+  showDescription: false,
   options: [
-    { name: "Create New Campaign", description: "test desc" },
-    { name: "Option 2", description: "test" },
+    { name: "Create New Campaign", description: "" },
+    { name: "Option 2", description: "" },
   ],
+  selectedBackgroundColor: "#333333",
+  selectedTextColor: "#FFFFFF",
 });
 
 const menuPanel = Box(
@@ -38,7 +41,7 @@ const menuPanel = Box(
     borderColor: "#666",
   },
   mainMenu,
-)
+);
 
 renderer.root.add(
   Box(
