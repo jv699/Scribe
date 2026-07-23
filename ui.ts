@@ -1,4 +1,4 @@
-import { BoxRenderable, TextRenderable, type RenderContext } from "@opentui/core";
+import { BoxRenderable, RenderableEvents, TextRenderable, type RenderContext } from "@opentui/core";
 
 export interface ButtonOptions {
   label: string;
@@ -39,6 +39,12 @@ export function makeButton(ctx: RenderContext, options: ButtonOptions): BoxRende
   button.onMouseOut = () => {
     button.borderColor = colors.border;
   };
+  button.on(RenderableEvents.FOCUSED, () => {
+    button.borderColor = BUTTON_COLORS.hover;
+  });
+  button.on(RenderableEvents.BLURRED, () => {
+    button.borderColor = colors.border;
+  });
 
   return button;
 }
