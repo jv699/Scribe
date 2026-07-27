@@ -24,9 +24,6 @@ export interface Dialog {
 export function makeDialog(ctx: RenderContext, options: DialogOptions): Dialog {
   const content = new BoxRenderable(ctx, {
     width: options.width,
-    border: true,
-    borderStyle: "rounded",
-    borderColor: options.borderColor ?? "#00AAFF",
     backgroundColor: options.backgroundColor ?? "#111111",
     padding: 1,
     flexDirection: "column",

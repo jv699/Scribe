@@ -1,4 +1,12 @@
-import { createCliRenderer, Box, BoxRenderable, TextRenderable, SelectRenderable, SelectRenderableEvents, type SelectOption } from "@opentui/core";
+import {
+  createCliRenderer,
+  Box,
+  BoxRenderable,
+  TextRenderable,
+  SelectRenderable,
+  SelectRenderableEvents,
+  type SelectOption,
+} from "@opentui/core";
 import { makeButton } from "./ui.ts";
 import * as consts from "./consts.ts";
 import { chunkyFadeIn, dissolveIn } from "./intro.ts";
@@ -10,7 +18,7 @@ const renderer = await createCliRenderer({
   exitOnCtrlC: true,
 });
 
-renderer.console.show();
+// renderer.console.show();
 // renderer.toggleDebugOverlay();
 
 renderer.setTerminalTitle("Scribe");
