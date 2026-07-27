@@ -25,7 +25,6 @@ renderer.setTerminalTitle("Scribe");
 
 //get theme
 const mode = await renderer.waitForThemeMode(1000);
-console.log(mode);
 
 const mainMenu = new SelectRenderable(renderer, {
   width: 30,
