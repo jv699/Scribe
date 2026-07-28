@@ -1,20 +1,30 @@
-import { createCliRenderer, Box, Text, SelectRenderable, SelectRenderableEvents, type SelectOption } from "@opentui/core";
+import {
+  createCliRenderer,
+  Box,
+  BoxRenderable,
+  TextRenderable,
+  SelectRenderable,
+  SelectRenderableEvents,
+  type SelectOption,
+} from "@opentui/core";
 import { makeButton } from "./ui.ts";
 import * as consts from "./consts.ts";
+import { chunkyFadeIn, dissolveIn } from "./intro.ts";
+import { addCampaign } from "./campaigns.ts";
+import { makeCampaignDialog } from "./campaign-dialog.ts";
 import { main } from "bun";
 
 const renderer = await createCliRenderer({
   exitOnCtrlC: true,
 });
 
-renderer.console.show();
+// renderer.console.show();
 // renderer.toggleDebugOverlay();
 
 renderer.setTerminalTitle("Scribe");
 
 //get theme
 const mode = await renderer.waitForThemeMode(1000);
-console.log(mode);
 
 const mainMenu = new SelectRenderable(renderer, {
   width: 30,
@@ -28,15 +38,33 @@ const mainMenu = new SelectRenderable(renderer, {
   selectedTextColor: "#FFFFFF",
 });
 
-const menuPanel = Box(
-  {
+const menuPanel = new BoxRenderable(renderer, {});
+menuPanel.add(mainMenu);
+
+const campaignDialog = makeCampaignDialog(renderer, {
+  onSubmit: (campaign) => {
+    addCampaign(campaign);
+    mainMenu.options = [
+      ...mainMenu.options,
+      { name: campaign.name, description: campaign.description },
+    ];
+    mainMenu.focus();
   },
-  mainMenu,
-);
+  onCancel: () => {
+    mainMenu.focus();
+  },
+});
+renderer.root.add(campaignDialog.layer);
 
 mainMenu.on(SelectRenderableEvents.ITEM_SELECTED, (index: number, option: SelectOption) => {
+  if (index === 0) {
+    campaignDialog.open();
+    return;
+  }
   console.log(`Selected index ${index}: ${option.name}`)
 });
+
+const logo = new TextRenderable(renderer, { content: consts.logoBloody });
 
 renderer.root.add(
   Box(
@@ -48,10 +76,15 @@ renderer.root.add(
       alignItems: "center",
     },
     Box({ flexGrow: 0.5 }),
-    Text({ content: consts.logoBloody }),
+    logo,
     menuPanel,
     Box({ flexGrow: 2 }),
   ),
 );
+
+// 90's videogame intro: logo dissolves in char-by-char through the shade
+// ramp, then the menu fades up in discrete brightness steps.
+dissolveIn(logo, consts.logoBloody);
+chunkyFadeIn(menuPanel, { delayMs: 500 });
 
 mainMenu.focus();
