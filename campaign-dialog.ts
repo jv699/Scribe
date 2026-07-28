@@ -10,10 +10,10 @@ import {
 } from "@opentui/core";
 import { makeDialog } from "./dialog.ts";
 import { makeButton } from "./ui.ts";
-import type { Campaign } from "./campaigns.ts";
+import type { NewCampaign } from "./store/campaigns.ts";
 
 export interface CampaignDialogOptions {
-  onSubmit: (campaign: Campaign) => void;
+  onSubmit: (campaign: NewCampaign) => void;
   onCancel: () => void;
 }
 
@@ -41,8 +41,17 @@ export function makeCampaignDialog(renderer: CliRenderer, options: CampaignDialo
     marginBottom: 1,
   });
 
+  const systemInput = new InputRenderable(renderer, {
+    placeholder: "System (e.g. D&D 5e, Shadowdark, Mothership)",
+    maxLength: 40,
+    width: "100%",
+    backgroundColor: "#222222",
+    focusedBackgroundColor: "#333333",
+    marginBottom: 1,
+  });
+
   const descInput = new TextareaRenderable(renderer, {
-    placeholder: "Description (optional)",
+    placeholder: "Campaign background (optional)",
     width: "100%",
     height: 4,
     backgroundColor: "#222222",
@@ -62,11 +71,12 @@ export function makeCampaignDialog(renderer: CliRenderer, options: CampaignDialo
 
   dialog.content.add(title);
   dialog.content.add(nameInput);
+  dialog.content.add(systemInput);
   dialog.content.add(descInput);
   dialog.content.add(hint);
   dialog.content.add(buttonRow);
 
-  const focusChain: Renderable[] = [nameInput, descInput, createButton, cancelButton];
+  const focusChain: Renderable[] = [nameInput, systemInput, descInput, createButton, cancelButton];
 
   function submit(): void {
     const name = nameInput.value.trim();
@@ -75,7 +85,11 @@ export function makeCampaignDialog(renderer: CliRenderer, options: CampaignDialo
       nameInput.focus();
       return;
     }
-    options.onSubmit({ name, description: descInput.plainText.trim() });
+    options.onSubmit({
+      name,
+      system: systemInput.value.trim(),
+      description: descInput.plainText.trim(),
+    });
     close();
   }
 
@@ -86,6 +100,7 @@ export function makeCampaignDialog(renderer: CliRenderer, options: CampaignDialo
 
   function open(): void {
     nameInput.value = "";
+    systemInput.value = "";
     descInput.clear();
     hint.content = "";
     dialog.open();
@@ -114,8 +129,9 @@ export function makeCampaignDialog(renderer: CliRenderer, options: CampaignDialo
     }
   }
 
-  // Enter in the name field jumps to the description.
-  nameInput.on(InputRenderableEvents.ENTER, () => descInput.focus());
+  // Enter in a single-line field jumps to the next one.
+  nameInput.on(InputRenderableEvents.ENTER, () => systemInput.focus());
+  systemInput.on(InputRenderableEvents.ENTER, () => descInput.focus());
 
   // Enter "clicks" the focused button (mouse clicks work via makeButton).
   // Note: the main Enter key reports key.name === "return" ("enter" is the
