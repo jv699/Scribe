@@ -1,90 +1,73 @@
-import {
-  createCliRenderer,
-  Box,
-  BoxRenderable,
-  TextRenderable,
-  SelectRenderable,
-  SelectRenderableEvents,
-  type SelectOption,
-} from "@opentui/core";
-import { makeButton } from "./ui.ts";
-import * as consts from "./consts.ts";
-import { chunkyFadeIn, dissolveIn } from "./intro.ts";
-import { addCampaign } from "./campaigns.ts";
+import { createCliRenderer } from "@opentui/core";
 import { makeCampaignDialog } from "./campaign-dialog.ts";
-import { main } from "bun";
+import { makeMainMenuScreen } from "./screens/main-menu.ts";
+import { makeCampaignHomeScreen } from "./screens/campaign-home.ts";
+import type { Screen } from "./screens/screen.ts";
+import { loadSettings } from "./store/settings.ts";
+import { createCampaign, listCampaigns, loadCampaign, type Campaign } from "./store/campaigns.ts";
 
 const renderer = await createCliRenderer({
   exitOnCtrlC: true,
 });
 
-// renderer.console.show();
-// renderer.toggleDebugOverlay();
-
 renderer.setTerminalTitle("Scribe");
 
-//get theme
-const mode = await renderer.waitForThemeMode(1000);
+const settings = await loadSettings();
 
-const mainMenu = new SelectRenderable(renderer, {
-  width: 30,
-  height: 2,
-  showDescription: false,
-  options: [
-    { name: "Create New Campaign", description: "" },
-    { name: "Option 2", description: "" },
-  ],
-  selectedBackgroundColor: "#333333",
-  selectedTextColor: "#FFFFFF",
-});
+// --- Screen management: one screen at a time under the renderer root ---
+let currentScreen: Screen | null = null;
 
-const menuPanel = new BoxRenderable(renderer, {});
-menuPanel.add(mainMenu);
+function showScreen(screen: Screen): void {
+  if (currentScreen) {
+    currentScreen.dispose?.();
+    renderer.root.remove(currentScreen.node.id);
+    currentScreen.node.destroyRecursively();
+  }
+  currentScreen = screen;
+  renderer.root.add(screen.node);
+  screen.focus?.();
+}
+
+let introPlayed = false;
+
+async function showMainMenu(): Promise<void> {
+  const campaigns = await listCampaigns(settings.campaignsDir);
+  showScreen(
+    makeMainMenuScreen(renderer, {
+      campaigns,
+      playIntro: !introPlayed,
+      onCreateCampaign: () => campaignDialog.open(),
+      onSelectCampaign: (campaign) => void showCampaignHome(campaign),
+      onQuit: () => {
+        renderer.destroy();
+        process.exit(0);
+      },
+    }),
+  );
+  introPlayed = true;
+}
+
+async function showCampaignHome(campaign: Campaign): Promise<void> {
+  // Re-read from disk so external edits (and our own changes) are reflected.
+  const fresh = (await loadCampaign(campaign.dir)) ?? campaign;
+  showScreen(
+    await makeCampaignHomeScreen(renderer, {
+      campaign: fresh,
+      onBack: () => void showMainMenu(),
+      onChanged: () => void showCampaignHome(fresh),
+    }),
+  );
+}
 
 const campaignDialog = makeCampaignDialog(renderer, {
-  onSubmit: (campaign) => {
-    addCampaign(campaign);
-    mainMenu.options = [
-      ...mainMenu.options,
-      { name: campaign.name, description: campaign.description },
-    ];
-    mainMenu.focus();
+  onSubmit: (input) => {
+    void (async () => {
+      const campaign = await createCampaign(settings.campaignsDir, input);
+      await showCampaignHome(campaign);
+    })();
   },
-  onCancel: () => {
-    mainMenu.focus();
-  },
+  onCancel: () => currentScreen?.focus?.(),
 });
 renderer.root.add(campaignDialog.layer);
 
-mainMenu.on(SelectRenderableEvents.ITEM_SELECTED, (index: number, option: SelectOption) => {
-  if (index === 0) {
-    campaignDialog.open();
-    return;
-  }
-  console.log(`Selected index ${index}: ${option.name}`)
-});
-
-const logo = new TextRenderable(renderer, { content: consts.logoBloody });
-
-renderer.root.add(
-  Box(
-    {
-      width: "100%",
-      height: "100%",
-      padding: 1,
-      justifyContent: "center",
-      alignItems: "center",
-    },
-    Box({ flexGrow: 0.5 }),
-    logo,
-    menuPanel,
-    Box({ flexGrow: 2 }),
-  ),
-);
-
-// 90's videogame intro: logo dissolves in char-by-char through the shade
-// ramp, then the menu fades up in discrete brightness steps.
-dissolveIn(logo, consts.logoBloody);
-chunkyFadeIn(menuPanel, { delayMs: 500 });
-
-mainMenu.focus();
+await showMainMenu();
