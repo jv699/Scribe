@@ -2,6 +2,27 @@
 
 A small Bun + TypeScript terminal UI project. Keep it simple.
 
+## What Scribe is
+
+Scribe is (becoming) a bring-your-own-model TTRPG campaign builder and
+organizer: users create campaigns for any system, plan sessions with an LLM
+agent in a chat-like harness, run sessions from generated markdown notes, then
+report outcomes so the agent maintains a running campaign summary it uses to
+plan future sessions. **Read `PLAN.md` before making architectural decisions**
+— it contains the full design and roadmap.
+
+Locked design decisions (don't revisit without asking):
+
+- **Persistence is markdown-first**: campaign data lives in user-visible
+  markdown files with frontmatter (default `~/Scribe`), not a database. The
+  files the agent reads/writes are the same files the user owns.
+- **Frontmatter is flat `key: value` lines**, parsed by a tiny hand-rolled
+  parser — do not add a YAML dependency.
+- **Model access is OpenAI-compatible only** (configurable `baseUrl`/`model`,
+  covers OpenAI/OpenRouter/Ollama/LM Studio). API keys are referenced by env
+  var name in `~/.config/scribe/config.json` — never store keys.
+- Current roadmap phase: **Phase 0 (persistence)** — see `PLAN.md`.
+
 ## Project basics
 
 - **Runtime**: Bun (`bun` v1.3+).
@@ -39,7 +60,7 @@ bunx tsc --noEmit
 - `intro.ts`: startup animation helpers — `dissolveIn` (per-character shade-ramp dissolve for text) and `chunkyFadeIn` (stepped opacity fade). Driven by `setInterval`, need real renderable instances (not the `Box()`/`Text()` VNode factory proxies).
 - `dialog.ts`: generic centered modal primitive (`makeDialog`) — absolute full-screen layer + `zIndex`, toggled via `visible`. Callers handle focus.
 - `campaign-dialog.ts`: "New Campaign" form (`makeCampaignDialog`) built on `dialog.ts`. Name `InputRenderable` + description `TextareaRenderable` + `makeButton` buttons. Global `keypress` listener (while open) traps Tab/Shift+Tab/Escape; `onSubmit`/`onCancel` callbacks.
-- `campaigns.ts`: `Campaign` type + in-memory store (`addCampaign`/`listCampaigns`). No persistence by design — this module is the seam for adding it later.
+- `campaigns.ts`: `Campaign` type + in-memory store (`addCampaign`/`listCampaigns`). No persistence by design — Phase 0 replaces this with a markdown-file store per `PLAN.md`.
 
 ## Gotchas
 
