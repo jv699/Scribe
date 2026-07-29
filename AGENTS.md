@@ -63,6 +63,7 @@ bun test
 - `screens/main-menu.ts`: main menu — create / campaign list (loaded from disk) / quit, plus the intro animation on first show.
 - `screens/campaign-home.ts`: campaign view — background & story-so-far peeks, session list with statuses, new-session dialog, session detail dialog (mark ready/played, trash), Escape goes back.
 - `ui.ts`: helper for creating focusable/mouse-aware buttons (`makeButton`).
+- `theme.ts`: unified palette (`theme`) — burnt-orange accent over flat dark surfaces. ALL UI colors come from here; never hardcode hex literals.
 - `consts.ts`: ASCII art logos.
 - `intro.ts`: startup animation helpers — `dissolveIn` (per-character shade-ramp dissolve for text) and `chunkyFadeIn` (stepped opacity fade). Driven by `setInterval`, need real renderable instances (not the `Box()`/`Text()` VNode factory proxies).
 - `dialog.ts`: generic centered modal primitive (`makeDialog`) — absolute full-screen layer + `zIndex`, toggled via `visible`. Callers handle focus.

@@ -8,6 +8,7 @@ import {
 } from "@opentui/core";
 import * as consts from "../consts.ts";
 import { chunkyFadeIn, dissolveIn } from "../intro.ts";
+import { theme } from "../theme.ts";
 import type { Campaign } from "../store/campaigns.ts";
 import type { Screen } from "./screen.ts";
 
@@ -32,8 +33,8 @@ export function makeMainMenuScreen(renderer: CliRenderer, options: MainMenuOptio
     height: menuOptions.length,
     showDescription: false,
     options: menuOptions,
-    selectedBackgroundColor: "#333333",
-    selectedTextColor: "#FFFFFF",
+    selectedBackgroundColor: theme.accent,
+    selectedTextColor: theme.text,
   });
 
   const menuPanel = new BoxRenderable(renderer, {});
@@ -52,7 +53,7 @@ export function makeMainMenuScreen(renderer: CliRenderer, options: MainMenuOptio
     if (campaign) options.onSelectCampaign(campaign);
   });
 
-  const logo = new TextRenderable(renderer, { content: consts.logoBloody });
+  const logo = new TextRenderable(renderer, { content: consts.logoBloody, fg: theme.text });
 
   const container = new BoxRenderable(renderer, {
     width: "100%",

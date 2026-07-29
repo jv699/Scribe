@@ -12,6 +12,7 @@ import { makeDialog } from "../dialog.ts";
 import { makeButton } from "../ui.ts";
 import { makeSessionDialog } from "../session-dialog.ts";
 import { listSessions, createSession, setSessionStatus, trashSession, type Session } from "../store/sessions.ts";
+import { theme } from "../theme.ts";
 import type { Campaign } from "../store/campaigns.ts";
 import type { Screen } from "./screen.ts";
 
@@ -43,25 +44,25 @@ export async function makeCampaignHomeScreen(
     padding: 1,
     flexDirection: "column",
   });
-  container.add(new TextRenderable(renderer, { content: campaign.name, fg: "#00AAFF", marginBottom: 1 }));
+  container.add(new TextRenderable(renderer, { content: campaign.name, fg: theme.accent, marginBottom: 1 }));
   container.add(
     new TextRenderable(renderer, {
       content: `System: ${campaign.system || "—"}    Created: ${campaign.created}    Folder: ${campaign.dir}`,
-      fg: "#888888",
+      fg: theme.textMuted,
       marginBottom: 1,
     }),
   );
   container.add(
     new TextRenderable(renderer, {
       content: `Background:\n${peek(campaign.description, 3)}`,
-      fg: "#AAAAAA",
+      fg: theme.textDim,
       marginBottom: 1,
     }),
   );
   container.add(
     new TextRenderable(renderer, {
       content: `The Story So Far:\n${peek(campaign.storySoFar, 3)}`,
-      fg: "#AAAAAA",
+      fg: theme.textDim,
       marginBottom: 1,
     }),
   );
@@ -80,8 +81,8 @@ export async function makeCampaignHomeScreen(
     height: items.length,
     showDescription: false,
     options: items,
-    selectedBackgroundColor: "#333333",
-    selectedTextColor: "#FFFFFF",
+    selectedBackgroundColor: theme.accent,
+    selectedTextColor: theme.text,
   });
   container.add(menu);
 
@@ -118,7 +119,7 @@ export async function makeCampaignHomeScreen(
     const dialog = makeDialog(renderer, { width: 60 });
     renderer.root.add(dialog.layer);
 
-    dialog.content.add(new TextRenderable(renderer, { content: session.title, fg: "#00AAFF" }));
+    dialog.content.add(new TextRenderable(renderer, { content: session.title, fg: theme.accent }));
     dialog.content.add(
       new TextRenderable(renderer, {
         content: `Session ${session.number} — status: ${session.status}`,
@@ -126,7 +127,7 @@ export async function makeCampaignHomeScreen(
       }),
     );
     dialog.content.add(
-      new TextRenderable(renderer, { content: session.path, fg: "#888888", width: "100%", marginBottom: 1 }),
+      new TextRenderable(renderer, { content: session.path, fg: theme.textMuted, width: "100%", marginBottom: 1 }),
     );
 
     const buttonRow = new BoxRenderable(renderer, { flexDirection: "row" });

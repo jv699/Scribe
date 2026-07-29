@@ -7,6 +7,7 @@ import {
   type KeyEvent,
   type Renderable,
 } from "@opentui/core";
+import { theme } from "./theme.ts";
 import { makeDialog } from "./dialog.ts";
 import { makeButton } from "./ui.ts";
 
@@ -24,18 +25,18 @@ export interface SessionDialog {
 export function makeSessionDialog(renderer: CliRenderer, options: SessionDialogOptions): SessionDialog {
   const dialog = makeDialog(renderer, { width: 44 });
 
-  const title = new TextRenderable(renderer, { content: "New Session", fg: "#00AAFF", marginBottom: 1 });
+  const title = new TextRenderable(renderer, { content: "New Session", fg: theme.accent, marginBottom: 1 });
 
   const titleInput = new InputRenderable(renderer, {
     placeholder: "Session title",
     maxLength: 60,
     width: "100%",
-    backgroundColor: "#222222",
-    focusedBackgroundColor: "#333333",
+    backgroundColor: theme.surfaceRaised,
+    focusedBackgroundColor: theme.surfaceActive,
     marginBottom: 1,
   });
 
-  const hint = new TextRenderable(renderer, { content: "", fg: "#FF5555", height: 1 });
+  const hint = new TextRenderable(renderer, { content: "", fg: theme.danger, height: 1 });
 
   const createButton = makeButton(renderer, { label: "Create", variant: "primary", onClick: submit });
   const cancelButton = makeButton(renderer, { label: "Cancel", onClick: cancel });

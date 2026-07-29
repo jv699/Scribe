@@ -1,4 +1,5 @@
 import { BoxRenderable, RenderableEvents, TextRenderable, type RenderContext } from "@opentui/core";
+import { theme } from "./theme.ts";
 
 export interface ButtonOptions {
   label: string;
@@ -7,9 +8,8 @@ export interface ButtonOptions {
 }
 
 const BUTTON_COLORS = {
-  primary: { border: "#00AAFF", bg: "#003355", fg: "#FFFFFF" },
-  ghost: { border: "#FFFFFF", bg: "#222222", fg: "#FFFFFF" },
-  hover: "#333333",
+  primary: { bg: theme.accent, fg: theme.text, hover: theme.accentHover },
+  ghost: { bg: theme.surfaceRaised, fg: theme.text, hover: theme.surfaceActive },
 } as const;
 
 export function makeButton(ctx: RenderContext, options: ButtonOptions): BoxRenderable {
@@ -31,13 +31,13 @@ export function makeButton(ctx: RenderContext, options: ButtonOptions): BoxRende
     options.onClick?.();
   };
   button.onMouseOver = () => {
-    button.backgroundColor = BUTTON_COLORS.hover;
+    button.backgroundColor = colors.hover;
   };
   button.onMouseOut = () => {
     button.backgroundColor = colors.bg;
   };
   button.on(RenderableEvents.FOCUSED, () => {
-    button.backgroundColor = BUTTON_COLORS.hover;
+    button.backgroundColor = colors.hover;
   });
   button.on(RenderableEvents.BLURRED, () => {
     button.backgroundColor = colors.bg;
