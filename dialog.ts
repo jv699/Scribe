@@ -1,8 +1,8 @@
 import { BoxRenderable, type RenderContext } from "@opentui/core";
+import { theme } from "./theme.ts";
 
 export interface DialogOptions {
   width: number;
-  borderColor?: string;
   backgroundColor?: string;
 }
 
@@ -24,7 +24,7 @@ export interface Dialog {
 export function makeDialog(ctx: RenderContext, options: DialogOptions): Dialog {
   const content = new BoxRenderable(ctx, {
     width: options.width,
-    backgroundColor: options.backgroundColor ?? "#111111",
+    backgroundColor: options.backgroundColor ?? theme.surface,
     padding: 1,
     flexDirection: "column",
   });

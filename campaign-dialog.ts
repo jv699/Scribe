@@ -8,6 +8,7 @@ import {
   type KeyEvent,
   type Renderable,
 } from "@opentui/core";
+import { theme } from "./theme.ts";
 import { makeDialog } from "./dialog.ts";
 import { makeButton } from "./ui.ts";
 import type { NewCampaign } from "./store/campaigns.ts";
@@ -28,7 +29,7 @@ export function makeCampaignDialog(renderer: CliRenderer, options: CampaignDialo
 
   const title = new TextRenderable(renderer, {
     content: "New Campaign",
-    fg: "#00AAFF",
+    fg: theme.accent,
     marginBottom: 1,
   });
 
@@ -36,8 +37,8 @@ export function makeCampaignDialog(renderer: CliRenderer, options: CampaignDialo
     placeholder: "Campaign name",
     maxLength: 40,
     width: "100%",
-    backgroundColor: "#222222",
-    focusedBackgroundColor: "#333333",
+    backgroundColor: theme.surfaceRaised,
+    focusedBackgroundColor: theme.surfaceActive,
     marginBottom: 1,
   });
 
@@ -45,8 +46,8 @@ export function makeCampaignDialog(renderer: CliRenderer, options: CampaignDialo
     placeholder: "System (e.g. D&D 5e, Shadowdark, Mothership)",
     maxLength: 40,
     width: "100%",
-    backgroundColor: "#222222",
-    focusedBackgroundColor: "#333333",
+    backgroundColor: theme.surfaceRaised,
+    focusedBackgroundColor: theme.surfaceActive,
     marginBottom: 1,
   });
 
@@ -54,12 +55,12 @@ export function makeCampaignDialog(renderer: CliRenderer, options: CampaignDialo
     placeholder: "Campaign background (optional)",
     width: "100%",
     height: 4,
-    backgroundColor: "#222222",
-    focusedBackgroundColor: "#333333",
+    backgroundColor: theme.surfaceRaised,
+    focusedBackgroundColor: theme.surfaceActive,
     marginBottom: 1,
   });
 
-  const hint = new TextRenderable(renderer, { content: "", fg: "#FF5555", height: 1 });
+  const hint = new TextRenderable(renderer, { content: "", fg: theme.danger, height: 1 });
 
   const createButton = makeButton(renderer, { label: "Create", variant: "primary", onClick: submit });
   const cancelButton = makeButton(renderer, { label: "Cancel", onClick: cancel });
