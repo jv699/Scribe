@@ -12,7 +12,7 @@ import { makeChatScreen } from "./screens/chat.ts";
 import type { Screen } from "./screens/screen.ts";
 import { loadSettings, saveSettings } from "./store/settings.ts";
 import { createCampaign, listCampaigns, loadCampaign, type Campaign } from "./store/campaigns.ts";
-import { createProviderFromSettings } from "./provider/openai.ts";
+import { createProviderFromSettings, DEFAULT_MODEL } from "./provider/openai.ts";
 
 const renderer = await createCliRenderer({
   exitOnCtrlC: true,
@@ -75,6 +75,7 @@ async function showChatScreen(): Promise<void> {
   showScreen(
     await makeChatScreen(renderer, {
       provider: createProviderFromSettings(settings),
+      model: settings.model ?? DEFAULT_MODEL,
       onBack: () => void showMainMenu(),
     }),
   );
