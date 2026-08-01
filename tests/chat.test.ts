@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { createTestRenderer, createMockKeys, type TestRenderer } from "@opentui/core/testing";
 import { makeChatScreen } from "../src/screens/chat.ts";
 import type { Screen } from "../src/screens/screen.ts";
-import type { ChatProvider } from "../src/provider/types.ts";
+import type { ChatEvent, ChatProvider } from "../src/provider/types.ts";
+import type { AgentTool } from "../src/agent/loop.ts";
 
 let renderer: TestRenderer;
 let captureCharFrame: () => string;
@@ -13,7 +14,7 @@ let wentBack = false;
 
 const okProvider: ChatProvider = {
   async *streamChat() {
-    for (const chunk of ["Hel", "lo ", "world"]) yield chunk;
+    for (const chunk of ["Hel", "lo ", "world"]) yield { type: "text", delta: chunk };
   },
 };
 
@@ -80,5 +81,51 @@ describe("chat screen", () => {
     keys.pressKey("ESCAPE");
     await wait(500);
     expect(wentBack).toBe(true);
+  });
+
+  test("planning mode runs tools and streams the final answer", async () => {
+    const toolProvider: ChatProvider = {
+      async *streamChat(messages): AsyncGenerator<ChatEvent> {
+        if (messages.some((m) => m.role === "tool")) {
+          yield { type: "text", delta: "All set." };
+          return;
+        }
+        yield {
+          type: "tool_call",
+          toolCall: { index: 0, id: "c1", name: "echo", arguments: '{"word":"hi"}' },
+        };
+      },
+    };
+    const tools: AgentTool[] = [
+      {
+        definition: {
+          type: "function",
+          function: { name: "echo", description: "echo", parameters: { type: "object", properties: {} } },
+        },
+        execute: () => "ok",
+      },
+    ];
+
+    current = await makeChatScreen(renderer, {
+      provider: toolProvider,
+      systemPrompt: "You plan.",
+      tools,
+      onBack: () => {},
+    });
+    renderer.root.add(current.node);
+    current.focus?.();
+    await renderOnce();
+
+    await keys.typeText("do it", 5);
+    keys.pressEnter();
+    await wait();
+    await renderOnce();
+
+    const frame = captureCharFrame();
+    expect(frame.includes("You:")).toBe(true);
+    expect(frame.includes("All set.")).toBe(true);
+    // exactly one assistant reply, no duplicate/empty "Scribe:" lines
+    const scribeCount = (frame.match(/Scribe:/g) ?? []).length;
+    expect(scribeCount).toBe(1);
   });
 });

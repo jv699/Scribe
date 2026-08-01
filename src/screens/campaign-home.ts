@@ -26,6 +26,8 @@ export interface CampaignHomeOptions {
   onBack: () => void;
   /** Reload this screen after data changed (new session, status change, …). */
   onChanged: () => void;
+  /** Open planning mode for a session (agent writes its notes). */
+  onPlan: (session: Session) => void;
 }
 
 /** First few non-empty lines of a markdown section, for the peek view. */
@@ -154,7 +156,11 @@ export async function makeCampaignHomeScreen(
       });
     };
     if (session.status === "planning") {
-      addButton("Mark Ready", "primary", () => act(() => setSessionStatus(session, "ready")));
+      addButton("Plan with Agent", "primary", () => {
+        close();
+        options.onPlan(session);
+      });
+      addButton("Mark Ready", "ghost", () => act(() => setSessionStatus(session, "ready")));
     }
     if (session.status === "ready") {
       addButton("Mark Played", "primary", () => act(() => setSessionStatus(session, "played")));

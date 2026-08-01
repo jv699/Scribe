@@ -56,6 +56,7 @@ async function showCampaignHome(campaign: Campaign): Promise<void> {
       campaign: fresh,
       onBack: () => void showMainMenu(),
       onChanged: () => void showCampaignHome(fresh),
+      onPlan: () => {},
     }),
   );
 }
@@ -127,9 +128,10 @@ describe("phase-0 ui flow", () => {
     await renderOnce();
     expect(captureCharFrame().includes("001 — Death House [planning]")).toBe(true);
 
-    // mark ready via the detail dialog
+    // mark ready via the detail dialog (first button is now "Plan with Agent")
     keys.pressEnter();
     await wait(100);
+    await keys.pressKeys(["TAB"], 20); // Plan with Agent -> Mark Ready
     keys.pressEnter();
     await wait();
     await renderOnce();
