@@ -68,3 +68,9 @@ export async function loadSettings(configPath: string = defaultConfigPath()): Pr
 
   return settings;
 }
+
+/** Persist settings back to the config file. */
+export async function saveSettings(settings: Settings, configPath: string = defaultConfigPath()): Promise<void> {
+  await mkdir(join(configPath, ".."), { recursive: true });
+  await writeFile(configPath, JSON.stringify(settings, null, 2) + "\n", "utf8");
+}

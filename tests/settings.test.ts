@@ -1,0 +1,87 @@
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { createTestRenderer, createMockKeys, type TestRenderer } from "@opentui/core/testing";
+import { makeSettingsScreen } from "../src/screens/settings.ts";
+import type { Screen } from "../src/screens/screen.ts";
+import type { Settings } from "../src/store/settings.ts";
+
+let renderer: TestRenderer;
+let captureCharFrame: () => string;
+let renderOnce: () => Promise<void>;
+let keys: ReturnType<typeof createMockKeys>;
+let current: Screen | null = null;
+let saved: Settings | null = null;
+let wentBack = false;
+
+const wait = (ms = 300) => new Promise((r) => setTimeout(r, ms));
+
+beforeEach(async () => {
+  const setup = await createTestRenderer({ width: 90, height: 24 });
+  renderer = setup.renderer;
+  captureCharFrame = setup.captureCharFrame;
+  renderOnce = setup.renderOnce;
+  keys = createMockKeys(renderer);
+  current = null;
+  saved = null;
+  wentBack = false;
+});
+
+afterEach(() => {
+  current?.dispose?.();
+});
+
+async function open(settings: Settings): Promise<void> {
+  current = await makeSettingsScreen(renderer, {
+    settings,
+    onSaved: (s) => {
+      saved = s;
+    },
+    onBack: () => {
+      wentBack = true;
+    },
+  });
+  renderer.root.add(current.node);
+  current.focus?.();
+  await renderOnce();
+}
+
+describe("settings screen", () => {
+  test("renders fields prefilled from settings and accepts typing", async () => {
+    await open({ campaignsDir: "/tmp/x", baseUrl: "https://localhost:11434/v1", model: "llama3.1" });
+
+    let frame = captureCharFrame();
+    expect(frame.includes("Base URL")).toBe(true);
+    expect(frame.includes("https://localhost:11434/v1")).toBe(true);
+    expect(frame.includes("llama3.1")).toBe(true);
+    expect(frame.includes("/tmp/x")).toBe(true);
+
+    await keys.typeText("http://other/v1", 5);
+    await wait();
+    await renderOnce();
+    frame = captureCharFrame();
+    expect(frame.includes("http://other/v1")).toBe(true);
+  });
+
+  test("saves edited values", async () => {
+    await open({ campaignsDir: "/tmp/x" });
+
+    await keys.typeText("https://ollama.local/v1", 5); // base URL
+    await keys.pressKeys(["TAB"], 20); // -> model
+    await keys.typeText("llama3.1", 5);
+    await keys.pressKeys(["TAB", "TAB", "TAB"], 20); // -> key, dir, Save
+    keys.pressEnter();
+    await wait();
+
+    expect(saved?.baseUrl).toBe("https://ollama.local/v1");
+    expect(saved?.model).toBe("llama3.1");
+    expect(saved?.campaignsDir).toBe("/tmp/x"); // untouched field preserved
+  });
+
+  test("escape goes back without saving", async () => {
+    await open({ campaignsDir: "/tmp/x" });
+    await keys.typeText("zzz", 5);
+    keys.pressKey("ESCAPE");
+    await wait(500);
+    expect(wentBack).toBe(true);
+    expect(saved).toBeNull();
+  });
+});

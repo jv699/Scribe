@@ -42,6 +42,8 @@ async function showMainMenu(): Promise<void> {
       playIntro: false,
       onCreateCampaign: () => campaignDialog.open(),
       onSelectCampaign: (c) => void showCampaignHome(c),
+      onSettings: () => {},
+      onChat: () => {},
       onQuit: () => {},
     }),
   );

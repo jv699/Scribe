@@ -89,6 +89,10 @@ tools.**
     far: … Help plan session N; keep `sessions/00N.md` updated via tools."
   - *Report*: "The user played session N. Ask what happened, then append a
     concise summary via `append_campaign_summary`."
+- **System prompt is a user-owned file** — the shared base instruction lives
+  in `~/.config/scribe/system-prompt.md` (plain markdown, editable in any
+  editor), defaulting to a sensible TTRPG co-designer prompt. The two mode
+  prompts above layer on top of it; the app reads the file into context.
 - **Context assembly** — system prompt + background + running summary +
   current draft + chat history. Known future issue: the running summary grows
   unboundedly; add a compression step later (not v1).

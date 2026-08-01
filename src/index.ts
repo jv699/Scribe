@@ -7,9 +7,12 @@ import { createCliRenderer } from "@opentui/core";
 import { makeCampaignDialog } from "./campaign-dialog.ts";
 import { makeMainMenuScreen } from "./screens/main-menu.ts";
 import { makeCampaignHomeScreen } from "./screens/campaign-home.ts";
+import { makeSettingsScreen } from "./screens/settings.ts";
+import { makeChatScreen } from "./screens/chat.ts";
 import type { Screen } from "./screens/screen.ts";
-import { loadSettings } from "./store/settings.ts";
+import { loadSettings, saveSettings } from "./store/settings.ts";
 import { createCampaign, listCampaigns, loadCampaign, type Campaign } from "./store/campaigns.ts";
+import { createProviderFromSettings, DEFAULT_MODEL } from "./provider/openai.ts";
 
 const renderer = await createCliRenderer({
   exitOnCtrlC: true,
@@ -17,7 +20,7 @@ const renderer = await createCliRenderer({
 
 renderer.setTerminalTitle("Scribe");
 
-const settings = await loadSettings();
+let settings = await loadSettings();
 
 // --- Screen management: one screen at a time under the renderer root ---
 let currentScreen: Screen | null = null;
@@ -43,6 +46,8 @@ async function showMainMenu(): Promise<void> {
       playIntro: !introPlayed,
       onCreateCampaign: () => campaignDialog.open(),
       onSelectCampaign: (campaign) => void showCampaignHome(campaign),
+      onSettings: () => void showSettingsScreen(),
+      onChat: () => void showChatScreen(),
       onQuit: () => {
         renderer.destroy();
         process.exit(0);
@@ -50,6 +55,30 @@ async function showMainMenu(): Promise<void> {
     }),
   );
   introPlayed = true;
+}
+
+async function showSettingsScreen(): Promise<void> {
+  showScreen(
+    await makeSettingsScreen(renderer, {
+      settings,
+      onSaved: async (next) => {
+        await saveSettings(next);
+        settings = next;
+        await showMainMenu();
+      },
+      onBack: () => void showMainMenu(),
+    }),
+  );
+}
+
+async function showChatScreen(): Promise<void> {
+  showScreen(
+    await makeChatScreen(renderer, {
+      provider: createProviderFromSettings(settings),
+      model: settings.model ?? DEFAULT_MODEL,
+      onBack: () => void showMainMenu(),
+    }),
+  );
 }
 
 async function showCampaignHome(campaign: Campaign): Promise<void> {

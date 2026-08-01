@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { parseFrontmatter, serializeFrontmatter } from "../src/store/frontmatter.ts";
-import { loadSettings } from "../src/store/settings.ts";
+import { loadSettings, saveSettings } from "../src/store/settings.ts";
 import { createCampaign, listCampaigns, loadCampaign, updateCampaignMeta } from "../src/store/campaigns.ts";
 import { createSession, listSessions, setSessionStatus, trashSession } from "../src/store/sessions.ts";
 
@@ -68,6 +68,20 @@ describe("settings", () => {
     await Bun.write(configPath, "{not json");
     const settings = await loadSettings(configPath);
     expect(settings.campaignsDir.endsWith("Scribe")).toBe(true);
+  });
+
+  test("saveSettings persists and round-trips", async () => {
+    const configPath = join(dir, "config.json");
+    const settings = await loadSettings(configPath);
+    await saveSettings(
+      { ...settings, baseUrl: "http://localhost:1234/v1", model: "my-model", apiKeyEnv: "MY_KEY" },
+      configPath,
+    );
+    const reloaded = await loadSettings(configPath);
+    expect(reloaded.baseUrl).toBe("http://localhost:1234/v1");
+    expect(reloaded.model).toBe("my-model");
+    expect(reloaded.apiKeyEnv).toBe("MY_KEY");
+    expect(reloaded.campaignsDir).toBe(settings.campaignsDir);
   });
 });
 
