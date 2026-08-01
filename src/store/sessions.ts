@@ -109,6 +109,18 @@ export async function setSessionStatus(session: Session, status: SessionStatus):
   session.status = status;
 }
 
+/** Read the session's markdown body (the Plan/Outcome sections, no frontmatter). */
+export async function readSessionNotes(session: Session): Promise<string> {
+  const { body } = parseFrontmatter(await readFile(session.path, "utf8"));
+  return body;
+}
+
+/** Replace the session's markdown body, preserving frontmatter. */
+export async function writeSessionNotes(session: Session, body: string): Promise<void> {
+  const { data } = parseFrontmatter(await readFile(session.path, "utf8"));
+  await writeFile(session.path, serializeFrontmatter(data, body), "utf8");
+}
+
 /** Soft-delete: move the session file into the campaign's .scribe/trash/. */
 export async function trashSession(campaign: Campaign, session: Session): Promise<void> {
   const trashDir = join(campaign.dir, TRASH_DIR);

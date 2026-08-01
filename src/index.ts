@@ -13,6 +13,9 @@ import type { Screen } from "./screens/screen.ts";
 import { loadSettings, saveSettings } from "./store/settings.ts";
 import { createCampaign, listCampaigns, loadCampaign, type Campaign } from "./store/campaigns.ts";
 import { createProviderFromSettings, DEFAULT_MODEL } from "./provider/openai.ts";
+import { makeCampaignTools } from "./agent/tools.ts";
+import { buildPlanningSystemPrompt } from "./agent/context.ts";
+import type { Session } from "./store/sessions.ts";
 
 const renderer = await createCliRenderer({
   exitOnCtrlC: true,
@@ -89,6 +92,23 @@ async function showCampaignHome(campaign: Campaign): Promise<void> {
       campaign: fresh,
       onBack: () => void showMainMenu(),
       onChanged: () => void showCampaignHome(fresh),
+      onPlan: (session) => void showPlanningChat(fresh, session),
+    }),
+  );
+}
+
+async function showPlanningChat(campaign: Campaign, session: Session): Promise<void> {
+  const [systemPrompt, tools] = await Promise.all([
+    buildPlanningSystemPrompt(campaign, session),
+    makeCampaignTools(campaign.dir),
+  ]);
+  showScreen(
+    await makeChatScreen(renderer, {
+      provider: createProviderFromSettings(settings),
+      model: settings.model ?? DEFAULT_MODEL,
+      systemPrompt,
+      tools,
+      onBack: () => void showCampaignHome(campaign),
     }),
   );
 }

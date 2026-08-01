@@ -114,12 +114,12 @@ Settings           → provider, model, key env var, campaigns dir
 
 Each phase leaves the app runnable.
 
-| Phase | Deliverable | Needs API key? |
+| Phase | Deliverable | Status |
 |---|---|---|
-| **0. Persistence** | Markdown store replaces `campaigns.ts` memory store; campaigns survive restarts; campaign home + manual session CRUD; "System" field in create dialog; settings store | No |
-| **1. Provider client** | Settings screen + OpenAI-compatible streaming chat in a scratch screen | Yes |
-| **2. Planning mode** | Chat + tools → agent writes `sessions/00N.md` | Yes |
-| **3. Report mode** | Outcome chat → summary appended; session → `played` | Yes |
+| **0. Persistence** | Markdown store; campaign home + manual session CRUD; "System" field; settings store | ✅ done |
+| **1. Provider client** | Settings screen + OpenAI-compatible streaming chat | ✅ done |
+| **2. Planning mode** | Agent loop + campaign tools + system-prompt file → agent writes `sessions/00N.md` | ✅ done |
+| **3. Report mode** | Outcome chat → summary appended; session → `played` | next |
 | **4. Polish** | Resume conversations, status guards, error handling, tests | — |
 
 Phase 0 is a useful campaign organizer with zero AI risk and is fully testable

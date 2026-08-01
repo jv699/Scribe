@@ -18,6 +18,7 @@ import {
 } from "@opentui/core";
 import { theme } from "../theme.ts";
 import { startSpinnerFrames } from "../spinner.ts";
+import { runAgent, type AgentTool } from "../agent/loop.ts";
 import type { ChatMessage, ChatProvider } from "../provider/types.ts";
 import type { Screen } from "./screen.ts";
 
@@ -25,6 +26,12 @@ export interface ChatScreenOptions {
   provider: ChatProvider;
   /** Shown on the right of the title bar. */
   model?: string;
+  /**
+   * When set, sends go through the agent loop with these tools and this base
+   * system prompt (planning mode). When omitted, plain text streaming only.
+   */
+  systemPrompt?: string;
+  tools?: AgentTool[];
   onBack: () => void;
 }
 
@@ -91,7 +98,10 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
   let stopThinking: (() => void) | null = null;
 
   const transcript = (): string =>
-    messages.map((m) => `**${m.role === "user" ? "You" : "Scribe"}:** ${m.content}`).join("\n\n");
+    messages
+      .filter((m) => (m.role === "user" || m.role === "assistant") && m.content.trim() !== "")
+      .map((m) => `**${m.role === "user" ? "You" : "Scribe"}:** ${m.content}`)
+      .join("\n\n");
 
   function render(): void {
     markdown.content = transcript();
@@ -109,6 +119,22 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
     });
   }
 
+  /** Stop the spinner, clearing its frame from the pending message. */
+  function stopThinkingNow(): void {
+    if (!stopThinking) return;
+    stopThinking();
+    stopThinking = null;
+    const last = messages[messages.length - 1];
+    if (last?.role === "assistant") last.content = "";
+  }
+
+  /** Append a streamed delta to the pending assistant message. */
+  function appendStreamed(delta: string): void {
+    stopThinkingNow();
+    messages[messages.length - 1]!.content += delta;
+    render();
+  }
+
   async function send(): Promise<void> {
     const text = input.value.trim();
     if (text === "" || busy) return;
@@ -122,27 +148,36 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
     render();
 
     try {
-      for await (const chunk of options.provider.streamChat(messages)) {
-        const last = messages[messages.length - 1]!;
-        if (stopThinking) {
-          // First chunk: drop the spinner frame before appending real text.
-          stopThinking();
-          stopThinking = null;
-          last.content = "";
+      if (options.tools) {
+        // Planning mode: run the agent loop (system prompt + tools). The
+        // pending assistant message is for spinner/streaming display only —
+        // runAgent manages its own conversation copy.
+        const result = await runAgent(
+          {
+            provider: options.provider,
+            systemPrompt: options.systemPrompt,
+            tools: options.tools,
+            onText: (delta) => appendStreamed(delta),
+            onTool: (name) => {
+              status.content = `running tool: ${name}…`;
+            },
+          },
+          messages.slice(0, -1),
+        );
+        // Keep the full conversation (minus the system message) for context.
+        messages.splice(0, messages.length, ...result.messages.filter((m) => m.role !== "system"));
+      } else {
+        // Scratch mode: plain text streaming.
+        for await (const event of options.provider.streamChat(messages)) {
+          if (event.type === "text") appendStreamed(event.delta);
         }
-        last.content += chunk;
-        render();
       }
+      status.content = "";
     } catch (err) {
       status.fg = theme.danger;
       status.content = `Error: ${err instanceof Error ? err.message : String(err)}`;
     } finally {
-      if (stopThinking) {
-        // No output arrived — clear the leftover spinner frame.
-        stopThinking();
-        stopThinking = null;
-        messages[messages.length - 1]!.content = "";
-      }
+      stopThinkingNow();
       busy = false;
       render();
     }

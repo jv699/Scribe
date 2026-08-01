@@ -1,10 +1,11 @@
 /**
  * OpenAI-compatible chat client. One implementation covers OpenAI, OpenRouter,
  * Ollama, LM Studio, vLLM — any endpoint speaking the /chat/completions
- * protocol. Streams SSE deltas by default, with a non-stream fallback.
+ * protocol. Streams SSE deltas (text + tool calls) by default, with a
+ * non-stream fallback.
  */
 import type { Settings } from "../store/settings.ts";
-import type { ChatMessage, ChatProvider } from "./types.ts";
+import type { ChatEvent, ChatMessage, ChatOptions, ChatProvider, ToolCallDelta } from "./types.ts";
 
 export interface OpenAIProviderOptions {
   /** Base URL without a trailing slash, e.g. "https://api.openai.com/v1". */
@@ -16,8 +17,19 @@ export interface OpenAIProviderOptions {
 export const DEFAULT_BASE_URL = "https://api.openai.com/v1";
 export const DEFAULT_MODEL = "gpt-4o-mini";
 
-/** Yield the `content` deltas from a Server-Sent-Events response body. */
-async function* streamSSE(response: Response): AsyncGenerator<string> {
+interface StreamChoice {
+  delta?: {
+    content?: string;
+    tool_calls?: {
+      index?: number;
+      id?: string;
+      function?: { name?: string; arguments?: string };
+    }[];
+  };
+}
+
+/** Yield text + tool-call deltas from a Server-Sent-Events response body. */
+async function* streamSSE(response: Response): AsyncGenerator<ChatEvent> {
   if (!response.body) return;
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
@@ -39,11 +51,18 @@ async function* streamSSE(response: Response): AsyncGenerator<string> {
         const payload = trimmed.slice(5).trim();
         if (payload === "[DONE]") return;
         try {
-          const json = JSON.parse(payload) as {
-            choices?: { delta?: { content?: string } }[];
-          };
-          const delta = json.choices?.[0]?.delta?.content;
-          if (typeof delta === "string" && delta.length > 0) yield delta;
+          const json = JSON.parse(payload) as { choices?: StreamChoice[] };
+          const delta = json.choices?.[0]?.delta;
+          if (delta?.content) yield { type: "text", delta: delta.content };
+          for (const tc of delta?.tool_calls ?? []) {
+            const toolCall: ToolCallDelta = {
+              index: tc.index ?? 0,
+              id: tc.id,
+              name: tc.function?.name,
+              arguments: tc.function?.arguments,
+            };
+            yield { type: "tool_call", toolCall };
+          }
         } catch {
           // Malformed keep-alive or partial line — ignore.
         }
@@ -56,14 +75,17 @@ export function createOpenAIProvider(options: OpenAIProviderOptions): ChatProvid
   const baseUrl = options.baseUrl.replace(/\/+$/, "");
 
   return {
-    async *streamChat(messages: ChatMessage[]): AsyncGenerator<string> {
+    async *streamChat(messages: ChatMessage[], chatOptions?: ChatOptions): AsyncGenerator<ChatEvent> {
+      const body: Record<string, unknown> = { model: options.model, messages, stream: true };
+      if (chatOptions?.tools?.length) body.tools = chatOptions.tools;
+
       const response = await fetch(`${baseUrl}/chat/completions`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${options.apiKey}`,
         },
-        body: JSON.stringify({ model: options.model, messages, stream: true }),
+        body: JSON.stringify(body),
       });
 
       if (!response.ok) {
@@ -76,10 +98,13 @@ export function createOpenAIProvider(options: OpenAIProviderOptions): ChatProvid
       } else {
         // Non-streaming fallback (older endpoints / proxies).
         const json = (await response.json()) as {
-          choices?: { message?: { content?: string } }[];
+          choices?: { message?: { content?: string; tool_calls?: ToolCallDelta[] } }[];
         };
-        const content = json.choices?.[0]?.message?.content;
-        if (typeof content === "string") yield content;
+        const message = json.choices?.[0]?.message;
+        if (message?.content) yield { type: "text", delta: message.content };
+        for (const tc of message?.tool_calls ?? []) {
+          yield { type: "tool_call", toolCall: tc };
+        }
       }
     },
   };

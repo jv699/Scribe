@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { createOpenAIProvider, createProviderFromSettings } from "../src/provider/openai.ts";
-import type { ChatMessage } from "../src/provider/types.ts";
+import type { ChatEvent, ChatMessage } from "../src/provider/types.ts";
 import type { Settings } from "../src/store/settings.ts";
 
 /**
@@ -25,11 +25,52 @@ function sseResponse(chunks: string[]): Response {
   return new Response(body, { headers: { "content-type": "text/event-stream" } });
 }
 
-type MockBehavior = "stream" | "json" | "error";
+type MockBehavior = "stream" | "json" | "error" | "tools";
 
 let server: ReturnType<typeof Bun.serve> | null = null;
-let lastRequest: { model?: string; messages?: ChatMessage[] } | null = null;
+let lastRequest: { model?: string; messages?: ChatMessage[]; tools?: unknown } | null = null;
 let seenAuth: string | null = null;
+
+/** SSE events: some text, then a split tool call, then [DONE]. */
+function toolSseResponse(): Response {
+  const events = [
+    { choices: [{ delta: { content: "Let me" } }] },
+    { choices: [{ delta: { content: " check." } }] },
+    {
+      choices: [
+        {
+          delta: {
+            tool_calls: [{ index: 0, id: "call_1", function: { name: "list_sessions", arguments: "" } }],
+          },
+        },
+      ],
+    },
+    {
+      choices: [
+        {
+          delta: {
+            tool_calls: [{ index: 0, function: { arguments: '{"' } }],
+          },
+        },
+      ],
+    },
+    {
+      choices: [
+        {
+          delta: {
+            tool_calls: [{ index: 0, function: { arguments: 'n":1}' } }],
+          },
+        },
+      ],
+    },
+    { choices: [{ delta: {} }] },
+  ];
+  const body = events
+    .map((e) => `data: ${JSON.stringify(e)}\n\n`)
+    .concat("data: [DONE]\n\n")
+    .join("");
+  return new Response(body, { headers: { "content-type": "text/event-stream" } });
+}
 
 async function startServer(behavior: MockBehavior): Promise<string> {
   server = Bun.serve({
@@ -40,7 +81,7 @@ async function startServer(behavior: MockBehavior): Promise<string> {
         return new Response("not found", { status: 404 });
       }
       seenAuth = req.headers.get("authorization");
-      lastRequest = (await req.json()) as { model?: string; messages?: ChatMessage[] };
+      lastRequest = (await req.json()) as { model?: string; messages?: ChatMessage[]; tools?: unknown };
 
       if (behavior === "error") {
         return new Response(JSON.stringify({ error: { message: "nope" } }), { status: 401 });
@@ -51,6 +92,9 @@ async function startServer(behavior: MockBehavior): Promise<string> {
           { headers: { "content-type": "application/json" } },
         );
       }
+      if (behavior === "tools") {
+        return toolSseResponse();
+      }
       return sseResponse(["Hel", "lo ", "world"]);
     },
   });
@@ -59,8 +103,8 @@ async function startServer(behavior: MockBehavior): Promise<string> {
 
 async function collect(provider: ReturnType<typeof createOpenAIProvider>): Promise<string[]> {
   const chunks: string[] = [];
-  for await (const chunk of provider.streamChat([{ role: "user", content: "hi" }])) {
-    chunks.push(chunk);
+  for await (const event of provider.streamChat([{ role: "user", content: "hi" }])) {
+    if (event.type === "text") chunks.push(event.delta);
   }
   return chunks;
 }
@@ -102,5 +146,45 @@ describe("provider client", () => {
     const provider = createProviderFromSettings(settings);
     await collect(provider);
     expect(seenAuth).toBe("Bearer secret-value");
+  });
+
+  test("streams tool-call deltas and accumulates arguments", async () => {
+    const baseUrl = await startServer("tools");
+    const provider = createOpenAIProvider({ baseUrl, model: "m", apiKey: "k" });
+
+    const events: { type: string; delta?: string; toolCall?: unknown }[] = [];
+    for await (const event of provider.streamChat([{ role: "user", content: "hi" }])) {
+      events.push(event);
+    }
+
+    expect(events.filter((e) => e.type === "text").map((e) => (e as { delta: string }).delta)).toEqual([
+      "Let me",
+      " check.",
+    ]);
+    const toolCalls = events.filter((e) => e.type === "tool_call");
+    expect(toolCalls).toHaveLength(3);
+    expect(toolCalls[0]!.toolCall).toMatchObject({ index: 0, id: "call_1", name: "list_sessions" });
+    // arguments arrive in fragments
+    const args = toolCalls.map((e) => (e as { toolCall: { arguments?: string } }).toolCall.arguments).join("");
+    expect(args).toBe('{"n":1}');
+  });
+
+  test("sends tool definitions in the request when provided", async () => {
+    const baseUrl = await startServer("stream");
+    const provider = createOpenAIProvider({ baseUrl, model: "m", apiKey: "k" });
+    await collect(provider);
+    // no tools by default
+    expect(lastRequest?.tools).toBeUndefined();
+
+    const toolDef = {
+      type: "function" as const,
+      function: { name: "list_sessions", description: "x", parameters: { type: "object" } },
+    };
+    const withTools: ChatEvent[] = [];
+    for await (const event of provider.streamChat([{ role: "user", content: "hi" }], { tools: [toolDef] })) {
+      withTools.push(event);
+    }
+    expect(lastRequest?.tools).toEqual([toolDef]);
+    expect(withTools.length).toBeGreaterThan(0);
   });
 });
