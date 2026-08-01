@@ -116,12 +116,10 @@ describe("phase-0 ui flow", () => {
     const rawMd = await readFile(join(onDisk[0]!.dir, "campaign.md"), "utf8");
     expect(rawMd.includes("system: D&D 5e") && rawMd.includes("nextSession: 1")).toBe(true);
 
-    // create a session
+    // create a session (Enter submits directly)
     keys.pressEnter();
     await wait(100);
     await keys.typeText("Death House", 5);
-    keys.pressEnter();
-    await wait(100);
     keys.pressEnter();
     await wait();
     await renderOnce();

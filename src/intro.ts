@@ -1,3 +1,8 @@
+/**
+ * Startup animations: `dissolveIn` (per-character shade-ramp dissolve) and
+ * `chunkyFadeIn` (stepped opacity fade). Both are 90's-style, driven by
+ * setInterval. They need real renderable instances, not VNode factory proxies.
+ */
 import type { Renderable, TextRenderable } from "@opentui/core";
 
 /** Classic shade ramp for the dissolve effect (DOS "materialize" look). */

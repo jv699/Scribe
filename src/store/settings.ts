@@ -1,3 +1,8 @@
+/**
+ * App-level settings in `~/.config/scribe/config.json` (separate from
+ * campaign data, which lives in the campaigns dir). Created with defaults on
+ * first run; API keys are referenced by env var name, never stored.
+ */
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { mkdir, readFile, writeFile } from "node:fs/promises";

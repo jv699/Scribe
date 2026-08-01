@@ -1,3 +1,7 @@
+/**
+ * Main menu screen: create campaign / campaign list (loaded from disk) /
+ * quit, with the 90's intro animation on first show.
+ */
 import {
   BoxRenderable,
   SelectRenderable,

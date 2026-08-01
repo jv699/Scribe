@@ -1,3 +1,9 @@
+/**
+ * Markdown-first persistence for sessions: one file per session in the
+ * campaign's `sessions/` folder (`00N-slug.md`) with flat frontmatter and a
+ * "## Plan" / "## Outcome" body. Handles numbering, status transitions, and
+ * soft-delete to `.scribe/trash/`.
+ */
 import { basename, join } from "node:path";
 import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
 import { parseFrontmatter, serializeFrontmatter } from "./frontmatter.ts";

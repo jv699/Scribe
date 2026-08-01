@@ -1,3 +1,8 @@
+/**
+ * Generic centered modal primitive: an invisible full-screen layer that
+ * centers a solid-background content box. Form dialogs (campaign, session)
+ * are built on this. Callers handle focus themselves.
+ */
 import { BoxRenderable, type RenderContext } from "@opentui/core";
 import { theme } from "./theme.ts";
 

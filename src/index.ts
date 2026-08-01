@@ -1,3 +1,8 @@
+/**
+ * Entry point: sets up the renderer, loads settings, and owns the screen
+ * manager (one `Screen` at a time under the renderer root) plus the
+ * campaign-create dialog and app-level navigation wiring.
+ */
 import { createCliRenderer } from "@opentui/core";
 import { makeCampaignDialog } from "./campaign-dialog.ts";
 import { makeMainMenuScreen } from "./screens/main-menu.ts";

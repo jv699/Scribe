@@ -1,3 +1,8 @@
+/**
+ * Markdown-first persistence for campaigns: each campaign is a folder in the
+ * campaigns dir containing a `campaign.md` with flat frontmatter + a body of
+ * "## Background" and "## The Story So Far" sections.
+ */
 import { join } from "node:path";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { parseFrontmatter, serializeFrontmatter } from "./frontmatter.ts";

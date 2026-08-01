@@ -1,3 +1,8 @@
+/**
+ * Campaign home screen: campaign metadata with background/story-so-far peeks,
+ * a session list with statuses, and dialogs for creating/editing sessions
+ * (mark ready/played, trash). Escape returns to the main menu.
+ */
 import {
   BoxRenderable,
   SelectRenderable,

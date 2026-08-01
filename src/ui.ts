@@ -1,3 +1,7 @@
+/**
+ * Shared UI primitive: `makeButton` — flat, borderless buttons colored from
+ * the app theme, with hover/focus highlight and click + Enter support.
+ */
 import { BoxRenderable, RenderableEvents, TextRenderable, type RenderContext } from "@opentui/core";
 import { theme } from "./theme.ts";
 
