@@ -21,8 +21,8 @@ Locked design decisions (don't revisit without asking):
 - **Model access is OpenAI-compatible only** (configurable `baseUrl`/`model`,
   covers OpenAI/OpenRouter/Ollama/LM Studio). API keys are referenced by env
   var name in `~/.config/scribe/config.json` — never store keys.
-- Current roadmap phase: **Phase 1 (provider client)** — Phase 0
-  (persistence) is done; see `PLAN.md`.
+- Current roadmap phase: **Phase 2 (planning mode)** — Phase 1 (provider
+  client) is done; see `PLAN.md`.
 
 ## Project basics
 
@@ -62,7 +62,12 @@ bun test
 - `src/screens/screen.ts`: `Screen` interface (`node` + optional `focus()`/`dispose()`).
 - `src/screens/main-menu.ts`: main menu — create / campaign list (loaded from disk) / quit, plus the intro animation on first show.
 - `src/screens/campaign-home.ts`: campaign view — background & story-so-far peeks, session list with statuses, new-session dialog, session detail dialog (mark ready/played, trash), Escape goes back.
+- `src/screens/settings.ts`: settings screen — edit base URL, model, API key env var, campaigns dir; persists to config.json via `saveSettings`.
+- `src/screens/chat.ts`: chat screen (scratch harness) — markdown transcript + input; streams assistant replies from any `ChatProvider`; surfaces provider errors.
 - `src/ui.ts`: helper for creating focusable/mouse-aware buttons (`makeButton`).
+- `src/provider/`: model provider abstraction (Phase 1).
+  - `types.ts`: `ChatMessage`, `ChatProvider` (`streamChat` returns an async iterable of deltas).
+  - `openai.ts`: OpenAI-compatible client (SSE streaming + JSON fallback) and `createProviderFromSettings`. `DEFAULT_BASE_URL`/`DEFAULT_MODEL`.
 - `src/theme.ts`: unified palette (`theme`) — burnt-orange accent over flat dark surfaces. ALL UI colors come from here; never hardcode hex literals.
 - `src/consts.ts`: ASCII art logos.
 - `src/intro.ts`: startup animation helpers — `dissolveIn` (per-character shade-ramp dissolve for text) and `chunkyFadeIn` (stepped opacity fade). Driven by `setInterval`, need real renderable instances (not the `Box()`/`Text()` VNode factory proxies).
@@ -72,7 +77,7 @@ bun test
 - `src/store/`: markdown-first persistence (Phase 0). Campaign data lives in `<campaignsDir>/<Campaign Name>/campaign.md` + `sessions/00N-slug.md`; settings in `~/.config/scribe/config.json` (`campaignsDir`, default `~/Scribe`).
   - `frontmatter.ts`: flat `key: value` frontmatter parse/serialize (no YAML).
   - `naming.ts`: folder-name sanitize, session-file slugify, collision-proof `uniqueName`. Regex classes use `\xNN` escapes — do not paste raw control chars into source.
-  - `settings.ts`: `loadSettings()` — creates config + campaigns dir on first run, expands `~`.
+  - `settings.ts`: `loadSettings()`/`saveSettings()` — creates config + campaigns dir on first run, expands `~`.
   - `campaigns.ts`: `Campaign` type, `createCampaign`/`listCampaigns`/`loadCampaign`/`updateCampaignMeta`. `campaign.md` body holds Background + The Story So Far sections.
   - `sessions.ts`: `Session` type, `createSession` (bumps campaign `nextSession`), `listSessions`, `setSessionStatus` (stamps dates), `trashSession` (soft-delete to `.scribe/trash/`).
 

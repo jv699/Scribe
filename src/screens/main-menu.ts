@@ -22,6 +22,8 @@ export interface MainMenuOptions {
   playIntro: boolean;
   onCreateCampaign: () => void;
   onSelectCampaign: (campaign: Campaign) => void;
+  onSettings: () => void;
+  onChat: () => void;
   onQuit: () => void;
 }
 
@@ -29,6 +31,8 @@ export function makeMainMenuScreen(renderer: CliRenderer, options: MainMenuOptio
   const menuOptions: SelectOption[] = [
     { name: "Create New Campaign", description: "" },
     ...options.campaigns.map((c) => ({ name: c.name, description: c.system })),
+    { name: "Settings", description: "" },
+    { name: "Chat (test)", description: "" },
     { name: "Quit", description: "" },
   ];
 
@@ -44,12 +48,25 @@ export function makeMainMenuScreen(renderer: CliRenderer, options: MainMenuOptio
   const menuPanel = new BoxRenderable(renderer, {});
   menuPanel.add(mainMenu);
 
+  const createIndex = 0;
+  const settingsIndex = 1 + options.campaigns.length;
+  const chatIndex = settingsIndex + 1;
+  const quitIndex = chatIndex + 1;
+
   mainMenu.on(SelectRenderableEvents.ITEM_SELECTED, (index: number) => {
-    if (index === 0) {
+    if (index === createIndex) {
       options.onCreateCampaign();
       return;
     }
-    if (index === menuOptions.length - 1) {
+    if (index === settingsIndex) {
+      options.onSettings();
+      return;
+    }
+    if (index === chatIndex) {
+      options.onChat();
+      return;
+    }
+    if (index === quitIndex) {
       options.onQuit();
       return;
     }
