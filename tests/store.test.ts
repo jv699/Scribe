@@ -3,10 +3,10 @@ import { mkdtemp, readFile, rm, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { parseFrontmatter, serializeFrontmatter } from "../store/frontmatter.ts";
-import { loadSettings } from "../store/settings.ts";
-import { createCampaign, listCampaigns, loadCampaign, updateCampaignMeta } from "../store/campaigns.ts";
-import { createSession, listSessions, setSessionStatus, trashSession } from "../store/sessions.ts";
+import { parseFrontmatter, serializeFrontmatter } from "../src/store/frontmatter.ts";
+import { loadSettings } from "../src/store/settings.ts";
+import { createCampaign, listCampaigns, loadCampaign, updateCampaignMeta } from "../src/store/campaigns.ts";
+import { createSession, listSessions, setSessionStatus, trashSession } from "../src/store/sessions.ts";
 
 let dir: string;
 

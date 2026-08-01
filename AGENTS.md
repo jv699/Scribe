@@ -27,7 +27,7 @@ Locked design decisions (don't revisit without asking):
 ## Project basics
 
 - **Runtime**: Bun (`bun` v1.3+).
-- **Entry point**: `index.ts`.
+- **Entry point**: `src/index.ts`.
 - **Only dependency**: `@opentui/core` (TUI component library).
 - **Tests**: `bun:test` in `tests/`. No lint, formatter, or CI yet.
 
@@ -38,10 +38,10 @@ Locked design decisions (don't revisit without asking):
 bun install
 
 # Run the app (interactive terminal UI)
-bun run index.ts
+bun run src/index.ts
 
 # Watch mode during dev
-bun --watch index.ts
+bun --watch src/index.ts
 
 # Type check (no emit; tsconfig sets "noEmit": true)
 bunx tsc --noEmit
@@ -58,18 +58,18 @@ bun test
 
 ## Entrypoints and architecture
 
-- `index.ts`: entry point + screen manager. One `Screen` at a time under the renderer root (dispose → remove → destroy → add). Also owns the campaign-create dialog and app-level wiring.
-- `screens/screen.ts`: `Screen` interface (`node` + optional `focus()`/`dispose()`).
-- `screens/main-menu.ts`: main menu — create / campaign list (loaded from disk) / quit, plus the intro animation on first show.
-- `screens/campaign-home.ts`: campaign view — background & story-so-far peeks, session list with statuses, new-session dialog, session detail dialog (mark ready/played, trash), Escape goes back.
-- `ui.ts`: helper for creating focusable/mouse-aware buttons (`makeButton`).
-- `theme.ts`: unified palette (`theme`) — burnt-orange accent over flat dark surfaces. ALL UI colors come from here; never hardcode hex literals.
-- `consts.ts`: ASCII art logos.
-- `intro.ts`: startup animation helpers — `dissolveIn` (per-character shade-ramp dissolve for text) and `chunkyFadeIn` (stepped opacity fade). Driven by `setInterval`, need real renderable instances (not the `Box()`/`Text()` VNode factory proxies).
-- `dialog.ts`: generic centered modal primitive (`makeDialog`) — absolute full-screen layer + `zIndex`, toggled via `visible`. Callers handle focus.
-- `campaign-dialog.ts`: "New Campaign" form (`makeCampaignDialog`) built on `dialog.ts`. Name + system `InputRenderable`s + background `TextareaRenderable` + `makeButton` buttons. Global `keypress` listener (while open) traps Tab/Shift+Tab/Escape; `onSubmit`/`onCancel` callbacks.
-- `session-dialog.ts`: "New Session" form (`makeSessionDialog`), same pattern, single title field.
-- `store/`: markdown-first persistence (Phase 0). Campaign data lives in `<campaignsDir>/<Campaign Name>/campaign.md` + `sessions/00N-slug.md`; settings in `~/.config/scribe/config.json` (`campaignsDir`, default `~/Scribe`).
+- `src/index.ts`: entry point + screen manager. One `Screen` at a time under the renderer root (dispose → remove → destroy → add). Also owns the campaign-create dialog and app-level wiring.
+- `src/screens/screen.ts`: `Screen` interface (`node` + optional `focus()`/`dispose()`).
+- `src/screens/main-menu.ts`: main menu — create / campaign list (loaded from disk) / quit, plus the intro animation on first show.
+- `src/screens/campaign-home.ts`: campaign view — background & story-so-far peeks, session list with statuses, new-session dialog, session detail dialog (mark ready/played, trash), Escape goes back.
+- `src/ui.ts`: helper for creating focusable/mouse-aware buttons (`makeButton`).
+- `src/theme.ts`: unified palette (`theme`) — burnt-orange accent over flat dark surfaces. ALL UI colors come from here; never hardcode hex literals.
+- `src/consts.ts`: ASCII art logos.
+- `src/intro.ts`: startup animation helpers — `dissolveIn` (per-character shade-ramp dissolve for text) and `chunkyFadeIn` (stepped opacity fade). Driven by `setInterval`, need real renderable instances (not the `Box()`/`Text()` VNode factory proxies).
+- `src/dialog.ts`: generic centered modal primitive (`makeDialog`) — absolute full-screen layer + `zIndex`, toggled via `visible`. Callers handle focus.
+- `src/campaign-dialog.ts`: "New Campaign" form (`makeCampaignDialog`) built on `dialog.ts`. Name + system `InputRenderable`s + background `TextareaRenderable` + `makeButton` buttons. Global `keypress` listener (while open) traps Tab/Shift+Tab/Escape; `onSubmit`/`onCancel` callbacks.
+- `src/session-dialog.ts`: "New Session" form (`makeSessionDialog`), same pattern, single title field.
+- `src/store/`: markdown-first persistence (Phase 0). Campaign data lives in `<campaignsDir>/<Campaign Name>/campaign.md` + `sessions/00N-slug.md`; settings in `~/.config/scribe/config.json` (`campaignsDir`, default `~/Scribe`).
   - `frontmatter.ts`: flat `key: value` frontmatter parse/serialize (no YAML).
   - `naming.ts`: folder-name sanitize, session-file slugify, collision-proof `uniqueName`. Regex classes use `\xNN` escapes — do not paste raw control chars into source.
   - `settings.ts`: `loadSettings()` — creates config + campaigns dir on first run, expands `~`.
@@ -79,6 +79,6 @@ bun test
 ## Gotchas
 
 - The app is an interactive TUI. Running it in a non-TTY or automated context may fail or hang.
-- `bun run` without a script name is not configured; use `bun run index.ts` or `bun index.ts`.
+- `bun run` without a script name is not configured; use `bun run src/index.ts` or `bun src/index.ts`.
 - Key names: the main Enter key reports `key.name === "return"` (`"enter"` is the keypad-enter alias). Escape is `"escape"`, Tab is `"tab"` (check `key.shift` for Shift+Tab).
 - Headless testing: use `createTestRenderer` + `createMockKeys` from `@opentui/core/testing`. The test script MUST live inside the project — if run from outside, Bun resolves a second copy of `@opentui/core` from its global cache and rendering silently breaks (boxes draw, text never paints).

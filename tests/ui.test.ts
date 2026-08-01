@@ -4,11 +4,11 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { makeCampaignDialog } from "../campaign-dialog.ts";
-import { makeMainMenuScreen } from "../screens/main-menu.ts";
-import { makeCampaignHomeScreen } from "../screens/campaign-home.ts";
-import type { Screen } from "../screens/screen.ts";
-import { createCampaign, listCampaigns, loadCampaign, type Campaign } from "../store/campaigns.ts";
+import { makeCampaignDialog } from "../src/campaign-dialog.ts";
+import { makeMainMenuScreen } from "../src/screens/main-menu.ts";
+import { makeCampaignHomeScreen } from "../src/screens/campaign-home.ts";
+import type { Screen } from "../src/screens/screen.ts";
+import { createCampaign, listCampaigns, loadCampaign, type Campaign } from "../src/store/campaigns.ts";
 
 /**
  * End-to-end UI flow test — must live inside the project so @opentui/core
