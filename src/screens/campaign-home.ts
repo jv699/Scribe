@@ -152,10 +152,15 @@ export async function makeCampaignHomeScreen(
     };
 
     const act = (action: () => Promise<void>) => {
-      void action().then(() => {
-        close();
-        options.onChanged();
-      });
+      void action()
+        .then(() => {
+          close();
+          options.onChanged();
+        })
+        .catch((err: unknown) => {
+          close();
+          console.error("Action failed:", err);
+        });
     };
     if (session.status === "planning") {
       addButton("Plan with Agent", "primary", () => {
@@ -171,7 +176,10 @@ export async function makeCampaignHomeScreen(
       });
       addButton("Mark Played", "ghost", () => act(() => setSessionStatus(session, "played")));
     }
-    addButton("Move to Trash", "ghost", () => act(() => trashSession(campaign, session)));
+    addButton("Move to Trash", "ghost", () => {
+      close();
+      confirmTrash(session);
+    });
     addButton("Close", "ghost", () => close());
     dialog.content.add(buttonRow);
 
@@ -199,6 +207,72 @@ export async function makeCampaignHomeScreen(
     }
 
     closeDetail = close;
+    dialog.open();
+    renderer.keyInput.on("keypress", onKeypress);
+    buttons[0]?.focus();
+  }
+
+  // --- Trash confirmation (status guard for the destructive action) ---
+  function confirmTrash(session: Session): void {
+    modalOpen = true;
+    const dialog = makeDialog(renderer, { width: 52 });
+    renderer.root.add(dialog.layer);
+
+    dialog.content.add(
+      new TextRenderable(renderer, {
+        content: `Move session ${session.number} — "${session.title}" to trash?`,
+        marginBottom: 1,
+      }),
+    );
+
+    const buttonRow = new BoxRenderable(renderer, { flexDirection: "row" });
+    const buttons: Renderable[] = [];
+    const addButton = (label: string, variant: "primary" | "ghost", action: () => void) => {
+      const button = makeButton(renderer, { label, variant, onClick: action });
+      button.onKeyDown = (key) => {
+        if (key.name === "return") action();
+      };
+      if (buttons.length > 0) buttonRow.add(new BoxRenderable(renderer, { width: 2 }));
+      buttonRow.add(button);
+      buttons.push(button);
+    };
+
+    addButton("Trash", "primary", () => {
+      void trashSession(campaign, session)
+        .then(() => {
+          close();
+          options.onChanged();
+        })
+        .catch((err: unknown) => {
+          close();
+          console.error("Failed to trash session:", err);
+        });
+    });
+    addButton("Cancel", "ghost", () => close());
+    dialog.content.add(buttonRow);
+
+    const onKeypress = (key: KeyEvent): void => {
+      if (key.name === "escape") {
+        key.preventDefault();
+        close();
+        return;
+      }
+      if (key.name === "tab" && buttons.length > 0) {
+        key.preventDefault();
+        const index = buttons.indexOf(renderer.currentFocusedRenderable as Renderable);
+        const direction = key.shift ? -1 : 1;
+        buttons[(index + direction + buttons.length) % buttons.length]?.focus();
+      }
+    };
+
+    function close(): void {
+      renderer.keyInput.off("keypress", onKeypress);
+      renderer.root.remove(dialog.layer.id);
+      dialog.layer.destroyRecursively();
+      modalOpen = false;
+      menu.focus();
+    }
+
     dialog.open();
     renderer.keyInput.on("keypress", onKeypress);
     buttons[0]?.focus();

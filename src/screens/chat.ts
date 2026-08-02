@@ -10,17 +10,26 @@ import {
   InputRenderable,
   InputRenderableEvents,
   MarkdownRenderable,
+  RenderableEvents,
   ScrollBoxRenderable,
   SyntaxStyle,
   TextRenderable,
   type CliRenderer,
   type KeyEvent,
+  type Renderable,
 } from "@opentui/core";
 import { theme } from "../theme.ts";
 import { startSpinnerFrames } from "../spinner.ts";
 import { runAgent, type AgentTool } from "../agent/loop.ts";
 import type { ChatMessage, ChatProvider } from "../provider/types.ts";
 import type { Screen } from "./screen.ts";
+
+/** Persistence seam for resuming a conversation across app sessions. */
+export interface ChatLogStore {
+  load(): Promise<ChatMessage[]>;
+  save(messages: ChatMessage[]): Promise<void>;
+  clear(): Promise<void>;
+}
 
 export interface ChatScreenOptions {
   provider: ChatProvider;
@@ -34,6 +43,8 @@ export interface ChatScreenOptions {
    */
   systemPrompt?: string;
   tools?: AgentTool[];
+  /** When set, the conversation is loaded/saved here and a Clear button shows. */
+  chatLog?: ChatLogStore;
   onBack: () => void;
 }
 
@@ -76,23 +87,56 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
   scrollBox.content.add(markdown);
   container.add(scrollBox);
 
-  // Input panel (same dark background as the select menu; no border).
+  // Input panel: message input + (in resume mode) a Clear button.
   const inputBox = new BoxRenderable(renderer, {
     width: "100%",
+    flexDirection: "row",
+    alignItems: "center",
     backgroundColor: theme.surfaceActive,
     paddingX: 1,
     marginTop: 1,
   });
   const input = new InputRenderable(renderer, {
     placeholder: "Type a message…",
-    width: "100%",
+    flexGrow: 1,
     backgroundColor: theme.surfaceActive,
     focusedBackgroundColor: theme.surfaceActive,
   });
   inputBox.add(input);
+
+  const clearButton = new BoxRenderable(renderer, {
+    focusable: options.chatLog !== undefined,
+    backgroundColor: theme.surfaceRaised,
+    paddingX: 1,
+    marginLeft: 1,
+    visible: options.chatLog !== undefined,
+  });
+  clearButton.add(new TextRenderable(renderer, { content: "Clear", fg: theme.textDim }));
+
+  function doClear(): void {
+    if (!options.chatLog) return;
+    messages.length = 0;
+    render();
+    void options.chatLog.clear();
+  }
+  clearButton.onKeyDown = (key) => {
+    if (key.name === "return") doClear();
+  };
+  clearButton.onMouseDown = () => doClear();
+  clearButton.on(RenderableEvents.FOCUSED, () => {
+    clearButton.backgroundColor = theme.accent;
+  });
+  clearButton.on(RenderableEvents.BLURRED, () => {
+    clearButton.backgroundColor = theme.surfaceRaised;
+  });
+  inputBox.add(clearButton);
   container.add(inputBox);
   container.add(
-    new TextRenderable(renderer, { content: "Enter to send · Esc to exit", fg: theme.textMuted, marginTop: 1 }),
+    new TextRenderable(renderer, {
+      content: options.chatLog ? "Enter to send · Tab to Clear · Esc to exit" : "Enter to send · Esc to exit",
+      fg: theme.textMuted,
+      marginTop: 1,
+    }),
   );
 
   const messages: ChatMessage[] = [];
@@ -108,6 +152,12 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
   function render(): void {
     markdown.content = transcript();
     markdown.streaming = busy;
+  }
+
+  // Resume: seed the transcript with any saved conversation.
+  if (options.chatLog) {
+    messages.push(...(await options.chatLog.load()));
+    render();
   }
 
   /** Animate the spinner in the pending "Scribe:" message. */
@@ -182,6 +232,13 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
       stopThinkingNow();
       busy = false;
       render();
+      if (options.chatLog) {
+        try {
+          await options.chatLog.save(messages);
+        } catch {
+          // Persisting history must not break the turn.
+        }
+      }
     }
   }
 
@@ -190,6 +247,14 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
       key.preventDefault();
       dispose();
       options.onBack();
+      return;
+    }
+    if (key.name === "tab" && options.chatLog) {
+      key.preventDefault();
+      const chain: Renderable[] = [input, clearButton];
+      const index = chain.indexOf(renderer.currentFocusedRenderable as Renderable);
+      const direction = key.shift ? -1 : 1;
+      chain[(index + direction + chain.length) % chain.length]?.focus();
     }
   };
   renderer.keyInput.on("keypress", onKeypress);
@@ -198,6 +263,9 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
     stopThinking?.();
     renderer.keyInput.off("keypress", onKeypress);
     syntaxStyle.destroy();
+    if (options.chatLog && messages.length > 0) {
+      void options.chatLog.save(messages);
+    }
   }
 
   input.on(InputRenderableEvents.ENTER, () => void send());

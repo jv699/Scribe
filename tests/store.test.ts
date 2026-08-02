@@ -7,6 +7,7 @@ import { parseFrontmatter, serializeFrontmatter } from "../src/store/frontmatter
 import { loadSettings, saveSettings } from "../src/store/settings.ts";
 import { createCampaign, listCampaigns, loadCampaign, updateCampaignMeta, appendStorySoFar } from "../src/store/campaigns.ts";
 import { createSession, listSessions, setSessionStatus, trashSession } from "../src/store/sessions.ts";
+import { loadChatLog, appendChatMessage, saveChatLog, clearChatLog, chatLogPath } from "../src/store/chat-log.ts";
 
 let dir: string;
 
@@ -210,5 +211,55 @@ describe("sessions", () => {
 
     const trashed = await readdir(join(campaign.dir, ".scribe", "trash"));
     expect(trashed).toEqual(["001-one.md"]);
+  });
+});
+
+describe("chat log", () => {
+  async function setup() {
+    return createCampaign(dir, { name: "CoS", system: "5e", description: "" });
+  }
+
+  test("append/load round-trips messages", async () => {
+    const campaign = await setup();
+    await appendChatMessage(campaign.dir, 1, "plan", { role: "user", content: "hi" });
+    await appendChatMessage(campaign.dir, 1, "plan", { role: "assistant", content: "hello" });
+
+    const loaded = await loadChatLog(campaign.dir, 1, "plan");
+    expect(loaded).toEqual([
+      { role: "user", content: "hi" },
+      { role: "assistant", content: "hello" },
+    ]);
+  });
+
+  test("loads empty when no log exists", async () => {
+    const campaign = await setup();
+    expect(await loadChatLog(campaign.dir, 1, "report")).toEqual([]);
+  });
+
+  test("skips corrupt lines", async () => {
+    const campaign = await setup();
+    const path = chatLogPath(campaign.dir, 1, "plan");
+    await Bun.write(path, '{"role":"user","content":"ok"}\nnot json\n');
+    const loaded = await loadChatLog(campaign.dir, 1, "plan");
+    expect(loaded).toEqual([{ role: "user", content: "ok" }]);
+  });
+
+  test("save replaces the whole log; clear deletes it", async () => {
+    const campaign = await setup();
+    await saveChatLog(campaign.dir, 2, "report", [{ role: "user", content: "a" }, { role: "assistant", content: "b" }]);
+    expect(await loadChatLog(campaign.dir, 2, "report")).toHaveLength(2);
+
+    await clearChatLog(campaign.dir, 2, "report");
+    expect(await loadChatLog(campaign.dir, 2, "report")).toEqual([]);
+  });
+
+  test("logs are separate per session and mode", async () => {
+    const campaign = await setup();
+    await appendChatMessage(campaign.dir, 1, "plan", { role: "user", content: "plan msg" });
+    await appendChatMessage(campaign.dir, 2, "report", { role: "user", content: "report msg" });
+
+    expect(await loadChatLog(campaign.dir, 1, "plan")).toHaveLength(1);
+    expect(await loadChatLog(campaign.dir, 2, "plan")).toEqual([]);
+    expect(await loadChatLog(campaign.dir, 2, "report")).toHaveLength(1);
   });
 });
