@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { createTestRenderer, type TestRenderer } from "@opentui/core/testing";
-import { TorchSpinnerRenderable } from "../src/torch-spinner.ts";
+import { DiceSpinnerRenderable } from "../src/dice-spinner.ts";
 
 let renderer: TestRenderer;
 let captureCharFrame: () => string;
 let renderOnce: () => Promise<void>;
-const spinners: TorchSpinnerRenderable[] = [];
+const spinners: DiceSpinnerRenderable[] = [];
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -22,15 +22,15 @@ afterEach(() => {
   renderer.destroy();
 });
 
-function makeSpinner(frameMs?: number): TorchSpinnerRenderable {
-  const spinner = new TorchSpinnerRenderable(renderer, { marginRight: 1, ...(frameMs ? { frameMs } : {}) });
+function makeSpinner(frameMs?: number): DiceSpinnerRenderable {
+  const spinner = new DiceSpinnerRenderable(renderer, { marginRight: 1, ...(frameMs ? { frameMs } : {}) });
   spinners.push(spinner);
   return spinner;
 }
 
-const FLAME = /[\u2800-\u28FF]/;
+const DIE = /[⚀⚁⚂⚃⚄⚅]/;
 
-describe("torch spinner", () => {
+describe("dice spinner", () => {
   test("starts hidden so it never leaves a gap while idle", async () => {
     const spinner = makeSpinner();
     renderer.root.add(spinner);
@@ -39,31 +39,30 @@ describe("torch spinner", () => {
     expect(captureCharFrame().trim()).toBe("");
   });
 
-  test("start() shows a flame and stop() hides it", async () => {
+  test("start() shows a die face and stop() clears it", async () => {
     const spinner = makeSpinner();
     renderer.root.add(spinner);
     spinner.start();
     await renderOnce();
     expect(spinner.visible).toBe(true);
-    expect(captureCharFrame().match(FLAME)).not.toBeNull();
+    expect(captureCharFrame().match(DIE)).not.toBeNull();
 
     spinner.stop();
     await renderOnce();
     expect(spinner.visible).toBe(false);
-    expect(captureCharFrame().match(FLAME)).toBeNull();
+    expect(captureCharFrame().match(DIE)).toBeNull();
   });
 
-  test("start() animates through flame frames", async () => {
+  test("start() rolls through the faces", async () => {
     const spinner = makeSpinner(20);
     renderer.root.add(spinner);
     spinner.start();
-    // Sample across a few ticks (90ms apart, not aligned to the frame cycle)
-    // and require more than one distinct flame glyph to appear.
+    // Sample across several ticks and require more than one distinct face.
     const seen = new Set<string>();
     for (let i = 0; i < 6; i++) {
       await renderOnce();
-      seen.add(captureCharFrame().match(FLAME)?.[0] ?? "");
-      await wait(90);
+      seen.add(captureCharFrame().match(DIE)?.[0] ?? "");
+      await wait(70);
     }
     expect(seen.size).toBeGreaterThan(1);
   });
