@@ -128,3 +128,25 @@ export async function updateCampaignMeta(
   const merged = { ...data, ...Object.fromEntries(Object.entries(patch).map(([k, v]) => [k, String(v)])) };
   await writeFile(filePath, serializeFrontmatter(merged, body), "utf8");
 }
+
+/**
+ * Append an entry to the campaign's "The Story So Far" section (the running
+ * summary the agent maintains after each session). Updates the in-memory
+ * campaign's storySoFar too.
+ */
+export async function appendStorySoFar(campaign: Campaign, entry: string): Promise<void> {
+  const filePath = join(campaign.dir, CAMPAIGN_FILE);
+  const { data, body } = parseFrontmatter(await readFile(filePath, "utf8"));
+
+  const headingIndex = body.indexOf(STORY_HEADING);
+  if (headingIndex === -1) {
+    const newBody = `${body.trimEnd()}\n\n${STORY_HEADING}\n\n${entry.trim()}\n`;
+    await writeFile(filePath, serializeFrontmatter(data, newBody), "utf8");
+    return;
+  }
+
+  const rest = body.slice(headingIndex + STORY_HEADING.length).trim();
+  const newBody = `${body.slice(0, headingIndex + STORY_HEADING.length)}\n\n${rest ? `${rest}\n\n` : ""}${entry.trim()}\n`;
+  await writeFile(filePath, serializeFrontmatter(data, newBody), "utf8");
+  campaign.storySoFar = extractSection(newBody, STORY_HEADING);
+}

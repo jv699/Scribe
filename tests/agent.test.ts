@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 import { runAgent, type AgentTool } from "../src/agent/loop.ts";
 import { makeCampaignTools } from "../src/agent/tools.ts";
-import { buildPlanningSystemPrompt } from "../src/agent/context.ts";
+import { buildPlanningSystemPrompt, buildReportSystemPrompt } from "../src/agent/context.ts";
 import type { ChatEvent, ChatMessage, ChatProvider, ToolDefinition } from "../src/provider/types.ts";
 import { createCampaign, loadCampaign } from "../src/store/campaigns.ts";
 import { createSession, listSessions } from "../src/store/sessions.ts";
@@ -158,6 +158,24 @@ describe("campaign tools", () => {
     const res = await list.execute({});
     expect(res).toContain('1. "Death House" [planning]');
   });
+
+  test("append_campaign_summary is only present in report mode", async () => {
+    const planning = await makeCampaignTools(campaignDir);
+    expect(planning.find((t) => t.definition.function.name === "append_campaign_summary")).toBeUndefined();
+
+    const report = await makeCampaignTools(campaignDir, { report: true });
+    expect(report.find((t) => t.definition.function.name === "append_campaign_summary")).toBeDefined();
+  });
+
+  test("append_campaign_summary writes to the story so far", async () => {
+    const tools = await makeCampaignTools(campaignDir, { report: true });
+    const append = tools.find((t) => t.definition.function.name === "append_campaign_summary")!;
+    const res = await append.execute({ entry: "They defeated the vampire spawn." });
+    expect(res).toContain("Appended");
+
+    const campaign = (await loadCampaign(campaignDir))!;
+    expect(campaign.storySoFar).toContain("They defeated the vampire spawn.");
+  });
 });
 
 describe("planning context", () => {
@@ -170,5 +188,15 @@ describe("planning context", () => {
     expect(prompt).toContain("Name: CoS");
     expect(prompt).toContain("Gothic horror.");
     expect(prompt).toContain('session 1 — "Death House"');
+  });
+
+  test("report prompt frames the session as played and points at the append tool", async () => {
+    const campaign = (await loadCampaign(campaignDir))!;
+    const sessions = await listSessions(campaign);
+    const prompt = await buildReportSystemPrompt(campaign, sessions[0]!);
+
+    expect(prompt).toContain("You are Scribe");
+    expect(prompt).toContain("The user just played session 1");
+    expect(prompt).toContain("append_campaign_summary");
   });
 });

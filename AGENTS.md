@@ -21,8 +21,8 @@ Locked design decisions (don't revisit without asking):
 - **Model access is OpenAI-compatible only** (configurable `baseUrl`/`model`,
   covers OpenAI/OpenRouter/Ollama/LM Studio). API keys are referenced by env
   var name in `~/.config/scribe/config.json` — never store keys.
-- Current roadmap phase: **Phase 3 (report mode)** — Phase 2 (planning
-  mode) is done; see `PLAN.md`.
+- Current roadmap phase: **Phase 4 (polish)** — Phase 3 (report mode) is
+  done; see `PLAN.md`.
 
 ## Project basics
 
@@ -61,14 +61,14 @@ bun test
 - `src/index.ts`: entry point + screen manager. One `Screen` at a time under the renderer root (dispose → remove → destroy → add). Also owns the campaign-create dialog and app-level wiring.
 - `src/screens/screen.ts`: `Screen` interface (`node` + optional `focus()`/`dispose()`).
 - `src/screens/main-menu.ts`: main menu — create / campaign list (loaded from disk) / quit, plus the intro animation on first show.
-- `src/screens/campaign-home.ts`: campaign view — background & story-so-far peeks, session list with statuses, new-session dialog, session detail dialog ("Plan with Agent" for planning sessions, mark ready/played, trash), Escape goes back.
+- `src/screens/campaign-home.ts`: campaign view — background & story-so-far peeks, session list with statuses, new-session dialog, session detail dialog ("Plan with Agent" for planning sessions, "Report outcome" for ready sessions, mark ready/played, trash), Escape goes back.
 - `src/screens/settings.ts`: settings screen — edit base URL, model, API key env var, campaigns dir; persists to config.json via `saveSettings`.
 - `src/screens/chat.ts`: chat screen (harness) — markdown transcript + input; streams assistant replies from any `ChatProvider`; surfaces provider errors. In **planning mode** (`tools` + `systemPrompt` options) sends run through `runAgent`.
 - `src/ui.ts`: helper for creating focusable/mouse-aware buttons (`makeButton`).
 - `src/agent/`: the harness core (Phase 2).
   - `loop.ts`: `runAgent` — tool-call loop (stream → execute tools → feed back → repeat until a text answer), `AgentTool`.
-  - `tools.ts`: campaign-scoped tools (`list_sessions`, `read_campaign_summary`, `read_session_notes`, `update_session_notes`) with a path-traversal guard.
-  - `context.ts`: `buildPlanningSystemPrompt` — base system prompt file + campaign background/story + session draft.
+  - `tools.ts`: campaign-scoped tools (`list_sessions`, `read_campaign_summary`, `read_session_notes`, `update_session_notes`; report mode adds `append_campaign_summary`) with a path-traversal guard.
+  - `context.ts`: `buildPlanningSystemPrompt` / `buildReportSystemPrompt` — base system prompt file + campaign background/story + session draft (or report framing).
 - `src/provider/`: model provider abstraction (Phase 1).
   - `types.ts`: `ChatMessage`, `ToolCall`/`ToolDefinition`, `ChatEvent` (`text` | `tool_call`), `ChatProvider.streamChat(messages, options?)`.
   - `openai.ts`: OpenAI-compatible client (SSE streaming + JSON fallback) and `createProviderFromSettings`. `DEFAULT_BASE_URL`/`DEFAULT_MODEL`.
@@ -84,7 +84,7 @@ bun test
   - `naming.ts`: folder-name sanitize, session-file slugify, collision-proof `uniqueName`. Regex classes use `\xNN` escapes — do not paste raw control chars into source.
   - `settings.ts`: `loadSettings()`/`saveSettings()` — creates config + campaigns dir on first run, expands `~`.
   - `system-prompt.ts`: user-owned base system prompt file (`~/.config/scribe/system-prompt.md`), created with a default if missing.
-  - `campaigns.ts`: `Campaign` type, `createCampaign`/`listCampaigns`/`loadCampaign`/`updateCampaignMeta`. `campaign.md` body holds Background + The Story So Far sections.
+  - `campaigns.ts`: `Campaign` type, `createCampaign`/`listCampaigns`/`loadCampaign`/`updateCampaignMeta`/`appendStorySoFar`. `campaign.md` body holds Background + The Story So Far sections.
   - `sessions.ts`: `Session` type, `createSession` (bumps campaign `nextSession`), `listSessions`, `setSessionStatus` (stamps dates), `trashSession` (soft-delete to `.scribe/trash/`).
 
 ## Gotchas

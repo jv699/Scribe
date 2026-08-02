@@ -28,6 +28,8 @@ export interface CampaignHomeOptions {
   onChanged: () => void;
   /** Open planning mode for a session (agent writes its notes). */
   onPlan: (session: Session) => void;
+  /** Open report mode for a session (agent records the outcome). */
+  onReport: (session: Session) => void;
 }
 
 /** First few non-empty lines of a markdown section, for the peek view. */
@@ -163,7 +165,11 @@ export async function makeCampaignHomeScreen(
       addButton("Mark Ready", "ghost", () => act(() => setSessionStatus(session, "ready")));
     }
     if (session.status === "ready") {
-      addButton("Mark Played", "primary", () => act(() => setSessionStatus(session, "played")));
+      addButton("Report outcome", "primary", () => {
+        close();
+        options.onReport(session);
+      });
+      addButton("Mark Played", "ghost", () => act(() => setSessionStatus(session, "played")));
     }
     addButton("Move to Trash", "ghost", () => act(() => trashSession(campaign, session)));
     addButton("Close", "ghost", () => close());

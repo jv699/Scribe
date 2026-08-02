@@ -26,9 +26,11 @@ export interface ChatScreenOptions {
   provider: ChatProvider;
   /** Shown on the right of the title bar. */
   model?: string;
+  /** Left of the title bar. Defaults to "Chat (test)". */
+  title?: string;
   /**
    * When set, sends go through the agent loop with these tools and this base
-   * system prompt (planning mode). When omitted, plain text streaming only.
+   * system prompt (planning/report mode). When omitted, plain text streaming only.
    */
   systemPrompt?: string;
   tools?: AgentTool[];
@@ -50,7 +52,7 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
     width: "100%",
     marginBottom: 1,
   });
-  titleRow.add(new TextRenderable(renderer, { content: "Chat (test)", fg: theme.accent }));
+  titleRow.add(new TextRenderable(renderer, { content: options.title ?? "Chat (test)", fg: theme.accent }));
   if (options.model) {
     titleRow.add(new TextRenderable(renderer, { content: options.model, fg: theme.textMuted }));
   }
