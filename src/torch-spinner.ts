@@ -72,23 +72,23 @@ function profileAt(u: number): number {
 }
 
 export interface TorchSpinnerOptions {
-  /** ms per animation tick. Defaults to 90. */
+  /** ms per animation tick. Defaults to 70. */
   frameMs?: number;
   /** Right margin, e.g. to space the flame off following text. */
   marginRight?: number;
 }
 
 function paintFrame(b: OptimizedBuffer["buffers"], t: number): void {
-  const rawH = 5.0 + 1.5 * (0.5 + 0.5 * Math.sin(t * 2.2));
+  const rawH = 5.0 + 1.5 * (0.5 + 0.5 * Math.sin(t * 3.4));
   const tipRow = 2 * Math.round((BASE_ROW - (rawH - 1)) / 2); // even row → pointy ▀ tip
   const h = BASE_ROW - tipRow + 1;
-  const centerX = (CELL_WIDTH - 1) / 2 + 0.3 * Math.sin(t * 1.7);
+  const centerX = (CELL_WIDTH - 1) / 2 + 0.3 * Math.sin(t * 2.6);
 
   const pixel = (x: number, py: number): Rgb | null => {
     const rowIn = py - tipRow;
     if (rowIn < 0) return null;
     const u = Math.min(rowIn / (h - 1), 1);
-    const halfWidth = profileAt(u) + 0.1 * Math.sin(t * 3.3 + x * 2.2) * (0.3 + u);
+    const halfWidth = profileAt(u) + 0.1 * Math.sin(t * 5.0 + x * 2.2) * (0.3 + u);
     const dx = Math.abs(x - centerX) / Math.max(halfWidth, 0.01);
     if (dx >= 1.5) return null;
     if (dx >= 1) return GLOW;
@@ -138,7 +138,7 @@ export class TorchSpinnerRenderable extends FrameBufferRenderable {
 
   constructor(renderer: CliRenderer, options: TorchSpinnerOptions = {}) {
     super(renderer, { width: CELL_WIDTH, height: CELL_HEIGHT, respectAlpha: true, visible: false });
-    this.frameMs = options.frameMs ?? 90;
+    this.frameMs = options.frameMs ?? 70;
     if (options.marginRight !== undefined) this.marginRight = options.marginRight;
   }
 
