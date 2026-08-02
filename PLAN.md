@@ -119,8 +119,8 @@ Each phase leaves the app runnable.
 | **0. Persistence** | Markdown store; campaign home + manual session CRUD; "System" field; settings store | ✅ done |
 | **1. Provider client** | Settings screen + OpenAI-compatible streaming chat | ✅ done |
 | **2. Planning mode** | Agent loop + campaign tools + system-prompt file → agent writes `sessions/00N.md` | ✅ done |
-| **3. Report mode** | Outcome chat → summary appended; session → `played` | next |
-| **4. Polish** | Resume conversations, status guards, error handling, tests | — |
+| **3. Report mode** | Outcome chat → summary appended; session → `played` | ✅ done |
+| **4. Polish** | Resume conversations, status guards, error handling, tests | next |
 
 Phase 0 is a useful campaign organizer with zero AI risk and is fully testable
 headlessly (`createTestRenderer` + temp dirs). Phases 2–3 are thin once 0–1

@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 import { parseFrontmatter, serializeFrontmatter } from "../src/store/frontmatter.ts";
 import { loadSettings, saveSettings } from "../src/store/settings.ts";
-import { createCampaign, listCampaigns, loadCampaign, updateCampaignMeta } from "../src/store/campaigns.ts";
+import { createCampaign, listCampaigns, loadCampaign, updateCampaignMeta, appendStorySoFar } from "../src/store/campaigns.ts";
 import { createSession, listSessions, setSessionStatus, trashSession } from "../src/store/sessions.ts";
 
 let dir: string;
@@ -138,6 +138,23 @@ describe("campaigns", () => {
     const reloaded = await loadCampaign(campaign.dir);
     expect(reloaded?.nextSession).toBe(3);
     expect(reloaded?.description).toBe("Gothic horror.");
+  });
+
+  test("appendStorySoFar appends to the summary and updates in-memory state", async () => {
+    const campaign = await createCampaign(dir, input);
+    await appendStorySoFar(campaign, "The party met Strahd at the gates.");
+    await appendStorySoFar(campaign, "They escaped the manor alive.");
+
+    const reloaded = (await loadCampaign(campaign.dir))!;
+    expect(reloaded.storySoFar).toContain("The party met Strahd at the gates.");
+    expect(reloaded.storySoFar).toContain("They escaped the manor alive.");
+    // both entries present in order, section preserved
+    const idx1 = reloaded.storySoFar.indexOf("Strahd");
+    const idx2 = reloaded.storySoFar.indexOf("escaped");
+    expect(idx1).toBeGreaterThanOrEqual(0);
+    expect(idx2).toBeGreaterThan(idx1);
+    // background section untouched
+    expect(reloaded.description).toBe("Gothic horror.");
   });
 });
 

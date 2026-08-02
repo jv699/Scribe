@@ -3,7 +3,7 @@
  * inside the campaign folder; session access happens by number, resolved via
  * the store (never from raw user-supplied paths).
  */
-import { loadCampaign } from "../store/campaigns.ts";
+import { appendStorySoFar, loadCampaign } from "../store/campaigns.ts";
 import { listSessions, readSessionNotes, writeSessionNotes } from "../store/sessions.ts";
 import type { AgentTool } from "./loop.ts";
 
@@ -17,11 +17,16 @@ function numberArg(args: Record<string, unknown>, key: string): number {
   return typeof value === "number" ? value : NaN;
 }
 
-export async function makeCampaignTools(campaignDir: string): Promise<AgentTool[]> {
+export interface CampaignToolsOptions {
+  /** Report mode: also expose `append_campaign_summary`. */
+  report?: boolean;
+}
+
+export async function makeCampaignTools(campaignDir: string, options: CampaignToolsOptions = {}): Promise<AgentTool[]> {
   const campaign = await loadCampaign(campaignDir);
   if (!campaign) return [];
 
-  return [
+  const tools: AgentTool[] = [
     {
       definition: {
         type: "function",
@@ -94,6 +99,32 @@ export async function makeCampaignTools(campaignDir: string): Promise<AgentTool[
       },
     },
   ];
+
+  if (options.report) {
+    tools.push({
+      definition: {
+        type: "function",
+        function: {
+          name: "append_campaign_summary",
+          description:
+            "Append an entry to the campaign's running summary ('The Story So Far'), recording what happened in the session that was just played. Use this after the user reports the session outcome.",
+          parameters: {
+            type: "object",
+            properties: { entry: { type: "string", description: "The concise summary entry to append" } },
+            required: ["entry"],
+          },
+        },
+      },
+      execute: async (args) => {
+        const entry = stringArg(args, "entry").trim();
+        if (entry === "") return "(entry cannot be empty)";
+        await appendStorySoFar(campaign, entry);
+        return "Appended to the campaign's story so far.";
+      },
+    });
+  }
+
+  return tools;
 }
 
 async function findSession(campaignDir: string, number: number) {
