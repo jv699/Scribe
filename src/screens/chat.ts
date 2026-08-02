@@ -17,7 +17,7 @@ import {
   type KeyEvent,
 } from "@opentui/core";
 import { theme } from "../theme.ts";
-import { SpinnerRenderable } from "../spinner.ts";
+import { TorchSpinnerRenderable } from "../torch-spinner.ts";
 import { runAgent, type AgentTool } from "../agent/loop.ts";
 import type { ChatMessage, ChatProvider } from "../provider/types.ts";
 import type { Screen } from "./screen.ts";
@@ -41,7 +41,7 @@ export interface ChatScreenOptions {
    */
   systemPrompt?: string;
   tools?: AgentTool[];
-  /** When set, the conversation is loaded/saved here and a Clear button shows. */
+  /** When set, the conversation is loaded and saved back here across sessions. */
   chatLog?: ChatLogStore;
   onBack: () => void;
 }
@@ -74,7 +74,7 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
     flexDirection: "row",
     alignItems: "center",
   });
-  const thinkingSpinner = new SpinnerRenderable(renderer, { fg: theme.textMuted, marginRight: 1 });
+  const thinkingSpinner = new TorchSpinnerRenderable(renderer, { marginRight: 1 });
   const status = new TextRenderable(renderer, { content: "", fg: theme.textMuted, height: 1 });
   statusRow.add(thinkingSpinner);
   statusRow.add(status);
@@ -93,7 +93,7 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
   scrollBox.content.add(markdown);
   container.add(scrollBox);
 
-  // Input panel: message input + (in resume mode) a Clear button.
+  // Input panel: message input.
   const inputBox = new BoxRenderable(renderer, {
     width: "100%",
     flexDirection: "row",
@@ -113,7 +113,7 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
   container.add(inputBox);
   container.add(
     new TextRenderable(renderer, {
-      content: options.chatLog ? "Enter to send · Esc to exit" : "Enter to send · Esc to exit",
+      content: "Enter to send · Esc to exit",
       fg: theme.textMuted,
       marginTop: 1,
     }),

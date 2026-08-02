@@ -128,7 +128,7 @@ describe("chat screen", () => {
     expect(scribeCount).toBe(1);
   });
 
-  test("resumes a saved conversation and clears it", async () => {
+  test("resumes a saved conversation and persists new messages", async () => {
     let stored: ChatMessage[] = [
       { role: "user", content: "previous question" },
       { role: "assistant", content: "previous answer" },
@@ -159,14 +159,5 @@ describe("chat screen", () => {
     await wait();
     await renderOnce();
     expect(stored.some((m) => m.content === "new msg")).toBe(true);
-
-    // Clear button (Tab from input) wipes the transcript and the log
-    await keys.pressKeys(["TAB"], 20);
-    keys.pressEnter();
-    await wait();
-    await renderOnce();
-    frame = captureCharFrame();
-    expect(frame.includes("previous question")).toBe(false);
-    expect(stored).toEqual([]);
   });
 });
