@@ -1,14 +1,13 @@
 /**
- * Chat screen (scratch harness UI): a scrollable transcript with a single
- * message input in a dark panel. Streams assistant replies from any
- * ChatProvider; a spinner animates next to the "Scribe:" label while the
- * model is thinking, then disappears when the reply starts streaming.
- * Phase 2 will build the planning/report modes on this.
+ * Chat screen (scratch harness UI): a scrollable transcript with an
+ * opencode-style prompt at the bottom — an accent-bordered panel holding a
+ * multi-line textarea (Enter sends, Shift+Enter adds a line) and a hint footer.
+ * Streams assistant replies from any ChatProvider; a spinner animates next to
+ * the "Scribe:" label while the model is thinking, then disappears when the
+ * reply starts streaming. Phase 2 will build the planning/report modes on this.
  */
 import {
   BoxRenderable,
-  InputRenderable,
-  InputRenderableEvents,
   MarkdownRenderable,
   ScrollBoxRenderable,
   SyntaxStyle,
@@ -17,6 +16,7 @@ import {
   type KeyEvent,
 } from "@opentui/core";
 import { theme } from "../theme.ts";
+import { makePrompt } from "../prompt.ts";
 import { DiceSpinnerRenderable } from "../dice-spinner.ts";
 import { runAgent, type AgentTool } from "../agent/loop.ts";
 import type { ChatMessage, ChatProvider } from "../provider/types.ts";
@@ -93,31 +93,9 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
   scrollBox.content.add(markdown);
   container.add(scrollBox);
 
-  // Input panel: message input.
-  const inputBox = new BoxRenderable(renderer, {
-    width: "100%",
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: theme.surfaceActive,
-    paddingX: 1,
-    marginTop: 1,
-  });
-  const input = new InputRenderable(renderer, {
-    placeholder: "Type a message…",
-    flexGrow: 1,
-    backgroundColor: theme.surfaceActive,
-    focusedBackgroundColor: theme.surfaceActive,
-  });
-  inputBox.add(input);
-
-  container.add(inputBox);
-  container.add(
-    new TextRenderable(renderer, {
-      content: "Enter to send · Esc to exit",
-      fg: theme.textMuted,
-      marginTop: 1,
-    }),
-  );
+  // Prompt panel (opencode-style): bordered textarea + hint footer.
+  const prompt = makePrompt(renderer, { onSubmit: () => void send() });
+  container.add(prompt.node);
 
   const messages: ChatMessage[] = [];
   let busy = false;
@@ -166,9 +144,9 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
   }
 
   async function send(): Promise<void> {
-    const text = input.value.trim();
+    const text = prompt.input.plainText.trim();
     if (text === "" || busy) return;
-    input.value = "";
+    prompt.input.clear();
     messages.push({ role: "user", content: text });
     messages.push({ role: "assistant", content: "" });
     busy = true;
@@ -240,7 +218,5 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
     }
   }
 
-  input.on(InputRenderableEvents.ENTER, () => void send());
-
-  return { node: container, focus: () => input.focus(), dispose };
+  return { node: container, focus: () => prompt.input.focus(), dispose };
 }

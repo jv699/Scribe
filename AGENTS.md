@@ -63,8 +63,9 @@ bun test
 - `src/screens/main-menu.ts`: main menu — create / campaign list (loaded from disk) / quit, plus the intro animation on first show.
 - `src/screens/campaign-home.ts`: campaign view — background & story-so-far peeks, session list with statuses, new-session dialog, session detail dialog ("Plan with Agent" for planning sessions, "Report outcome" for ready sessions, mark ready/played, trash), Escape goes back.
 - `src/screens/settings.ts`: settings screen — edit base URL, model, API key env var, campaigns dir; persists to config.json via `saveSettings`.
-- `src/screens/chat.ts`: chat screen (harness) — markdown transcript + input; streams assistant replies from any `ChatProvider`; surfaces provider errors. In **planning mode** (`tools` + `systemPrompt` options) sends run through `runAgent`. With a `chatLog` store it **resumes** the conversation and adds a Clear button (Tab to focus).
+- `src/screens/chat.ts`: chat screen (harness) — markdown transcript + prompt (via `makePrompt` from `prompt.ts`). Streams assistant replies from any `ChatProvider`; surfaces provider errors. In **planning mode** (`tools` + `systemPrompt` options) sends run through `runAgent`. With a `chatLog` store it **resumes** the conversation.
 - `src/ui.ts`: helper for creating focusable/mouse-aware buttons (`makeButton`).
+- `src/prompt.ts`: `makePrompt` — opencode-style prompt widget (accent-bordered panel with a multi-line `TextareaRenderable`: Enter sends, Shift+Enter newline, hint footer). Callers own submission and textarea state.
 - `src/agent/`: the harness core (Phase 2).
   - `loop.ts`: `runAgent` — tool-call loop (stream → execute tools → feed back → repeat until a text answer), `AgentTool`.
   - `tools.ts`: campaign-scoped tools (`list_sessions`, `read_campaign_summary`, `read_session_notes`, `update_session_notes`; report mode adds `append_campaign_summary`) with a path-traversal guard.
