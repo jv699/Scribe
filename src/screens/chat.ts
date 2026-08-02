@@ -10,13 +10,11 @@ import {
   InputRenderable,
   InputRenderableEvents,
   MarkdownRenderable,
-  RenderableEvents,
   ScrollBoxRenderable,
   SyntaxStyle,
   TextRenderable,
   type CliRenderer,
   type KeyEvent,
-  type Renderable,
 } from "@opentui/core";
 import { theme } from "../theme.ts";
 import { SpinnerRenderable } from "../spinner.ts";
