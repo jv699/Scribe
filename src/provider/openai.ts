@@ -57,9 +57,9 @@ async function* streamSSE(response: Response): AsyncGenerator<ChatEvent> {
           for (const tc of delta?.tool_calls ?? []) {
             const toolCall: ToolCallDelta = {
               index: tc.index ?? 0,
-              id: tc.id,
-              name: tc.function?.name,
-              arguments: tc.function?.arguments,
+              ...(tc.id !== undefined ? { id: tc.id } : {}),
+              ...(tc.function?.name !== undefined ? { name: tc.function.name } : {}),
+              ...(tc.function?.arguments !== undefined ? { arguments: tc.function.arguments } : {}),
             };
             yield { type: "tool_call", toolCall };
           }
@@ -77,7 +77,7 @@ export function createOpenAIProvider(options: OpenAIProviderOptions): ChatProvid
   return {
     async *streamChat(messages: ChatMessage[], chatOptions?: ChatOptions): AsyncGenerator<ChatEvent> {
       const body: Record<string, unknown> = { model: options.model, messages, stream: true };
-      if (chatOptions?.tools?.length) body.tools = chatOptions.tools;
+      if (chatOptions?.tools?.length) body["tools"] = chatOptions.tools;
 
       const response = await fetch(`${baseUrl}/chat/completions`, {
         method: "POST",

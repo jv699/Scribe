@@ -7,7 +7,7 @@
  *   session N" so the agent records what happened via append_campaign_summary.
  */
 import { basename } from "node:path";
-import { loadCampaign, type Campaign } from "../store/campaigns.ts";
+import type { Campaign } from "../store/campaigns.ts";
 import { readSessionNotes, type Session } from "../store/sessions.ts";
 import { loadSystemPrompt } from "../store/system-prompt.ts";
 

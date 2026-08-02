@@ -23,14 +23,14 @@ describe("frontmatter", () => {
   test("round-trips flat key:value data", () => {
     const doc = serializeFrontmatter({ name: "Strahd", system: "D&D 5e" }, "## Background\n\nhi\n");
     const { data, body } = parseFrontmatter(doc);
-    expect(data.name).toBe("Strahd");
-    expect(data.system).toBe("D&D 5e");
+    expect(data["name"]).toBe("Strahd");
+    expect(data["system"]).toBe("D&D 5e");
     expect(body).toBe("## Background\n\nhi\n");
   });
 
   test("parses values containing colons", () => {
     const { data } = parseFrontmatter("---\nurl: http://x:8080/y\n---\nbody");
-    expect(data.url).toBe("http://x:8080/y");
+    expect(data["url"]).toBe("http://x:8080/y");
   });
 
   test("no frontmatter returns empty data and full body", () => {

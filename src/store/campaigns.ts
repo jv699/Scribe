@@ -71,12 +71,12 @@ function extractSection(body: string, heading: string): string {
 function campaignFromMarkdown(dir: string, content: string): Campaign {
   const { data, body } = parseFrontmatter(content);
   return {
-    name: data.name ?? "(unnamed campaign)",
-    system: data.system ?? "",
+    name: data["name"] ?? "(unnamed campaign)",
+    system: data["system"] ?? "",
     description: extractSection(body, BACKGROUND_HEADING),
     storySoFar: extractSection(body, STORY_HEADING),
-    created: data.created ?? "",
-    nextSession: Math.max(1, Number.parseInt(data.nextSession ?? "1", 10) || 1),
+    created: data["created"] ?? "",
+    nextSession: Math.max(1, Number.parseInt(data["nextSession"] ?? "1", 10) || 1),
     dir,
   };
 }

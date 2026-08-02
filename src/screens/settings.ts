@@ -83,12 +83,14 @@ export async function makeSettingsScreen(
       dirInput.focus();
       return;
     }
-    options.onSaved({
-      campaignsDir: expandHome(campaignsDir),
-      baseUrl: baseUrlInput.value.trim() || undefined,
-      model: modelInput.value.trim() || undefined,
-      apiKeyEnv: keyInput.value.trim() || undefined,
-    });
+    const next: Settings = { campaignsDir: expandHome(campaignsDir) };
+    const baseUrl = baseUrlInput.value.trim();
+    if (baseUrl !== "") next.baseUrl = baseUrl;
+    const model = modelInput.value.trim();
+    if (model !== "") next.model = model;
+    const apiKeyEnv = keyInput.value.trim();
+    if (apiKeyEnv !== "") next.apiKeyEnv = apiKeyEnv;
+    options.onSaved(next);
   }
 
   const onKeypress = (key: KeyEvent): void => {

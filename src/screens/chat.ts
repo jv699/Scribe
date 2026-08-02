@@ -207,7 +207,7 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
         const result = await runAgent(
           {
             provider: options.provider,
-            systemPrompt: options.systemPrompt,
+            ...(options.systemPrompt !== undefined ? { systemPrompt: options.systemPrompt } : {}),
             tools: options.tools,
             onText: (delta) => appendStreamed(delta),
             onTool: (name) => {

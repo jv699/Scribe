@@ -46,14 +46,14 @@ function today(): string {
 
 function sessionFromMarkdown(path: string, content: string): Session {
   const { data } = parseFrontmatter(content);
-  const status = VALID_STATUSES.includes(data.status as SessionStatus)
-    ? (data.status as SessionStatus)
+  const status = VALID_STATUSES.includes(data["status"] as SessionStatus)
+    ? (data["status"] as SessionStatus)
     : "planning";
   return {
-    number: Number.parseInt(data.number ?? "0", 10) || 0,
-    title: data.title ?? basename(path, ".md"),
+    number: Number.parseInt(data["number"] ?? "0", 10) || 0,
+    title: data["title"] ?? basename(path, ".md"),
     status,
-    created: data.created ?? "",
+    created: data["created"] ?? "",
     path,
   };
 }
@@ -103,8 +103,8 @@ export async function listSessions(campaign: Campaign): Promise<Session[]> {
 export async function setSessionStatus(session: Session, status: SessionStatus): Promise<void> {
   const { data, body } = parseFrontmatter(await readFile(session.path, "utf8"));
   const patch: Record<string, string> = { status };
-  if (status === "ready" && !data.ready) patch.ready = today();
-  if (status === "played" && !data.played) patch.played = today();
+  if (status === "ready" && !data["ready"]) patch["ready"] = today();
+  if (status === "played" && !data["played"]) patch["played"] = today();
   await writeFile(session.path, serializeFrontmatter({ ...data, ...patch }, body), "utf8");
   session.status = status;
 }

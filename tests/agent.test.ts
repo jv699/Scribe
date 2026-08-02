@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { runAgent, type AgentTool } from "../src/agent/loop.ts";
 import { makeCampaignTools } from "../src/agent/tools.ts";
 import { buildPlanningSystemPrompt, buildReportSystemPrompt } from "../src/agent/context.ts";
-import type { ChatEvent, ChatMessage, ChatProvider, ToolDefinition } from "../src/provider/types.ts";
+import type { ChatEvent, ChatMessage, ChatProvider } from "../src/provider/types.ts";
 import { createCampaign, loadCampaign } from "../src/store/campaigns.ts";
 import { createSession, listSessions } from "../src/store/sessions.ts";
 
@@ -44,7 +44,7 @@ const echoTool: AgentTool = {
       parameters: { type: "object", properties: { word: { type: "string" } }, required: ["word"] },
     },
   },
-  execute: (args) => `echoed: ${String(args.word)}`,
+  execute: (args) => `echoed: ${String(args["word"])}`,
 };
 
 // --- store setup ---

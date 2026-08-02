@@ -6,7 +6,6 @@
     "module": "Preserve",
     "moduleDetection": "force",
     "jsx": "react-jsx",
-    "allowJs": true,
     "types": ["bun"],
 
     // Bundler mode
@@ -22,9 +21,11 @@
     "noUncheckedIndexedAccess": true,
     "noImplicitOverride": true,
 
-    // Some stricter flags (disabled by default)
-    "noUnusedLocals": false,
-    "noUnusedParameters": false,
-    "noPropertyAccessFromIndexSignature": false
+    // Stricter flags
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noPropertyAccessFromIndexSignature": true,
+    "noImplicitReturns": true,
+    "exactOptionalPropertyTypes": true
   }
 }
