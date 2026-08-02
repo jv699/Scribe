@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { createTestRenderer, createMockKeys, type TestRenderer } from "@opentui/core/testing";
-import { makeChatScreen } from "../src/screens/chat.ts";
+import { makeChatScreen, type ChatLogStore } from "../src/screens/chat.ts";
 import type { Screen } from "../src/screens/screen.ts";
-import type { ChatEvent, ChatProvider } from "../src/provider/types.ts";
+import type { ChatEvent, ChatMessage, ChatProvider } from "../src/provider/types.ts";
 import type { AgentTool } from "../src/agent/loop.ts";
 
 let renderer: TestRenderer;
@@ -83,8 +83,7 @@ describe("chat screen", () => {
     expect(wentBack).toBe(true);
   });
 
-  test("planning mode runs tools and streams the final answer", async () => {
-    const toolProvider: ChatProvider = {
+  test("planning mode runs tools and streams the final answer", async () => {    const toolProvider: ChatProvider = {
       async *streamChat(messages): AsyncGenerator<ChatEvent> {
         if (messages.some((m) => m.role === "tool")) {
           yield { type: "text", delta: "All set." };
@@ -127,5 +126,47 @@ describe("chat screen", () => {
     // exactly one assistant reply, no duplicate/empty "Scribe:" lines
     const scribeCount = (frame.match(/Scribe:/g) ?? []).length;
     expect(scribeCount).toBe(1);
+  });
+
+  test("resumes a saved conversation and clears it", async () => {
+    let stored: ChatMessage[] = [
+      { role: "user", content: "previous question" },
+      { role: "assistant", content: "previous answer" },
+    ];
+    const chatLog: ChatLogStore = {
+      load: async () => stored,
+      save: async (m) => {
+        stored = [...m];
+      },
+      clear: async () => {
+        stored = [];
+      },
+    };
+
+    current = await makeChatScreen(renderer, { provider: okProvider, chatLog, onBack: () => {} });
+    renderer.root.add(current.node);
+    current.focus?.();
+    // markdown parses async — give it a beat before asserting the transcript
+    await wait();
+    await renderOnce();
+    let frame = captureCharFrame();
+    expect(frame.includes("previous question")).toBe(true);
+    expect(frame.includes("previous answer")).toBe(true);
+
+    // sending a message persists it through the chat log
+    await keys.typeText("new msg", 5);
+    keys.pressEnter();
+    await wait();
+    await renderOnce();
+    expect(stored.some((m) => m.content === "new msg")).toBe(true);
+
+    // Clear button (Tab from input) wipes the transcript and the log
+    await keys.pressKeys(["TAB"], 20);
+    keys.pressEnter();
+    await wait();
+    await renderOnce();
+    frame = captureCharFrame();
+    expect(frame.includes("previous question")).toBe(false);
+    expect(stored).toEqual([]);
   });
 });

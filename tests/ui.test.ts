@@ -138,11 +138,14 @@ describe("phase-0 ui flow", () => {
     await renderOnce();
     expect(captureCharFrame().includes("001 — Death House [ready]")).toBe(true);
 
-    // trash it (ready: buttons = [Report outcome, Mark Played, Move to Trash, Close])
+    // trash it (ready: buttons = [Report outcome, Mark Played, Move to Trash, Close]),
+    // then confirm the trash dialog
     keys.pressEnter();
     await wait(100);
     await keys.pressKeys(["TAB", "TAB"], 20);
-    keys.pressEnter();
+    keys.pressEnter(); // -> confirm dialog, "Trash" focused
+    await wait(100);
+    keys.pressEnter(); // confirm
     await wait();
     await renderOnce();
     expect(captureCharFrame().includes("Death House")).toBe(false);

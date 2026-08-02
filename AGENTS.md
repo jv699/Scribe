@@ -21,8 +21,8 @@ Locked design decisions (don't revisit without asking):
 - **Model access is OpenAI-compatible only** (configurable `baseUrl`/`model`,
   covers OpenAI/OpenRouter/Ollama/LM Studio). API keys are referenced by env
   var name in `~/.config/scribe/config.json` — never store keys.
-- Current roadmap phase: **Phase 4 (polish)** — Phase 3 (report mode) is
-  done; see `PLAN.md`.
+- Current roadmap phase: **roadmap complete (all phases done)** — see
+  `PLAN.md` for deferred/future ideas.
 
 ## Project basics
 
@@ -63,7 +63,7 @@ bun test
 - `src/screens/main-menu.ts`: main menu — create / campaign list (loaded from disk) / quit, plus the intro animation on first show.
 - `src/screens/campaign-home.ts`: campaign view — background & story-so-far peeks, session list with statuses, new-session dialog, session detail dialog ("Plan with Agent" for planning sessions, "Report outcome" for ready sessions, mark ready/played, trash), Escape goes back.
 - `src/screens/settings.ts`: settings screen — edit base URL, model, API key env var, campaigns dir; persists to config.json via `saveSettings`.
-- `src/screens/chat.ts`: chat screen (harness) — markdown transcript + input; streams assistant replies from any `ChatProvider`; surfaces provider errors. In **planning mode** (`tools` + `systemPrompt` options) sends run through `runAgent`.
+- `src/screens/chat.ts`: chat screen (harness) — markdown transcript + input; streams assistant replies from any `ChatProvider`; surfaces provider errors. In **planning mode** (`tools` + `systemPrompt` options) sends run through `runAgent`. With a `chatLog` store it **resumes** the conversation and adds a Clear button (Tab to focus).
 - `src/ui.ts`: helper for creating focusable/mouse-aware buttons (`makeButton`).
 - `src/agent/`: the harness core (Phase 2).
   - `loop.ts`: `runAgent` — tool-call loop (stream → execute tools → feed back → repeat until a text answer), `AgentTool`.
@@ -86,6 +86,7 @@ bun test
   - `system-prompt.ts`: user-owned base system prompt file (`~/.config/scribe/system-prompt.md`), created with a default if missing.
   - `campaigns.ts`: `Campaign` type, `createCampaign`/`listCampaigns`/`loadCampaign`/`updateCampaignMeta`/`appendStorySoFar`. `campaign.md` body holds Background + The Story So Far sections.
   - `sessions.ts`: `Session` type, `createSession` (bumps campaign `nextSession`), `listSessions`, `setSessionStatus` (stamps dates), `trashSession` (soft-delete to `.scribe/trash/`).
+  - `chat-log.ts`: conversation persistence per session+mode as JSONL in `.scribe/` (`loadChatLog`/`saveChatLog`/`clearChatLog`/`appendChatMessage`) — resumes planning/report chats across app sessions.
 
 ## Gotchas
 
