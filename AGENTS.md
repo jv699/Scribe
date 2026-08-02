@@ -63,9 +63,15 @@ bun test
 - `src/screens/main-menu.ts`: main menu — create / campaign list (loaded from disk) / quit, plus the intro animation on first show.
 - `src/screens/campaign-home.ts`: campaign view — background & story-so-far peeks, session list with statuses, new-session dialog, session detail dialog ("Plan with Agent" for planning sessions, "Report outcome" for ready sessions, mark ready/played, trash), Escape goes back.
 - `src/screens/settings.ts`: settings screen — edit base URL, model, API key env var, campaigns dir; persists to config.json via `saveSettings`.
-- `src/screens/chat.ts`: chat screen (harness) — markdown transcript + prompt (via `makePrompt` from `prompt.ts`). Streams assistant replies from any `ChatProvider`; surfaces provider errors. In **planning mode** (`tools` + `systemPrompt` options) sends run through `runAgent`. With a `chatLog` store it **resumes** the conversation.
-- `src/ui.ts`: helper for creating focusable/mouse-aware buttons (`makeButton`).
-- `src/prompt.ts`: `makePrompt` — opencode-style prompt widget (accent-bordered panel with a multi-line `TextareaRenderable`: Enter sends, Shift+Enter newline, hint footer). Callers own submission and textarea state.
+- `src/screens/chat.ts`: chat screen (harness) — markdown transcript + prompt (via `makePrompt` from `components/prompt.ts`). Streams assistant replies from any `ChatProvider`; surfaces provider errors. In **planning mode** (`tools` + `systemPrompt` options) sends run through `runAgent`. With a `chatLog` store it **resumes** the conversation.
+- `src/components/`: reusable UI widgets (opencode-style).
+  - `ui.ts`: helper for creating focusable/mouse-aware buttons (`makeButton`).
+  - `dialog.ts`: generic centered modal primitive (`makeDialog`) — absolute full-screen layer + `zIndex`, toggled via `visible`. Callers handle focus.
+  - `campaign-dialog.ts`: "New Campaign" form (`makeCampaignDialog`) built on `dialog.ts`. Name + system `InputRenderable`s + background `TextareaRenderable` + `makeButton` buttons. Global `keypress` listener (while open) traps Tab/Shift+Tab/Escape; `onSubmit`/`onCancel` callbacks.
+  - `session-dialog.ts`: "New Session" form (`makeSessionDialog`), same pattern, single title field.
+  - `prompt.ts`: `makePrompt` — opencode-style prompt widget (accent-bordered panel with a multi-line `TextareaRenderable`: Enter sends, Shift+Enter newline, hint footer). Callers own submission and textarea state.
+  - `spinner.ts`: braille spinner animation (`startSpinnerFrames`) for "thinking" indicators.
+  - `dice-spinner.ts`: `DiceSpinnerRenderable` — rolling-die "thinking" indicator built on `opentui-spinner` (tumbling die faces in a pulsing fire gradient).
 - `src/agent/`: the harness core (Phase 2).
   - `loop.ts`: `runAgent` — tool-call loop (stream → execute tools → feed back → repeat until a text answer), `AgentTool`.
   - `tools.ts`: campaign-scoped tools (`list_sessions`, `read_campaign_summary`, `read_session_notes`, `update_session_notes`; report mode adds `append_campaign_summary`) with a path-traversal guard.
@@ -74,13 +80,8 @@ bun test
   - `types.ts`: `ChatMessage`, `ToolCall`/`ToolDefinition`, `ChatEvent` (`text` | `tool_call`), `ChatProvider.streamChat(messages, options?)`.
   - `openai.ts`: OpenAI-compatible client (SSE streaming + JSON fallback) and `createProviderFromSettings`. `DEFAULT_BASE_URL`/`DEFAULT_MODEL`.
 - `src/theme.ts`: unified palette (`theme`) — burnt-orange accent over flat dark surfaces. ALL UI colors come from here; never hardcode hex literals.
-- `src/spinner.ts`: braille spinner animation (`startSpinnerFrames`) for "thinking" indicators.
-- `src/dice-spinner.ts`: `DiceSpinnerRenderable` — rolling-die "thinking" indicator built on `opentui-spinner` (tumbling die faces in a pulsing fire gradient).
 - `src/consts.ts`: ASCII art logos.
 - `src/intro.ts`: startup animation helpers — `dissolveIn` (per-character shade-ramp dissolve for text) and `chunkyFadeIn` (stepped opacity fade). Driven by `setInterval`, need real renderable instances (not the `Box()`/`Text()` VNode factory proxies).
-- `src/dialog.ts`: generic centered modal primitive (`makeDialog`) — absolute full-screen layer + `zIndex`, toggled via `visible`. Callers handle focus.
-- `src/campaign-dialog.ts`: "New Campaign" form (`makeCampaignDialog`) built on `dialog.ts`. Name + system `InputRenderable`s + background `TextareaRenderable` + `makeButton` buttons. Global `keypress` listener (while open) traps Tab/Shift+Tab/Escape; `onSubmit`/`onCancel` callbacks.
-- `src/session-dialog.ts`: "New Session" form (`makeSessionDialog`), same pattern, single title field.
 - `src/store/`: markdown-first persistence (Phase 0). Campaign data lives in `<campaignsDir>/<Campaign Name>/campaign.md` + `sessions/00N-slug.md`; settings in `~/.config/scribe/config.json` (`campaignsDir`, default `~/Scribe`).
   - `frontmatter.ts`: flat `key: value` frontmatter parse/serialize (no YAML).
   - `naming.ts`: folder-name sanitize, session-file slugify, collision-proof `uniqueName`. Regex classes use `\xNN` escapes — do not paste raw control chars into source.

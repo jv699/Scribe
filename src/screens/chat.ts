@@ -16,8 +16,8 @@ import {
   type KeyEvent,
 } from "@opentui/core";
 import { theme } from "../theme.ts";
-import { makePrompt } from "../prompt.ts";
-import { DiceSpinnerRenderable } from "../dice-spinner.ts";
+import { makePrompt } from "../components/prompt.ts";
+import { DiceSpinnerRenderable } from "../components/dice-spinner.ts";
 import { runAgent, type AgentTool } from "../agent/loop.ts";
 import type { ChatMessage, ChatProvider } from "../provider/types.ts";
 import type { Screen } from "./screen.ts";

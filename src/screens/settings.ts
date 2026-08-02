@@ -12,7 +12,7 @@ import {
   type KeyEvent,
   type Renderable,
 } from "@opentui/core";
-import { makeButton } from "../ui.ts";
+import { makeButton } from "../components/ui.ts";
 import { theme } from "../theme.ts";
 import { expandHome, type Settings } from "../store/settings.ts";
 import type { Screen } from "./screen.ts";

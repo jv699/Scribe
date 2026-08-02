@@ -7,7 +7,7 @@
  */
 import { createPulse, SpinnerRenderable } from "opentui-spinner";
 import type { CliRenderer } from "@opentui/core";
-import { theme } from "./theme.ts";
+import { theme } from "../theme.ts";
 
 /** Die faces in a tumbling order, so it reads like a roll rather than a count. */
 const DICE_FRAMES = ["⚀", "⚄", "⚁", "⚅", "⚃", "⚂"] as const;

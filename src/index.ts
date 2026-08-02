@@ -4,7 +4,7 @@
  * campaign-create dialog and app-level navigation wiring.
  */
 import { createCliRenderer } from "@opentui/core";
-import { makeCampaignDialog } from "./campaign-dialog.ts";
+import { makeCampaignDialog } from "./components/campaign-dialog.ts";
 import { makeMainMenuScreen } from "./screens/main-menu.ts";
 import { makeCampaignHomeScreen } from "./screens/campaign-home.ts";
 import { makeSettingsScreen } from "./screens/settings.ts";

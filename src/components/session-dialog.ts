@@ -11,7 +11,7 @@ import {
   type KeyEvent,
   type Renderable,
 } from "@opentui/core";
-import { theme } from "./theme.ts";
+import { theme } from "../theme.ts";
 import { makeDialog } from "./dialog.ts";
 import { makeButton } from "./ui.ts";
 

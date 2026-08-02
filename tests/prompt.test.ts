@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { createTestRenderer, createMockKeys, type TestRenderer } from "@opentui/core/testing";
-import { makePrompt, type Prompt } from "../src/prompt.ts";
+import { makePrompt, type Prompt } from "../src/components/prompt.ts";
 
 let renderer: TestRenderer;
 let captureCharFrame: () => string;

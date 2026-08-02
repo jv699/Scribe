@@ -5,7 +5,7 @@
  * textarea state.
  */
 import { BoxRenderable, TextRenderable, TextareaRenderable, type RenderContext } from "@opentui/core";
-import { theme } from "./theme.ts";
+import { theme } from "../theme.ts";
 
 export interface PromptOptions {
   /** Shown in the textarea while it is empty. Defaults to "Type a message…". */
