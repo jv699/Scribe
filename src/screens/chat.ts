@@ -19,7 +19,7 @@ import {
   type Renderable,
 } from "@opentui/core";
 import { theme } from "../theme.ts";
-import { startSpinnerFrames } from "../spinner.ts";
+import { SpinnerRenderable } from "../spinner.ts";
 import { runAgent, type AgentTool } from "../agent/loop.ts";
 import type { ChatMessage, ChatProvider } from "../provider/types.ts";
 import type { Screen } from "./screen.ts";
@@ -69,10 +69,18 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
   }
   container.add(titleRow);
 
-  // Status line: errors only (the "thinking" indicator lives in the
-  // transcript next to "Scribe:").
+  // Status line: spinner + text for thinking / tool activity / errors.
+  const statusRow = new BoxRenderable(renderer, {
+    width: "100%",
+    height: 1,
+    flexDirection: "row",
+    alignItems: "center",
+  });
+  const thinkingSpinner = new SpinnerRenderable(renderer, { fg: theme.textMuted, marginRight: 1 });
   const status = new TextRenderable(renderer, { content: "", fg: theme.textMuted, height: 1 });
-  container.add(status);
+  statusRow.add(thinkingSpinner);
+  statusRow.add(status);
+  container.add(statusRow);
 
   // Transcript.
   const syntaxStyle = SyntaxStyle.create();
@@ -104,36 +112,10 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
   });
   inputBox.add(input);
 
-  const clearButton = new BoxRenderable(renderer, {
-    focusable: options.chatLog !== undefined,
-    backgroundColor: theme.surfaceRaised,
-    paddingX: 1,
-    marginLeft: 1,
-    visible: options.chatLog !== undefined,
-  });
-  clearButton.add(new TextRenderable(renderer, { content: "Clear", fg: theme.textDim }));
-
-  function doClear(): void {
-    if (!options.chatLog) return;
-    messages.length = 0;
-    render();
-    void options.chatLog.clear();
-  }
-  clearButton.onKeyDown = (key) => {
-    if (key.name === "return") doClear();
-  };
-  clearButton.onMouseDown = () => doClear();
-  clearButton.on(RenderableEvents.FOCUSED, () => {
-    clearButton.backgroundColor = theme.accent;
-  });
-  clearButton.on(RenderableEvents.BLURRED, () => {
-    clearButton.backgroundColor = theme.surfaceRaised;
-  });
-  inputBox.add(clearButton);
   container.add(inputBox);
   container.add(
     new TextRenderable(renderer, {
-      content: options.chatLog ? "Enter to send · Tab to Clear · Esc to exit" : "Enter to send · Esc to exit",
+      content: options.chatLog ? "Enter to send · Esc to exit" : "Enter to send · Esc to exit",
       fg: theme.textMuted,
       marginTop: 1,
     }),
@@ -141,7 +123,6 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
 
   const messages: ChatMessage[] = [];
   let busy = false;
-  let stopThinking: (() => void) | null = null;
 
   const transcript = (): string =>
     messages
@@ -160,24 +141,23 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
     render();
   }
 
-  /** Animate the spinner in the pending "Scribe:" message. */
+  const THINKING_TEXT = "Scribe is thinking…";
+  let thinking = false;
+
+  /** Start the status-line spinner while waiting on the model. */
   function startThinking(): void {
-    stopThinking = startSpinnerFrames(80, (frame) => {
-      const last = messages[messages.length - 1];
-      if (last?.role === "assistant") {
-        last.content = frame;
-        render();
-      }
-    });
+    thinking = true;
+    thinkingSpinner.start();
+    status.fg = theme.textMuted;
+    status.content = THINKING_TEXT;
   }
 
-  /** Stop the spinner, clearing its frame from the pending message. */
+  /** Stop the spinner, clearing the status line it was driving. */
   function stopThinkingNow(): void {
-    if (!stopThinking) return;
-    stopThinking();
-    stopThinking = null;
-    const last = messages[messages.length - 1];
-    if (last?.role === "assistant") last.content = "";
+    if (!thinking) return;
+    thinking = false;
+    thinkingSpinner.stop();
+    status.content = "";
   }
 
   /** Append a streamed delta to the pending assistant message. */
@@ -202,7 +182,7 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
     try {
       if (options.tools) {
         // Planning mode: run the agent loop (system prompt + tools). The
-        // pending assistant message is for spinner/streaming display only —
+        // pending assistant message is for streaming display only —
         // runAgent manages its own conversation copy.
         const result = await runAgent(
           {
@@ -226,6 +206,7 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
       }
       status.content = "";
     } catch (err) {
+      stopThinkingNow();
       status.fg = theme.danger;
       status.content = `Error: ${err instanceof Error ? err.message : String(err)}`;
     } finally {
@@ -249,18 +230,11 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
       options.onBack();
       return;
     }
-    if (key.name === "tab" && options.chatLog) {
-      key.preventDefault();
-      const chain: Renderable[] = [input, clearButton];
-      const index = chain.indexOf(renderer.currentFocusedRenderable as Renderable);
-      const direction = key.shift ? -1 : 1;
-      chain[(index + direction + chain.length) % chain.length]?.focus();
-    }
   };
   renderer.keyInput.on("keypress", onKeypress);
 
   function dispose(): void {
-    stopThinking?.();
+    thinkingSpinner.stop();
     renderer.keyInput.off("keypress", onKeypress);
     syntaxStyle.destroy();
     if (options.chatLog && messages.length > 0) {
