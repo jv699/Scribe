@@ -17,7 +17,7 @@ import {
   type KeyEvent,
 } from "@opentui/core";
 import { theme } from "../theme.ts";
-import { SpinnerRenderable } from "../spinner.ts";
+import { TorchSpinnerRenderable } from "../torch-spinner.ts";
 import { runAgent, type AgentTool } from "../agent/loop.ts";
 import type { ChatMessage, ChatProvider } from "../provider/types.ts";
 import type { Screen } from "./screen.ts";
@@ -67,14 +67,14 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
   }
   container.add(titleRow);
 
-  // Status line: spinner + text for thinking / tool activity / errors.
+  // Status line: flame + text for thinking / tool activity / errors.
   const statusRow = new BoxRenderable(renderer, {
     width: "100%",
-    height: 1,
+    flexShrink: 0,
     flexDirection: "row",
     alignItems: "center",
   });
-  const thinkingSpinner = new SpinnerRenderable(renderer, { fg: theme.textMuted, marginRight: 1 });
+  const thinkingSpinner = new TorchSpinnerRenderable(renderer, { marginRight: 1 });
   const status = new TextRenderable(renderer, { content: "", fg: theme.textMuted, height: 1 });
   statusRow.add(thinkingSpinner);
   statusRow.add(status);

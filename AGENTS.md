@@ -74,6 +74,7 @@ bun test
   - `openai.ts`: OpenAI-compatible client (SSE streaming + JSON fallback) and `createProviderFromSettings`. `DEFAULT_BASE_URL`/`DEFAULT_MODEL`.
 - `src/theme.ts`: unified palette (`theme`) — burnt-orange accent over flat dark surfaces. ALL UI colors come from here; never hardcode hex literals.
 - `src/spinner.ts`: braille spinner animation (`startSpinnerFrames`) for "thinking" indicators.
+- `src/torch-spinner.ts`: `TorchSpinnerRenderable` — fire/torch "thinking" indicator that paints a flame (per-pixel fire gradient + ember glow) into a `FrameBufferRenderable` (subclass). Drop-in `start()`/`stop()` API.
 - `src/consts.ts`: ASCII art logos.
 - `src/intro.ts`: startup animation helpers — `dissolveIn` (per-character shade-ramp dissolve for text) and `chunkyFadeIn` (stepped opacity fade). Driven by `setInterval`, need real renderable instances (not the `Box()`/`Text()` VNode factory proxies).
 - `src/dialog.ts`: generic centered modal primitive (`makeDialog`) — absolute full-screen layer + `zIndex`, toggled via `visible`. Callers handle focus.
