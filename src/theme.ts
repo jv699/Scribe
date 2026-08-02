@@ -24,4 +24,8 @@ export const theme = {
 
   /** Validation errors and destructive hints. */
   danger: "#FF5555",
+
+  /** Flame spinner palette — tip to base (coolest to hottest). */
+  flameEmber: "#A63B00",
+  flameCore: "#FFB84D",
 } as const;

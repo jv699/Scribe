@@ -10,6 +10,7 @@
     "typescript": "^5"
   },
   "dependencies": {
-    "@opentui/core": "^0.4.2"
+    "@opentui/core": "^0.4.2",
+    "opentui-spinner": "^0.0.7"
   }
 }

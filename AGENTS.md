@@ -28,7 +28,7 @@ Locked design decisions (don't revisit without asking):
 
 - **Runtime**: Bun (`bun` v1.3+).
 - **Entry point**: `src/index.ts`.
-- **Only dependency**: `@opentui/core` (TUI component library).
+- **Only dependencies**: `@opentui/core` (TUI component library) and `opentui-spinner` (spinner animations).
 - **Tests**: `bun:test` in `tests/`. No lint, formatter, or CI yet.
 
 ## Common commands
@@ -74,6 +74,7 @@ bun test
   - `openai.ts`: OpenAI-compatible client (SSE streaming + JSON fallback) and `createProviderFromSettings`. `DEFAULT_BASE_URL`/`DEFAULT_MODEL`.
 - `src/theme.ts`: unified palette (`theme`) — burnt-orange accent over flat dark surfaces. ALL UI colors come from here; never hardcode hex literals.
 - `src/spinner.ts`: braille spinner animation (`startSpinnerFrames`) for "thinking" indicators.
+- `src/torch-spinner.ts`: `TorchSpinnerRenderable` — fire/torch spinner for "thinking" indicators, built on `opentui-spinner` (breathing flame column with a pulsing fire gradient).
 - `src/consts.ts`: ASCII art logos.
 - `src/intro.ts`: startup animation helpers — `dissolveIn` (per-character shade-ramp dissolve for text) and `chunkyFadeIn` (stepped opacity fade). Driven by `setInterval`, need real renderable instances (not the `Box()`/`Text()` VNode factory proxies).
 - `src/dialog.ts`: generic centered modal primitive (`makeDialog`) — absolute full-screen layer + `zIndex`, toggled via `visible`. Callers handle focus.
