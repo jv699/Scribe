@@ -67,19 +67,6 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
   }
   container.add(titleRow);
 
-  // Status line: die + text for thinking / tool activity / errors.
-  const statusRow = new BoxRenderable(renderer, {
-    width: "100%",
-    height: 1,
-    flexDirection: "row",
-    alignItems: "center",
-  });
-  const thinkingSpinner = new DiceSpinnerRenderable(renderer, { marginRight: 1 });
-  const status = new TextRenderable(renderer, { content: "", fg: theme.textMuted, height: 1 });
-  statusRow.add(thinkingSpinner);
-  statusRow.add(status);
-  container.add(statusRow);
-
   // Transcript.
   const syntaxStyle = SyntaxStyle.create();
   const markdown = new MarkdownRenderable(renderer, { content: "", width: "100%", syntaxStyle });
@@ -92,6 +79,21 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
   });
   scrollBox.content.add(markdown);
   container.add(scrollBox);
+  
+  // Status line: die + text for thinking / tool activity / errors.
+  const statusRow = new BoxRenderable(renderer, {
+    width: "100%",
+    height: 1,
+    paddingLeft: 2,
+    flexDirection: "row",
+    alignItems: "center",
+  });
+  const thinkingSpinner = new DiceSpinnerRenderable(renderer, { marginRight: 1 });
+  const status = new TextRenderable(renderer, { content: "", fg: theme.textMuted, height: 1 });
+  statusRow.add(thinkingSpinner);
+  statusRow.add(status);
+  container.add(statusRow);
+
 
   // Prompt panel (opencode-style): bordered textarea + hint footer.
   const prompt = makePrompt(renderer, { onSubmit: () => void send() });

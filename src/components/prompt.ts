@@ -43,6 +43,7 @@ export function makePrompt(ctx: RenderContext, options: PromptOptions): Prompt {
     paddingLeft: 2,
     paddingRight: 2,
     paddingTop: 1,
+    paddingBottom: 1,
     backgroundColor: theme.surfaceActive,
   });
 
