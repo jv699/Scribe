@@ -3,7 +3,7 @@
  * the app theme, with hover/focus highlight and click + Enter support.
  */
 import { BoxRenderable, RenderableEvents, TextRenderable, type RenderContext } from "@opentui/core";
-import { theme } from "./theme.ts";
+import { theme } from "../theme.ts";
 
 export interface ButtonOptions {
   label: string;

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { createTestRenderer, type TestRenderer } from "@opentui/core/testing";
-import { DiceSpinnerRenderable } from "../src/dice-spinner.ts";
+import { DiceSpinnerRenderable } from "../src/components/dice-spinner.ts";
 
 let renderer: TestRenderer;
 let captureCharFrame: () => string;

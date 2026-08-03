@@ -13,9 +13,9 @@ import {
   type Renderable,
   type SelectOption,
 } from "@opentui/core";
-import { makeDialog } from "../dialog.ts";
-import { makeButton } from "../ui.ts";
-import { makeSessionDialog } from "../session-dialog.ts";
+import { makeDialog } from "../components/dialog.ts";
+import { makeButton } from "../components/ui.ts";
+import { makeSessionDialog } from "../components/session-dialog.ts";
 import { listSessions, createSession, setSessionStatus, trashSession, type Session } from "../store/sessions.ts";
 import { theme } from "../theme.ts";
 import type { Campaign } from "../store/campaigns.ts";

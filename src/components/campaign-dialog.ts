@@ -12,10 +12,10 @@ import {
   type KeyEvent,
   type Renderable,
 } from "@opentui/core";
-import { theme } from "./theme.ts";
+import { theme } from "../theme.ts";
 import { makeDialog } from "./dialog.ts";
 import { makeButton } from "./ui.ts";
-import type { NewCampaign } from "./store/campaigns.ts";
+import type { NewCampaign } from "../store/campaigns.ts";
 
 export interface CampaignDialogOptions {
   onSubmit: (campaign: NewCampaign) => void;

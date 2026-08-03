@@ -4,7 +4,7 @@
  * are built on this. Callers handle focus themselves.
  */
 import { BoxRenderable, type RenderContext } from "@opentui/core";
-import { theme } from "./theme.ts";
+import { theme } from "../theme.ts";
 
 export interface DialogOptions {
   width: number;

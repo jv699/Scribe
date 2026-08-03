@@ -4,7 +4,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { makeCampaignDialog } from "../src/campaign-dialog.ts";
+import { makeCampaignDialog } from "../src/components/campaign-dialog.ts";
 import { makeMainMenuScreen } from "../src/screens/main-menu.ts";
 import { makeCampaignHomeScreen } from "../src/screens/campaign-home.ts";
 import type { Screen } from "../src/screens/screen.ts";

@@ -66,6 +66,24 @@ describe("chat screen", () => {
     expect(frame.includes("world")).toBe(true);
   });
 
+  test("multi-line input: Shift+Enter adds a line, Enter sends it", async () => {
+    // Modifiers need the kitty-keyboard mock to round-trip.
+    const kitty = createMockKeys(renderer, { kittyKeyboard: true });
+    await open(okProvider);
+    await kitty.typeText("first line", 5);
+    kitty.pressEnter({ shift: true });
+    await kitty.typeText("second line", 5);
+    kitty.pressEnter();
+    await wait();
+    await renderOnce();
+
+    const frame = captureCharFrame();
+    expect(frame.includes("first line")).toBe(true);
+    expect(frame.includes("second line")).toBe(true);
+    // both lines landed in a single message (one "You:")
+    expect((frame.match(/You:/g) ?? []).length).toBe(1);
+  });
+
   test("surfaces provider errors in the status line", async () => {
     await open(errorProvider);
     await keys.typeText("hi", 5);
