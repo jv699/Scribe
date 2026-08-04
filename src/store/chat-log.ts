@@ -38,19 +38,6 @@ export async function loadChatLog(
   return messages;
 }
 
-/** Append a message to the conversation log. */
-export async function appendChatMessage(
-  campaignDir: string,
-  sessionNumber: number,
-  mode: ChatLogMode,
-  message: ChatMessage,
-): Promise<void> {
-  const path = chatLogPath(campaignDir, sessionNumber, mode);
-  await mkdir(join(path, ".."), { recursive: true });
-  const raw = await readFile(path, "utf8").catch(() => "");
-  await writeFile(path, raw + JSON.stringify(message) + "\n", "utf8");
-}
-
 /** Replace the whole conversation log (used to save the trimmed history). */
 export async function saveChatLog(
   campaignDir: string,

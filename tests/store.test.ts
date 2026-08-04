@@ -7,7 +7,7 @@ import { parseFrontmatter, serializeFrontmatter } from "../src/store/frontmatter
 import { loadSettings, saveSettings } from "../src/store/settings.ts";
 import { createCampaign, listCampaigns, loadCampaign, updateCampaignMeta, appendStorySoFar } from "../src/store/campaigns.ts";
 import { createSession, listSessions, setSessionStatus, trashSession } from "../src/store/sessions.ts";
-import { loadChatLog, appendChatMessage, saveChatLog, clearChatLog, chatLogPath } from "../src/store/chat-log.ts";
+import { loadChatLog, saveChatLog, clearChatLog, chatLogPath } from "../src/store/chat-log.ts";
 import { loadOneshotPrompt, loadSystemPrompt } from "../src/store/system-prompt.ts";
 
 let dir: string;
@@ -244,8 +244,10 @@ describe("chat log", () => {
 
   test("append/load round-trips messages", async () => {
     const campaign = await setup();
-    await appendChatMessage(campaign.dir, 1, "plan", { role: "user", content: "hi" });
-    await appendChatMessage(campaign.dir, 1, "plan", { role: "assistant", content: "hello" });
+    await saveChatLog(campaign.dir, 1, "plan", [
+      { role: "user", content: "hi" },
+      { role: "assistant", content: "hello" },
+    ]);
 
     const loaded = await loadChatLog(campaign.dir, 1, "plan");
     expect(loaded).toEqual([
@@ -278,8 +280,8 @@ describe("chat log", () => {
 
   test("logs are separate per session and mode", async () => {
     const campaign = await setup();
-    await appendChatMessage(campaign.dir, 1, "plan", { role: "user", content: "plan msg" });
-    await appendChatMessage(campaign.dir, 2, "report", { role: "user", content: "report msg" });
+    await saveChatLog(campaign.dir, 1, "plan", [{ role: "user", content: "plan msg" }]);
+    await saveChatLog(campaign.dir, 2, "report", [{ role: "user", content: "report msg" }]);
 
     expect(await loadChatLog(campaign.dir, 1, "plan")).toHaveLength(1);
     expect(await loadChatLog(campaign.dir, 2, "plan")).toEqual([]);

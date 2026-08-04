@@ -190,9 +190,6 @@ describe("chat screen", () => {
       save: async (m) => {
         stored = [...m];
       },
-      clear: async () => {
-        stored = [];
-      },
     };
 
     current = await makeChatScreen(renderer, { provider: okProvider, chatLog, onBack: () => {} });

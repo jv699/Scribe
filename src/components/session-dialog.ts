@@ -13,7 +13,7 @@ import {
 } from "@opentui/core";
 import { theme } from "../theme.ts";
 import { makeDialog } from "./dialog.ts";
-import { makeButton } from "./ui.ts";
+import { makeButton, tabWalk } from "./ui.ts";
 
 export interface SessionDialogOptions {
   onSubmit: (title: string) => void;
@@ -93,24 +93,11 @@ export function makeSessionDialog(renderer: CliRenderer, options: SessionDialogO
       cancel();
       return;
     }
-    if (key.name === "tab") {
-      key.preventDefault();
-      const index = focusChain.indexOf(renderer.currentFocusedRenderable as Renderable);
-      const direction = key.shift ? -1 : 1;
-      const next = focusChain[(index + direction + focusChain.length) % focusChain.length];
-      next?.focus();
-    }
+    tabWalk(renderer, focusChain, key);
   }
 
   // Enter in the title field submits the dialog directly.
   titleInput.on(InputRenderableEvents.ENTER, () => submit());
-
-  createButton.onKeyDown = (key) => {
-    if (key.name === "return") submit();
-  };
-  cancelButton.onKeyDown = (key) => {
-    if (key.name === "return") cancel();
-  };
 
   return { layer: dialog.layer, open };
 }

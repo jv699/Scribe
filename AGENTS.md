@@ -65,12 +65,12 @@ bun test
 - `src/screens/settings.ts`: settings screen — edit base URL, model, API key env var, campaigns dir; persists to config.json via `saveSettings`.
 - `src/screens/chat.ts`: chat screen (harness) — markdown transcript + prompt (via `makePrompt` from `components/prompt.ts`). Streams assistant replies from any `ChatProvider`; surfaces provider errors. In **planning mode** (`tools` + `systemPrompt` options) sends run through `runAgent`. With a `chatLog` store it **resumes** the conversation.
 - `src/components/`: reusable UI widgets (opencode-style).
-  - `ui.ts`: helper for creating focusable/mouse-aware buttons (`makeButton`).
+  - `ui.ts`: shared primitives — focusable/mouse-aware buttons (`makeButton`, click + Enter) and Tab/Shift+Tab focus traversal (`tabWalk`).
   - `dialog.ts`: generic centered modal primitive (`makeDialog`) — absolute full-screen layer + `zIndex`, toggled via `visible`. Callers handle focus.
+  - `action-dialog.ts`: generic modal with a body + button row (`makeActionDialog`) — owns layer lifecycle, Tab/Shift+Tab traversal, Escape-to-close, initial focus; `onClose` returns focus.
   - `campaign-dialog.ts`: "New Campaign" form (`makeCampaignDialog`) built on `dialog.ts`. Name + system `InputRenderable`s + background `TextareaRenderable` + `makeButton` buttons. Global `keypress` listener (while open) traps Tab/Shift+Tab/Escape; `onSubmit`/`onCancel` callbacks.
   - `session-dialog.ts`: "New Session" form (`makeSessionDialog`), same pattern, single title field.
   - `prompt.ts`: `makePrompt` — opencode-style prompt widget (accent-bordered panel with a multi-line `TextareaRenderable`: Enter sends, Shift+Enter newline, hint footer). Callers own submission and textarea state.
-  - `spinner.ts`: braille spinner animation (`startSpinnerFrames`) for "thinking" indicators.
   - `dice-spinner.ts`: `DiceSpinnerRenderable` — rolling-die "thinking" indicator built on `opentui-spinner` (tumbling die faces in a pulsing fire gradient).
 - `src/agent/`: the harness core (Phase 2).
   - `loop.ts`: `runAgent` — tool-call loop (stream → execute tools → feed back → repeat until a text answer), `AgentTool`.
@@ -89,7 +89,7 @@ bun test
   - `system-prompt.ts`: user-owned base system prompt file (`~/.config/scribe/system-prompt.md`), created with a default if missing.
   - `campaigns.ts`: `Campaign` type, `createCampaign`/`listCampaigns`/`loadCampaign`/`updateCampaignMeta`/`appendStorySoFar`. `campaign.md` body holds Background + The Story So Far sections.
   - `sessions.ts`: `Session` type, `createSession` (bumps campaign `nextSession`), `listSessions`, `setSessionStatus` (stamps dates), `trashSession` (soft-delete to `.scribe/trash/`).
-  - `chat-log.ts`: conversation persistence per session+mode as JSONL in `.scribe/` (`loadChatLog`/`saveChatLog`/`clearChatLog`/`appendChatMessage`) — resumes planning/report chats across app sessions.
+  - `chat-log.ts`: conversation persistence per session+mode as JSONL in `.scribe/` (`loadChatLog`/`saveChatLog`/`clearChatLog`) — resumes planning/report chats across app sessions.
 
 ## Gotchas
 
