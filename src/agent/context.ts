@@ -9,7 +9,7 @@
 import { basename } from "node:path";
 import type { Campaign } from "../store/campaigns.ts";
 import { readSessionNotes, type Session } from "../store/sessions.ts";
-import { loadSystemPrompt } from "../store/system-prompt.ts";
+import { loadOneshotPrompt, loadSystemPrompt } from "../store/system-prompt.ts";
 
 function campaignSection(campaign: Campaign): string {
   return `
@@ -57,4 +57,12 @@ summary of the session's events to the campaign's story so far using the
 append_campaign_summary tool. The summary should record what the party did and
 anything that will matter for future sessions.
 `;
+}
+
+/**
+ * One-shot mode ("The Tome"): standalone planning with no campaign context or
+ * tools — just the user's one-shot prompt file.
+ */
+export async function buildOneshotSystemPrompt(): Promise<string> {
+  return loadOneshotPrompt();
 }

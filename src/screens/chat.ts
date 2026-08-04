@@ -1,10 +1,11 @@
 /**
- * Chat screen (scratch harness UI): a scrollable transcript with an
- * opencode-style prompt at the bottom — an accent-bordered panel holding a
- * multi-line textarea (Enter sends, Shift+Enter adds a line) and a hint footer.
- * Streams assistant replies from any ChatProvider; a spinner animates next to
- * the "Scribe:" label while the model is thinking, then disappears when the
- * reply starts streaming. Phase 2 will build the planning/report modes on this.
+ * Chat screen: a scrollable transcript with an opencode-style prompt at the
+ * bottom — an accent-bordered panel holding a multi-line textarea (Enter
+ * sends, Shift+Enter adds a line) and a hint footer. Streams assistant replies
+ * from any ChatProvider; a spinner animates next to the "Scribe:" label while
+ * the model is thinking, then disappears when the reply starts streaming.
+ * Supports three modes: plain streaming, plain streaming with a system prompt
+ * (The Tome), and the agent loop with tools (planning/report).
  */
 import {
   BoxRenderable,
@@ -33,11 +34,13 @@ export interface ChatScreenOptions {
   provider: ChatProvider;
   /** Shown on the right of the title bar. */
   model?: string;
-  /** Left of the title bar. Defaults to "Chat (test)". */
+  /** Left of the title bar. Defaults to "The Tome". */
   title?: string;
   /**
    * When set, sends go through the agent loop with these tools and this base
-   * system prompt (planning/report mode). When omitted, plain text streaming only.
+   * system prompt (planning/report mode). When omitted, plain text streaming
+   * only — if `systemPrompt` is still set (The Tome), it is prepended to the
+   * conversation as a system message.
    */
   systemPrompt?: string;
   tools?: AgentTool[];
@@ -61,7 +64,7 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
     width: "100%",
     marginBottom: 1,
   });
-  titleRow.add(new TextRenderable(renderer, { content: options.title ?? "Chat (test)", fg: theme.accent }));
+  titleRow.add(new TextRenderable(renderer, { content: options.title ?? "The Tome", fg: theme.accent }));
   if (options.model) {
     titleRow.add(new TextRenderable(renderer, { content: options.model, fg: theme.textMuted }));
   }
@@ -177,8 +180,13 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
         // Keep the full conversation (minus the system message) for context.
         messages.splice(0, messages.length, ...result.messages.filter((m) => m.role !== "system"));
       } else {
-        // Scratch mode: plain text streaming.
-        for await (const event of options.provider.streamChat(messages)) {
+        // Scratch / The Tome: plain text streaming. Prepend the system prompt
+        // (if any) to a local copy so it never pollutes the transcript/log.
+        const context: ChatMessage[] =
+          options.systemPrompt && options.systemPrompt.trim() !== ""
+            ? [{ role: "system", content: options.systemPrompt }, ...messages]
+            : messages;
+        for await (const event of options.provider.streamChat(context)) {
           if (event.type === "text") appendStreamed(event.delta);
         }
       }

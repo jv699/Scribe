@@ -26,14 +26,26 @@ const DEFAULT_SETTINGS: Settings = {
   campaignsDir: join(homedir(), "Scribe"),
 };
 
+/** Directory holding the app config files (config.json + prompts). */
+export function defaultConfigDir(): string {
+  return join(homedir(), ".config", "scribe");
+}
+
 function defaultConfigPath(): string {
-  return join(homedir(), ".config", "scribe", "config.json");
+  return join(defaultConfigDir(), "config.json");
 }
 
 /** Expand a leading "~" to the home directory. */
 export function expandHome(path: string): string {
   if (path === "~") return homedir();
   if (path.startsWith("~/")) return join(homedir(), path.slice(2));
+  return path;
+}
+
+/** Abbreviate a path under the home directory to a leading "~". */
+export function abbreviateHome(path: string): string {
+  if (path === homedir()) return "~";
+  if (path.startsWith(homedir() + "/")) return "~" + path.slice(homedir().length);
   return path;
 }
 

@@ -43,7 +43,7 @@ async function showMainMenu(): Promise<void> {
       onCreateCampaign: () => campaignDialog.open(),
       onSelectCampaign: (c) => void showCampaignHome(c),
       onSettings: () => {},
-      onChat: () => {},
+      onOneshotPlanner: () => {},
       onQuit: () => {},
     }),
   );
@@ -86,6 +86,8 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  currentScreen?.dispose?.();
+  renderer.destroy();
   await rm(campaignsDir, { recursive: true, force: true });
 });
 
