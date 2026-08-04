@@ -78,7 +78,7 @@ async function showSettingsScreen(): Promise<void> {
       onSaved: async (next) => {
         await saveSettings(next);
         settings = next;
-        await navigate(showMainMenu);
+        navigate(showMainMenu);
       },
       onBack: () => navigate(showMainMenu),
     }),

@@ -108,7 +108,7 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
   const transcript = (): string =>
     messages
       .filter((m) => (m.role === "user" || m.role === "assistant") && m.content.trim() !== "")
-      .map((m) => `**${m.role === "user" ? "You" : "Scribe"}:** ${m.content}`)
+      .map((m) => `${m.content}`)
       .join("\n\n");
 
   function render(): void {

@@ -62,9 +62,11 @@ describe("chat screen", () => {
     await renderOnce();
 
     const frame = captureCharFrame();
-    expect(frame.includes("You:")).toBe(true);
     expect(frame.includes("hello")).toBe(true);
     expect(frame.includes("world")).toBe(true);
+    // names are stripped from the transcript
+    expect(frame.includes("You:")).toBe(false);
+    expect(frame.includes("Scribe:")).toBe(false);
   });
 
   test("multi-line input: Shift+Enter adds a line, Enter sends it", async () => {
@@ -81,8 +83,10 @@ describe("chat screen", () => {
     const frame = captureCharFrame();
     expect(frame.includes("first line")).toBe(true);
     expect(frame.includes("second line")).toBe(true);
-    // both lines landed in a single message (one "You:")
-    expect((frame.match(/You:/g) ?? []).length).toBe(1);
+    // both lines landed in a single message (adjacent rows, no blank line between)
+    expect(/first line[^\n]*\n ?second line/.test(frame)).toBe(true);
+    expect((frame.match(/first line/g) ?? []).length).toBe(1);
+    expect((frame.match(/second line/g) ?? []).length).toBe(1);
   });
 
   test("surfaces provider errors in the status line", async () => {
@@ -169,11 +173,11 @@ describe("chat screen", () => {
     await renderOnce();
 
     const frame = captureCharFrame();
-    expect(frame.includes("You:")).toBe(true);
+    expect(frame.includes("do it")).toBe(true);
     expect(frame.includes("All set.")).toBe(true);
-    // exactly one assistant reply, no duplicate/empty "Scribe:" lines
-    const scribeCount = (frame.match(/Scribe:/g) ?? []).length;
-    expect(scribeCount).toBe(1);
+    // exactly one assistant reply, no duplicate/empty lines
+    expect((frame.match(/All set\./g) ?? []).length).toBe(1);
+    expect(frame.includes("Scribe:")).toBe(false);
   });
 
   test("resumes a saved conversation and persists new messages", async () => {
