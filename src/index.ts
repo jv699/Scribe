@@ -15,7 +15,7 @@ import { loadSettings, saveSettings } from "./store/settings.ts";
 import { createCampaign, listCampaigns, loadCampaign, type Campaign } from "./store/campaigns.ts";
 import { createProviderFromSettings, DEFAULT_MODEL } from "./provider/openai.ts";
 import { makeCampaignTools } from "./agent/tools.ts";
-import { buildPlanningSystemPrompt, buildReportSystemPrompt } from "./agent/context.ts";
+import { buildOneshotSystemPrompt, buildPlanningSystemPrompt, buildReportSystemPrompt } from "./agent/context.ts";
 import type { Session } from "./store/sessions.ts";
 import { clearChatLog, loadChatLog, saveChatLog, type ChatLogMode } from "./store/chat-log.ts";
 
@@ -61,7 +61,7 @@ async function showMainMenu(): Promise<void> {
       onCreateCampaign: () => campaignDialog.open(),
       onSelectCampaign: (campaign) => navigate(() => showCampaignHome(campaign)),
       onSettings: () => navigate(showSettingsScreen),
-      onChat: () => navigate(showChatScreen),
+      onOneshotPlanner: () => navigate(showOneshotPlanner),
       onQuit: () => {
         renderer.destroy();
         process.exit(0);
@@ -85,11 +85,13 @@ async function showSettingsScreen(): Promise<void> {
   );
 }
 
-async function showChatScreen(): Promise<void> {
+async function showOneshotPlanner(): Promise<void> {
   showScreen(
     await makeChatScreen(renderer, {
       provider: createProviderFromSettings(settings),
       model: settings.model ?? DEFAULT_MODEL,
+      title: "The Tome",
+      systemPrompt: await buildOneshotSystemPrompt(),
       onBack: () => navigate(showMainMenu),
     }),
   );

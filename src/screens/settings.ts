@@ -14,7 +14,7 @@ import {
 } from "@opentui/core";
 import { makeButton } from "../components/ui.ts";
 import { theme } from "../theme.ts";
-import { expandHome, type Settings } from "../store/settings.ts";
+import { abbreviateHome, defaultConfigDir, expandHome, type Settings } from "../store/settings.ts";
 import type { Screen } from "./screen.ts";
 
 export interface SettingsScreenOptions {
@@ -33,7 +33,15 @@ export async function makeSettingsScreen(
     padding: 1,
     flexDirection: "column",
   });
-  container.add(new TextRenderable(renderer, { content: "Settings", fg: theme.accent, marginBottom: 1 }));
+  const titleRow = new BoxRenderable(renderer, {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    width: "100%",
+    marginBottom: 1,
+  });
+  titleRow.add(new TextRenderable(renderer, { content: "Settings", fg: theme.accent }));
+  titleRow.add(new TextRenderable(renderer, { content: abbreviateHome(defaultConfigDir()), fg: theme.textMuted }));
+  container.add(titleRow);
 
   const fieldLabel = (label: string): TextRenderable =>
     new TextRenderable(renderer, { content: label, fg: theme.textMuted, marginBottom: 1 });

@@ -8,6 +8,7 @@ import { loadSettings, saveSettings } from "../src/store/settings.ts";
 import { createCampaign, listCampaigns, loadCampaign, updateCampaignMeta, appendStorySoFar } from "../src/store/campaigns.ts";
 import { createSession, listSessions, setSessionStatus, trashSession } from "../src/store/sessions.ts";
 import { loadChatLog, appendChatMessage, saveChatLog, clearChatLog, chatLogPath } from "../src/store/chat-log.ts";
+import { loadOneshotPrompt, loadSystemPrompt } from "../src/store/system-prompt.ts";
 
 let dir: string;
 
@@ -83,6 +84,28 @@ describe("settings", () => {
     expect(reloaded.model).toBe("my-model");
     expect(reloaded.apiKeyEnv).toBe("MY_KEY");
     expect(reloaded.campaignsDir).toBe(settings.campaignsDir);
+  });
+});
+
+describe("system prompts", () => {
+  test("creates the base system prompt file with the default when missing", async () => {
+    const path = join(dir, "prompts", "system-prompt.md");
+    const prompt = await loadSystemPrompt(path);
+    expect(prompt).toContain("You are Scribe");
+    expect(await readFile(path, "utf8")).toBe(prompt);
+  });
+
+  test("creates the oneshot prompt file with the default when missing", async () => {
+    const path = join(dir, "prompts", "oneshot-prompt.md");
+    const prompt = await loadOneshotPrompt(path);
+    expect(prompt).toContain("one-shots");
+    expect(await readFile(path, "utf8")).toBe(prompt);
+  });
+
+  test("reads an existing oneshot prompt file untouched", async () => {
+    const path = join(dir, "oneshot-prompt.md");
+    await Bun.write(path, "custom oneshot prompt");
+    expect(await loadOneshotPrompt(path)).toBe("custom oneshot prompt");
   });
 });
 

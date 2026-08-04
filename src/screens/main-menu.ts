@@ -23,7 +23,8 @@ export interface MainMenuOptions {
   onCreateCampaign: () => void;
   onSelectCampaign: (campaign: Campaign) => void;
   onSettings: () => void;
-  onChat: () => void;
+  /** Open the one-shot planner (The Tome) — free-form ideas chat. */
+  onOneshotPlanner: () => void;
   onQuit: () => void;
 }
 
@@ -32,7 +33,7 @@ export function makeMainMenuScreen(renderer: CliRenderer, options: MainMenuOptio
     { name: "Create New Campaign", description: "" },
     ...options.campaigns.map((c) => ({ name: c.name, description: c.system })),
     { name: "Settings", description: "" },
-    { name: "Chat (test)", description: "" },
+    { name: "The Tome", description: "one-shot and ideas planner" },
     { name: "Quit", description: "" },
   ];
 
@@ -50,8 +51,8 @@ export function makeMainMenuScreen(renderer: CliRenderer, options: MainMenuOptio
 
   const createIndex = 0;
   const settingsIndex = 1 + options.campaigns.length;
-  const chatIndex = settingsIndex + 1;
-  const quitIndex = chatIndex + 1;
+  const oneshotIndex = settingsIndex + 1;
+  const quitIndex = oneshotIndex + 1;
 
   mainMenu.on(SelectRenderableEvents.ITEM_SELECTED, (index: number) => {
     if (index === createIndex) {
@@ -62,8 +63,8 @@ export function makeMainMenuScreen(renderer: CliRenderer, options: MainMenuOptio
       options.onSettings();
       return;
     }
-    if (index === chatIndex) {
-      options.onChat();
+    if (index === oneshotIndex) {
+      options.onOneshotPlanner();
       return;
     }
     if (index === quitIndex) {

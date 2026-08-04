@@ -27,6 +27,7 @@ beforeEach(async () => {
 
 afterEach(() => {
   current?.dispose?.();
+  renderer.destroy();
 });
 
 async function open(settings: Settings): Promise<void> {
@@ -53,6 +54,7 @@ describe("settings screen", () => {
     expect(frame.includes("https://localhost:11434/v1")).toBe(true);
     expect(frame.includes("llama3.1")).toBe(true);
     expect(frame.includes("/tmp/x")).toBe(true);
+    expect(frame.includes(".config/scribe")).toBe(true);
 
     await keys.typeText("http://other/v1", 5);
     await wait();

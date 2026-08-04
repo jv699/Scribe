@@ -38,6 +38,7 @@ beforeEach(async () => {
 
 afterEach(() => {
   current?.dispose?.();
+  renderer.destroy();
 });
 
 async function open(provider: ChatProvider): Promise<void> {
@@ -99,6 +100,35 @@ describe("chat screen", () => {
     keys.pressKey("ESCAPE");
     await wait(500);
     expect(wentBack).toBe(true);
+  });
+
+  test("streaming mode without tools prepends the system prompt", async () => {
+    let received: ChatMessage[] = [];
+    const captureProvider: ChatProvider = {
+      async *streamChat(messages) {
+        received = [...messages];
+        yield { type: "text", delta: "ok" };
+      },
+    };
+
+    current = await makeChatScreen(renderer, {
+      provider: captureProvider,
+      systemPrompt: "You are a one-shot planner.",
+      onBack: () => {},
+    });
+    renderer.root.add(current.node);
+    current.focus?.();
+    await renderOnce();
+
+    await keys.typeText("plan an encounter", 5);
+    keys.pressEnter();
+    await wait();
+    await renderOnce();
+
+    expect(received[0]).toEqual({ role: "system", content: "You are a one-shot planner." });
+    expect(received[1]!.content).toBe("plan an encounter");
+    // the system prompt must not leak into the transcript
+    expect(captureCharFrame().includes("one-shot planner")).toBe(false);
   });
 
   test("planning mode runs tools and streams the final answer", async () => {    const toolProvider: ChatProvider = {
