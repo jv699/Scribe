@@ -4,6 +4,7 @@
  * campaign-create dialog and app-level navigation wiring.
  */
 import { createCliRenderer } from "@opentui/core";
+import { theme } from "./theme.ts";
 import { makeCampaignDialog } from "./components/campaign-dialog.ts";
 import { makeMainMenuScreen } from "./screens/main-menu.ts";
 import { makeCampaignHomeScreen } from "./screens/campaign-home.ts";
@@ -20,6 +21,7 @@ import { clearChatLog, loadChatLog, saveChatLog, type ChatLogMode } from "./stor
 
 const renderer = await createCliRenderer({
   exitOnCtrlC: true,
+  backgroundColor: theme.background,
 });
 
 renderer.setTerminalTitle("Scribe");

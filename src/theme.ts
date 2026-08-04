@@ -3,6 +3,9 @@
  * Every color in the UI should come from here — no ad-hoc hex literals.
  */
 export const theme = {
+  /** App-level background — the canvas behind all screens. */
+  background: "#1d1d1d",
+
   /** Burnt orange — titles, dialog borders, selected items, primary buttons. */
   accent: "#CC5500",
   /** Brighter orange — hover/focus state on accent-colored controls. */
