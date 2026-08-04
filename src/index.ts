@@ -14,10 +14,11 @@ import type { Screen } from "./screens/screen.ts";
 import { loadSettings, saveSettings } from "./store/settings.ts";
 import { createCampaign, listCampaigns, loadCampaign, type Campaign } from "./store/campaigns.ts";
 import { createProviderFromSettings, DEFAULT_MODEL } from "./provider/openai.ts";
+import type { ChatProvider } from "./provider/types.ts";
 import { makeCampaignTools } from "./agent/tools.ts";
 import { buildOneshotSystemPrompt, buildPlanningSystemPrompt, buildReportSystemPrompt } from "./agent/context.ts";
 import type { Session } from "./store/sessions.ts";
-import { clearChatLog, loadChatLog, saveChatLog, type ChatLogMode } from "./store/chat-log.ts";
+import { loadChatLog, saveChatLog, type ChatLogMode } from "./store/chat-log.ts";
 
 const renderer = await createCliRenderer({
   exitOnCtrlC: true,
@@ -85,11 +86,18 @@ async function showSettingsScreen(): Promise<void> {
   );
 }
 
+/** Build a ChatProvider + model from the current settings. */
+function makeChatOptions(): { provider: ChatProvider; model: string } {
+  return {
+    provider: createProviderFromSettings(settings),
+    model: settings.model ?? DEFAULT_MODEL,
+  };
+}
+
 async function showOneshotPlanner(): Promise<void> {
   showScreen(
     await makeChatScreen(renderer, {
-      provider: createProviderFromSettings(settings),
-      model: settings.model ?? DEFAULT_MODEL,
+      ...makeChatOptions(),
       title: "The Tome",
       systemPrompt: await buildOneshotSystemPrompt(),
       onBack: () => navigate(showMainMenu),
@@ -118,8 +126,7 @@ async function showPlanningChat(campaign: Campaign, session: Session): Promise<v
   ]);
   showScreen(
     await makeChatScreen(renderer, {
-      provider: createProviderFromSettings(settings),
-      model: settings.model ?? DEFAULT_MODEL,
+      ...makeChatOptions(),
       title: `Plan Session ${session.number} — ${session.title}`,
       systemPrompt,
       tools,
@@ -136,8 +143,7 @@ async function showReportChat(campaign: Campaign, session: Session): Promise<voi
   ]);
   showScreen(
     await makeChatScreen(renderer, {
-      provider: createProviderFromSettings(settings),
-      model: settings.model ?? DEFAULT_MODEL,
+      ...makeChatOptions(),
       title: `Report Session ${session.number} — ${session.title}`,
       systemPrompt,
       tools,
@@ -151,7 +157,6 @@ function makeChatLog(campaign: Campaign, session: Session, mode: ChatLogMode): C
   return {
     load: () => loadChatLog(campaign.dir, session.number, mode),
     save: (messages) => saveChatLog(campaign.dir, session.number, mode, messages),
-    clear: () => clearChatLog(campaign.dir, session.number, mode),
   };
 }
 

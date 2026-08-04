@@ -14,7 +14,7 @@ import {
 } from "@opentui/core";
 import { theme } from "../theme.ts";
 import { makeDialog } from "./dialog.ts";
-import { makeButton } from "./ui.ts";
+import { makeButton, tabWalk } from "./ui.ts";
 import type { NewCampaign } from "../store/campaigns.ts";
 
 export interface CampaignDialogOptions {
@@ -125,29 +125,13 @@ export function makeCampaignDialog(renderer: CliRenderer, options: CampaignDialo
       cancel();
       return;
     }
-    if (key.name === "tab") {
-      key.preventDefault();
-      const index = focusChain.indexOf(renderer.currentFocusedRenderable as Renderable);
-      const direction = key.shift ? -1 : 1;
-      const next = focusChain[(index + direction + focusChain.length) % focusChain.length];
-      next?.focus();
-    }
+    tabWalk(renderer, focusChain, key);
   }
 
   // Enter in a single-line field submits the dialog directly. Tab still
   // walks the focus chain; the description textarea keeps Enter for newlines.
   nameInput.on(InputRenderableEvents.ENTER, () => submit());
   systemInput.on(InputRenderableEvents.ENTER, () => submit());
-
-  // Enter "clicks" the focused button (mouse clicks work via makeButton).
-  // Note: the main Enter key reports key.name === "return" ("enter" is the
-  // keypad-enter alias in OpenTUI's keymap).
-  createButton.onKeyDown = (key) => {
-    if (key.name === "return") submit();
-  };
-  cancelButton.onKeyDown = (key) => {
-    if (key.name === "return") cancel();
-  };
 
   return { layer: dialog.layer, open };
 }

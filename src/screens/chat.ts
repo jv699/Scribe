@@ -27,7 +27,6 @@ import type { Screen } from "./screen.ts";
 export interface ChatLogStore {
   load(): Promise<ChatMessage[]>;
   save(messages: ChatMessage[]): Promise<void>;
-  clear(): Promise<void>;
 }
 
 export interface ChatScreenOptions {

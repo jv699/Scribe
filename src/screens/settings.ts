@@ -12,7 +12,7 @@ import {
   type KeyEvent,
   type Renderable,
 } from "@opentui/core";
-import { makeButton } from "../components/ui.ts";
+import { makeButton, tabWalk } from "../components/ui.ts";
 import { theme } from "../theme.ts";
 import { abbreviateHome, defaultConfigDir, expandHome, type Settings } from "../store/settings.ts";
 import type { Screen } from "./screen.ts";
@@ -107,12 +107,7 @@ export async function makeSettingsScreen(
       leave();
       return;
     }
-    if (key.name === "tab") {
-      key.preventDefault();
-      const index = focusChain.indexOf(renderer.currentFocusedRenderable as Renderable);
-      const direction = key.shift ? -1 : 1;
-      focusChain[(index + direction + focusChain.length) % focusChain.length]?.focus();
-    }
+    tabWalk(renderer, focusChain, key);
   };
 
   // dispose() only cleans up listeners (called by the screen manager on
@@ -130,17 +125,9 @@ export async function makeSettingsScreen(
     const index = focusChain.indexOf(from);
     focusChain[index + 1]?.focus();
   };
-  baseUrlInput.on(InputRenderableEvents.ENTER, () => advance(baseUrlInput));
-  modelInput.on(InputRenderableEvents.ENTER, () => advance(modelInput));
-  keyInput.on(InputRenderableEvents.ENTER, () => advance(keyInput));
-  dirInput.on(InputRenderableEvents.ENTER, () => advance(dirInput));
-
-  saveButton.onKeyDown = (key) => {
-    if (key.name === "return") save();
-  };
-  backButton.onKeyDown = (key) => {
-    if (key.name === "return") leave();
-  };
+  for (const input of [baseUrlInput, modelInput, keyInput, dirInput]) {
+    input.on(InputRenderableEvents.ENTER, () => advance(input));
+  }
 
   renderer.keyInput.on("keypress", onKeypress);
   baseUrlInput.focus();

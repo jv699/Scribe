@@ -10,11 +10,9 @@ import {
   TextRenderable,
   type CliRenderer,
   type KeyEvent,
-  type Renderable,
   type SelectOption,
 } from "@opentui/core";
-import { makeDialog } from "../components/dialog.ts";
-import { makeButton } from "../components/ui.ts";
+import { makeActionDialog, type ActionDialog } from "../components/action-dialog.ts";
 import { makeSessionDialog } from "../components/session-dialog.ts";
 import { listSessions, createSession, setSessionStatus, trashSession, type Session } from "../store/sessions.ts";
 import { theme } from "../theme.ts";
@@ -120,13 +118,19 @@ export async function makeCampaignHomeScreen(
     sessionDialog.layer.destroyRecursively();
   });
 
-  // --- Session detail dialog (created fresh on each open) ---
-  let closeDetail: (() => void) | null = null;
+  // --- Session detail dialog (built fresh on each open) ---
+  let detailDialog: ActionDialog | null = null;
 
   function openSessionDetail(session: Session): void {
     modalOpen = true;
-    const dialog = makeDialog(renderer, { width: 60 });
-    renderer.root.add(dialog.layer);
+    const dialog = makeActionDialog(renderer, {
+      width: 60,
+      onClose: () => {
+        modalOpen = false;
+        menu.focus();
+      },
+    });
+    detailDialog = dialog;
 
     dialog.content.add(new TextRenderable(renderer, { content: session.title, fg: theme.accent }));
     dialog.content.add(
@@ -139,84 +143,48 @@ export async function makeCampaignHomeScreen(
       new TextRenderable(renderer, { content: session.path, fg: theme.textMuted, width: "100%", marginBottom: 1 }),
     );
 
-    const buttonRow = new BoxRenderable(renderer, { flexDirection: "row" });
-    const buttons: Renderable[] = [];
-    const addButton = (label: string, variant: "primary" | "ghost", action: () => void) => {
-      const button = makeButton(renderer, { label, variant, onClick: action });
-      button.onKeyDown = (key) => {
-        if (key.name === "return") action();
-      };
-      if (buttons.length > 0) buttonRow.add(new BoxRenderable(renderer, { width: 2 }));
-      buttonRow.add(button);
-      buttons.push(button);
-    };
-
     const act = (action: () => Promise<void>) => {
       void action()
         .then(() => {
-          close();
+          dialog.close();
           options.onChanged();
         })
         .catch((err: unknown) => {
-          close();
+          dialog.close();
           console.error("Action failed:", err);
         });
     };
     if (session.status === "planning") {
-      addButton("Plan with Agent", "primary", () => {
-        close();
+      dialog.addButton("Plan with Agent", "primary", () => {
+        dialog.close();
         options.onPlan(session);
       });
-      addButton("Mark Ready", "ghost", () => act(() => setSessionStatus(session, "ready")));
+      dialog.addButton("Mark Ready", "ghost", () => act(() => setSessionStatus(session, "ready")));
     }
     if (session.status === "ready") {
-      addButton("Report outcome", "primary", () => {
-        close();
+      dialog.addButton("Report outcome", "primary", () => {
+        dialog.close();
         options.onReport(session);
       });
-      addButton("Mark Played", "ghost", () => act(() => setSessionStatus(session, "played")));
+      dialog.addButton("Mark Played", "ghost", () => act(() => setSessionStatus(session, "played")));
     }
-    addButton("Move to Trash", "ghost", () => {
-      close();
+    dialog.addButton("Move to Trash", "ghost", () => {
+      dialog.close();
       confirmTrash(session);
     });
-    addButton("Close", "ghost", () => close());
-    dialog.content.add(buttonRow);
-
-    const onKeypress = (key: KeyEvent): void => {
-      if (key.name === "escape") {
-        key.preventDefault();
-        close();
-        return;
-      }
-      if (key.name === "tab" && buttons.length > 0) {
-        key.preventDefault();
-        const index = buttons.indexOf(renderer.currentFocusedRenderable as Renderable);
-        const direction = key.shift ? -1 : 1;
-        buttons[(index + direction + buttons.length) % buttons.length]?.focus();
-      }
-    };
-
-    function close(): void {
-      renderer.keyInput.off("keypress", onKeypress);
-      renderer.root.remove(dialog.layer.id);
-      dialog.layer.destroyRecursively();
-      closeDetail = null;
-      modalOpen = false;
-      menu.focus();
-    }
-
-    closeDetail = close;
-    dialog.open();
-    renderer.keyInput.on("keypress", onKeypress);
-    buttons[0]?.focus();
+    dialog.addButton("Close", "ghost", () => dialog.close());
   }
 
   // --- Trash confirmation (status guard for the destructive action) ---
   function confirmTrash(session: Session): void {
     modalOpen = true;
-    const dialog = makeDialog(renderer, { width: 52 });
-    renderer.root.add(dialog.layer);
+    const dialog = makeActionDialog(renderer, {
+      width: 52,
+      onClose: () => {
+        modalOpen = false;
+        menu.focus();
+      },
+    });
 
     dialog.content.add(
       new TextRenderable(renderer, {
@@ -225,57 +193,18 @@ export async function makeCampaignHomeScreen(
       }),
     );
 
-    const buttonRow = new BoxRenderable(renderer, { flexDirection: "row" });
-    const buttons: Renderable[] = [];
-    const addButton = (label: string, variant: "primary" | "ghost", action: () => void) => {
-      const button = makeButton(renderer, { label, variant, onClick: action });
-      button.onKeyDown = (key) => {
-        if (key.name === "return") action();
-      };
-      if (buttons.length > 0) buttonRow.add(new BoxRenderable(renderer, { width: 2 }));
-      buttonRow.add(button);
-      buttons.push(button);
-    };
-
-    addButton("Trash", "primary", () => {
+    dialog.addButton("Trash", "primary", () => {
       void trashSession(campaign, session)
         .then(() => {
-          close();
+          dialog.close();
           options.onChanged();
         })
         .catch((err: unknown) => {
-          close();
+          dialog.close();
           console.error("Failed to trash session:", err);
         });
     });
-    addButton("Cancel", "ghost", () => close());
-    dialog.content.add(buttonRow);
-
-    const onKeypress = (key: KeyEvent): void => {
-      if (key.name === "escape") {
-        key.preventDefault();
-        close();
-        return;
-      }
-      if (key.name === "tab" && buttons.length > 0) {
-        key.preventDefault();
-        const index = buttons.indexOf(renderer.currentFocusedRenderable as Renderable);
-        const direction = key.shift ? -1 : 1;
-        buttons[(index + direction + buttons.length) % buttons.length]?.focus();
-      }
-    };
-
-    function close(): void {
-      renderer.keyInput.off("keypress", onKeypress);
-      renderer.root.remove(dialog.layer.id);
-      dialog.layer.destroyRecursively();
-      modalOpen = false;
-      menu.focus();
-    }
-
-    dialog.open();
-    renderer.keyInput.on("keypress", onKeypress);
-    buttons[0]?.focus();
+    dialog.addButton("Cancel", "ghost", () => dialog.close());
   }
 
   // --- Menu wiring ---
@@ -307,7 +236,7 @@ export async function makeCampaignHomeScreen(
     node: container,
     focus: () => menu.focus(),
     dispose: () => {
-      closeDetail?.();
+      detailDialog?.close();
       for (const dispose of disposers) dispose();
     },
   };

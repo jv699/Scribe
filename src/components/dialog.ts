@@ -16,7 +16,6 @@ export interface Dialog {
   layer: BoxRenderable;
   /** Centered box — put dialog content in here. */
   content: BoxRenderable;
-  isOpen(): boolean;
   open(): void;
   close(): void;
 }
@@ -50,7 +49,6 @@ export function makeDialog(ctx: RenderContext, options: DialogOptions): Dialog {
   return {
     layer,
     content,
-    isOpen: () => layer.visible,
     open: () => {
       layer.visible = true;
     },

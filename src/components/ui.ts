@@ -1,8 +1,17 @@
 /**
- * Shared UI primitive: `makeButton` — flat, borderless buttons colored from
- * the app theme, with hover/focus highlight and click + Enter support.
+ * Shared UI primitives: `makeButton` — flat, borderless buttons colored from
+ * the app theme, with hover/focus highlight and click + Enter support — and
+ * `tabWalk` — Tab / Shift+Tab focus traversal along a chain of renderables.
  */
-import { BoxRenderable, RenderableEvents, TextRenderable, type RenderContext } from "@opentui/core";
+import {
+  BoxRenderable,
+  RenderableEvents,
+  TextRenderable,
+  type CliRenderer,
+  type KeyEvent,
+  type Renderable,
+  type RenderContext,
+} from "@opentui/core";
 import { theme } from "../theme.ts";
 
 export interface ButtonOptions {
@@ -34,6 +43,9 @@ export function makeButton(ctx: RenderContext, options: ButtonOptions): BoxRende
   button.onMouseDown = () => {
     options.onClick?.();
   };
+  button.onKeyDown = (key) => {
+    if (key.name === "return") options.onClick?.();
+  };
   button.onMouseOver = () => {
     button.backgroundColor = colors.hover;
   };
@@ -48,4 +60,17 @@ export function makeButton(ctx: RenderContext, options: ButtonOptions): BoxRende
   });
 
   return button;
+}
+
+/**
+ * Walk focus along a chain of renderables for Tab / Shift+Tab. Returns true
+ * if the key was a handled Tab (so callers can return early).
+ */
+export function tabWalk(renderer: CliRenderer, focusChain: readonly Renderable[], key: KeyEvent): boolean {
+  if (key.name !== "tab" || focusChain.length === 0) return false;
+  key.preventDefault();
+  const index = focusChain.indexOf(renderer.currentFocusedRenderable as Renderable);
+  const direction = key.shift ? -1 : 1;
+  focusChain[(index + direction + focusChain.length) % focusChain.length]?.focus();
+  return true;
 }
