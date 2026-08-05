@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { createTestRenderer, createMockKeys, type TestRenderer } from "@opentui/core/testing";
+import { MarkdownRenderable, type Renderable } from "@opentui/core";
 import { makeChatScreen, type ChatLogStore } from "../src/screens/chat.ts";
 import type { Screen } from "../src/screens/screen.ts";
 import type { ChatEvent, ChatMessage, ChatProvider } from "../src/provider/types.ts";
@@ -180,6 +181,64 @@ describe("chat screen", () => {
     expect(frame.includes("Scribe:")).toBe(false);
   });
 
+  // Regression: MarkdownRenderable only builds a synchronous first paint while
+  // `streaming` is on. With it off, blocks wait on an async tree-sitter highlight
+  // and paint blank for a frame — a visible flicker mid-conversation and a blank
+  // first frame for rows built from existing content. See makeRow in chat.ts.
+  describe("markdown never blanks out", () => {
+    const MARKDOWN = "Here you go:\n\n- **System** (D&D 5e)\n- **Party size**\n\nWhat do you have in mind?";
+
+    /** Every MarkdownRenderable currently in the tree. */
+    function markdownRows(node: Renderable = renderer.root): MarkdownRenderable[] {
+      const found = node instanceof MarkdownRenderable ? [node] : [];
+      for (const child of node.getChildren()) found.push(...markdownRows(child));
+      return found;
+    }
+
+    test("transcript rows are never taken out of streaming mode", async () => {
+      const chunkedProvider: ChatProvider = {
+        async *streamChat(): AsyncGenerator<ChatEvent> {
+          for (const chunk of MARKDOWN.match(/[\s\S]{1,8}/g) ?? []) {
+            await new Promise((r) => setTimeout(r, 2));
+            yield { type: "text", delta: chunk };
+          }
+        },
+      };
+      await open(chunkedProvider);
+      await keys.typeText("hi", 5);
+      keys.pressEnter();
+      await wait();
+      await renderOnce();
+
+      expect(captureCharFrame().includes("What do you have in mind?")).toBe(true);
+      const rows = markdownRows();
+      expect(rows.length).toBe(2);
+      // Turning this off rebuilds every block without a synchronous first paint,
+      // which blanks the whole transcript for a frame.
+      expect(rows.map((r) => r.streaming)).toEqual([true, true]);
+    });
+
+    test("a resumed transcript paints on its very first frame", async () => {
+      const chatLog: ChatLogStore = {
+        load: async () => [
+          { role: "user", content: "previous question" },
+          { role: "assistant", content: MARKDOWN },
+        ],
+        save: async () => {},
+      };
+
+      current = await makeChatScreen(renderer, { provider: okProvider, chatLog, onBack: () => {} });
+      renderer.root.add(current.node);
+      current.focus?.();
+      // No settling delay: the first painted frame must already have the text.
+      await renderOnce();
+
+      const frame = captureCharFrame();
+      expect(frame.includes("previous question")).toBe(true);
+      expect(frame.includes("What do you have in mind?")).toBe(true);
+    });
+  });
+
   test("resumes a saved conversation and persists new messages", async () => {
     let stored: ChatMessage[] = [
       { role: "user", content: "previous question" },
@@ -195,8 +254,6 @@ describe("chat screen", () => {
     current = await makeChatScreen(renderer, { provider: okProvider, chatLog, onBack: () => {} });
     renderer.root.add(current.node);
     current.focus?.();
-    // markdown parses async — give it a beat before asserting the transcript
-    await wait();
     await renderOnce();
     let frame = captureCharFrame();
     expect(frame.includes("previous question")).toBe(true);

@@ -57,7 +57,7 @@ export function makeActionDialog(renderer: CliRenderer, options: ActionDialogOpt
     if (closed) return;
     closed = true;
     renderer.keyInput.off("keypress", onKeypress);
-    renderer.root.remove(dialog.layer.id);
+    renderer.root.remove(dialog.layer);
     dialog.layer.destroyRecursively();
     options.onClose?.();
   }

@@ -13,12 +13,12 @@ import {
   BoxRenderable,
   MarkdownRenderable,
   ScrollBoxRenderable,
-  SyntaxStyle,
   TextRenderable,
   type CliRenderer,
   type KeyEvent,
 } from "@opentui/core";
 import { theme } from "../theme.ts";
+import { createMarkdownSyntaxStyle } from "../markdown-style.ts";
 import { makeAccentPanel } from "../components/ui.ts";
 import { makePrompt } from "../components/prompt.ts";
 import { DiceSpinnerRenderable } from "../components/dice-spinner.ts";
@@ -73,8 +73,9 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
   container.add(titleRow);
 
   // Transcript: user messages each get their own accent-strip panel (mirroring
-  // the prompt box); assistant replies flow as plain markdown beneath them.
-  const syntaxStyle = SyntaxStyle.create();
+  // the prompt box); assistant replies flow as markdown beneath them. The shared
+  // SyntaxStyle themes every markdown block with Scribe's palette.
+  const syntaxStyle = createMarkdownSyntaxStyle();
   const scrollBox = new ScrollBoxRenderable(renderer, {
     width: "100%",
     flexGrow: 1,
@@ -115,7 +116,6 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
   interface TranscriptRow {
     msg: ChatMessage;
     node: BoxRenderable;
-    markdown: MarkdownRenderable;
     update: () => void;
   }
 
@@ -125,7 +125,22 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
     messages.filter((m) => (m.role === "user" || m.role === "assistant") && m.content.trim() !== "");
 
   function makeRow(msg: ChatMessage): TranscriptRow {
-    const md = new MarkdownRenderable(renderer, { content: msg.content, width: "100%", syntaxStyle });
+    const md = new MarkdownRenderable(renderer, {
+      content: msg.content,
+      width: "100%",
+      syntaxStyle,
+      fg: theme.text,
+      internalBlockMode: "top-level",
+      tableOptions: { style: "grid" },
+      // Always streaming, never toggled off. MarkdownRenderable only builds the
+      // synchronous "unstyled" first paint (`initialStyledText`) while streaming
+      // is on; with it off, every block waits on an async tree-sitter highlight
+      // and paints blank for a frame. That shows up as a full-transcript flicker
+      // when a reply finishes (true -> false rebuilds every block) and as a blank
+      // first frame for rows built from existing content (resume / agent mode).
+      // The settled output is identical either way, so we just leave it on.
+      streaming: true,
+    });
     const update = (): void => {
       md.content = msg.content;
     };
@@ -133,16 +148,16 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
       // Same accent-strip treatment as the prompt box.
       const { node, panel } = makeAccentPanel(renderer);
       panel.add(md);
-      return { msg, node, markdown: md, update };
+      return { msg, node, update };
     }
     const node = new BoxRenderable(renderer, { width: "100%", flexShrink: 0, marginTop: 1 });
     node.add(md);
-    return { msg, node, markdown: md, update };
+    return { msg, node, update };
   }
 
   function removeRow(index: number): void {
     const row = rows[index]!;
-    transcriptBox.remove(row.node.id);
+    transcriptBox.remove(row.node);
     row.node.destroyRecursively();
     rows.splice(index, 1);
   }
@@ -177,11 +192,6 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
     }
 
     for (const row of rows) row.update();
-
-    // Only a trailing assistant reply blinks a streaming cursor while busy.
-    for (const row of rows) row.markdown.streaming = false;
-    const last = rows[rows.length - 1];
-    if (busy && last?.msg.role === "assistant") last.markdown.streaming = true;
   }
 
   // Resume: seed the transcript with any saved conversation.

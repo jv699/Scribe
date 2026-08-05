@@ -114,7 +114,7 @@ export async function makeCampaignHomeScreen(
   });
   renderer.root.add(sessionDialog.layer);
   disposers.push(() => {
-    renderer.root.remove(sessionDialog.layer.id);
+    renderer.root.remove(sessionDialog.layer);
     sessionDialog.layer.destroyRecursively();
   });
 

@@ -35,7 +35,7 @@ let currentScreen: Screen | null = null;
 function showScreen(screen: Screen): void {
   if (currentScreen) {
     currentScreen.dispose?.();
-    renderer.root.remove(currentScreen.node.id);
+    renderer.root.remove(currentScreen.node);
     currentScreen.node.destroyRecursively();
   }
   currentScreen = screen;
