@@ -22,8 +22,8 @@ import { loadChatLog, saveChatLog, type ChatLogMode } from "./store/chat-log.ts"
 
 const renderer = await createCliRenderer({
   exitOnCtrlC: true,
-  backgroundColor: theme.background,
 });
+renderer.setBackgroundColor(theme.background);
 
 renderer.setTerminalTitle("Scribe");
 
