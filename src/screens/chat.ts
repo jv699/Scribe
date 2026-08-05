@@ -1,9 +1,11 @@
 /**
  * Chat screen: a scrollable transcript with an opencode-style prompt at the
  * bottom — an accent-bordered panel holding a multi-line textarea (Enter
- * sends, Shift+Enter adds a line) and a hint footer. Streams assistant replies
- * from any ChatProvider; a spinner animates next to the "Scribe:" label while
- * the model is thinking, then disappears when the reply starts streaming.
+ * sends, Shift+Enter adds a line) and a hint footer. User messages each render
+ * in their own accent-strip panel (the same treatment as the prompt box) while
+ * assistant replies flow as markdown beneath them. Streams assistant replies
+ * from any ChatProvider; a status line with a rolling-die spinner shows
+ * "Scribe is thinking…", running-tool activity, and provider errors.
  * Supports three modes: plain streaming, plain streaming with a system prompt
  * (The Tome), and the agent loop with tools (planning/report).
  */
@@ -17,6 +19,7 @@ import {
   type KeyEvent,
 } from "@opentui/core";
 import { theme } from "../theme.ts";
+import { makeAccentPanel } from "../components/ui.ts";
 import { makePrompt } from "../components/prompt.ts";
 import { DiceSpinnerRenderable } from "../components/dice-spinner.ts";
 import { runAgent, type AgentTool } from "../agent/loop.ts";
@@ -69,9 +72,9 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
   }
   container.add(titleRow);
 
-  // Transcript.
+  // Transcript: user messages each get their own accent-strip panel (mirroring
+  // the prompt box); assistant replies flow as plain markdown beneath them.
   const syntaxStyle = SyntaxStyle.create();
-  const markdown = new MarkdownRenderable(renderer, { content: "", width: "100%", syntaxStyle });
   const scrollBox = new ScrollBoxRenderable(renderer, {
     width: "100%",
     flexGrow: 1,
@@ -79,9 +82,13 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
     stickyScroll: true,
     stickyStart: "bottom",
   });
-  scrollBox.content.add(markdown);
+  const transcriptBox = new BoxRenderable(renderer, {
+    width: "100%",
+    flexDirection: "column",
+  });
+  scrollBox.content.add(transcriptBox);
   container.add(scrollBox);
-  
+
   // Status line: die + text for thinking / tool activity / errors.
   const statusRow = new BoxRenderable(renderer, {
     width: "100%",
@@ -104,15 +111,77 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
   const messages: ChatMessage[] = [];
   let busy = false;
 
-  const transcript = (): string =>
-    messages
-      .filter((m) => (m.role === "user" || m.role === "assistant") && m.content.trim() !== "")
-      .map((m) => `${m.content}`)
-      .join("\n\n");
+  /** A rendered transcript row; updated in place as its message streams in. */
+  interface TranscriptRow {
+    msg: ChatMessage;
+    node: BoxRenderable;
+    markdown: MarkdownRenderable;
+    update: () => void;
+  }
 
+  const rows: TranscriptRow[] = [];
+
+  const visibleMessages = (): ChatMessage[] =>
+    messages.filter((m) => (m.role === "user" || m.role === "assistant") && m.content.trim() !== "");
+
+  function makeRow(msg: ChatMessage): TranscriptRow {
+    const md = new MarkdownRenderable(renderer, { content: msg.content, width: "100%", syntaxStyle });
+    const update = (): void => {
+      md.content = msg.content;
+    };
+    if (msg.role === "user") {
+      // Same accent-strip treatment as the prompt box.
+      const { node, panel } = makeAccentPanel(renderer);
+      panel.add(md);
+      return { msg, node, markdown: md, update };
+    }
+    const node = new BoxRenderable(renderer, { width: "100%", flexShrink: 0, marginTop: 1 });
+    node.add(md);
+    return { msg, node, markdown: md, update };
+  }
+
+  function removeRow(index: number): void {
+    const row = rows[index]!;
+    transcriptBox.remove(row.node.id);
+    row.node.destroyRecursively();
+    rows.splice(index, 1);
+  }
+
+  /** Line the transcript up with `messages`, reusing rows for surviving messages. */
   function render(): void {
-    markdown.content = transcript();
-    markdown.streaming = busy;
+    const visible = visibleMessages();
+    const alive = new Set(visible);
+
+    for (let i = rows.length - 1; i >= 0; i--) {
+      if (!alive.has(rows[i]!.msg)) removeRow(i);
+    }
+
+    let cursor = 0;
+    for (const msg of visible) {
+      // Search manually from cursor (findIndex's 2nd arg is thisArg, not fromIndex).
+      let match = -1;
+      for (let i = cursor; i < rows.length; i++) {
+        if (rows[i]!.msg === msg) {
+          match = i;
+          break;
+        }
+      }
+      if (match === cursor) {
+        cursor++;
+        continue;
+      }
+      const row = match > cursor ? rows.splice(match, 1)[0]! : makeRow(msg);
+      rows.splice(cursor, 0, row);
+      transcriptBox.insertBefore(row.node, rows[cursor + 1]?.node);
+      cursor++;
+    }
+
+    for (const row of rows) row.update();
+
+    // Only a trailing assistant reply blinks a streaming cursor while busy.
+    for (const row of rows) row.markdown.streaming = false;
+    const last = rows[rows.length - 1];
+    if (busy && last?.msg.role === "assistant") last.markdown.streaming = true;
   }
 
   // Resume: seed the transcript with any saved conversation.
