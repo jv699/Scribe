@@ -83,8 +83,8 @@ describe("chat screen", () => {
     const frame = captureCharFrame();
     expect(frame.includes("first line")).toBe(true);
     expect(frame.includes("second line")).toBe(true);
-    // both lines landed in a single message (adjacent rows, no blank line between)
-    expect(/first line[^\n]*\n ?second line/.test(frame)).toBe(true);
+    // both lines landed in a single message (adjacent rows inside one box, no blank line between)
+    expect(/first line[^\n]*\n *│ +second line/.test(frame)).toBe(true);
     expect((frame.match(/first line/g) ?? []).length).toBe(1);
     expect((frame.match(/second line/g) ?? []).length).toBe(1);
   });

@@ -1,7 +1,9 @@
 /**
- * Shared UI primitives: `makeButton` — flat, borderless buttons colored from
- * the app theme, with hover/focus highlight and click + Enter support — and
- * `tabWalk` — Tab / Shift+Tab focus traversal along a chain of renderables.
+ * Shared UI primitives: `makeAccentPanel` — the accent-strip surface used by
+ * the prompt box and user chat messages — `makeButton` — flat, borderless
+ * buttons colored from the app theme, with hover/focus highlight and click +
+ * Enter support — and `tabWalk` — Tab / Shift+Tab focus traversal along a
+ * chain of renderables.
  */
 import {
   BoxRenderable,
@@ -13,6 +15,48 @@ import {
   type RenderContext,
 } from "@opentui/core";
 import { theme } from "../theme.ts";
+
+export interface AccentPanelOptions {
+  /** Vertical spacing above the panel. Defaults to 1. */
+  marginTop?: number;
+  /** Padding inside the surface. Defaults to { left: 2, right: 2, top: 1, bottom: 1 }. */
+  padding?: { top?: number; right?: number; bottom?: number; left?: number };
+}
+
+export interface AccentPanel {
+  /** Accent-bordered outer box — add this to a column layout. */
+  node: BoxRenderable;
+  /** Inner padded surface — add content here. */
+  panel: BoxRenderable;
+}
+
+/**
+ * The accent-strip panel that gives the prompt box its look: a burnt-orange
+ * line down the left edge over a raised surface. Extracted so user chat
+ * messages (and anything else) can share the same treatment.
+ */
+export function makeAccentPanel(ctx: RenderContext, options: AccentPanelOptions = {}): AccentPanel {
+  const node = new BoxRenderable(ctx, {
+    width: "100%",
+    flexShrink: 0,
+    border: ["left"],
+    borderColor: theme.accent,
+    marginTop: options.marginTop ?? 1,
+  });
+
+  const panel = new BoxRenderable(ctx, {
+    width: "100%",
+    flexDirection: "column",
+    paddingLeft: options.padding?.left ?? 2,
+    paddingRight: options.padding?.right ?? 2,
+    paddingTop: options.padding?.top ?? 1,
+    paddingBottom: options.padding?.bottom ?? 1,
+    backgroundColor: theme.surfaceActive,
+  });
+  node.add(panel);
+
+  return { node, panel };
+}
 
 export interface ButtonOptions {
   label: string;

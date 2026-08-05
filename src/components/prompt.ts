@@ -6,6 +6,7 @@
  */
 import { BoxRenderable, TextRenderable, TextareaRenderable, type RenderContext } from "@opentui/core";
 import { theme } from "../theme.ts";
+import { makeAccentPanel } from "./ui.ts";
 
 export interface PromptOptions {
   /** Shown in the textarea while it is empty. Defaults to "Type a message…". */
@@ -24,28 +25,12 @@ export interface Prompt {
 }
 
 /**
- * A bordered prompt panel with a growing textarea and a hint footer. Bakes in
- * `flexShrink: 0` so a flex-grow sibling (e.g. a transcript scrollbox) can't
- * squeeze the footer out.
+ * A bordered prompt panel with a growing textarea and a hint footer, built on
+ * `makeAccentPanel`. Its outer box never shrinks so a flex-grow sibling (e.g.
+ * a transcript scrollbox) can't squeeze the footer out.
  */
 export function makePrompt(ctx: RenderContext, options: PromptOptions): Prompt {
-  const promptBox = new BoxRenderable(ctx, {
-    width: "100%",
-    flexShrink: 0,
-    border: ["left"],
-    borderColor: theme.accent,
-    marginTop: 1,
-  });
-
-  const panel = new BoxRenderable(ctx, {
-    width: "100%",
-    flexDirection: "column",
-    paddingLeft: 2,
-    paddingRight: 2,
-    paddingTop: 1,
-    paddingBottom: 1,
-    backgroundColor: theme.surfaceActive,
-  });
+  const { node: promptBox, panel } = makeAccentPanel(ctx);
 
   const input = new TextareaRenderable(ctx, {
     placeholder: options.placeholder ?? "Type a message…",
@@ -80,7 +65,6 @@ export function makePrompt(ctx: RenderContext, options: PromptOptions): Prompt {
     }),
   );
   panel.add(footer);
-  promptBox.add(panel);
 
   return { node: promptBox, input };
 }
