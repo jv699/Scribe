@@ -7,7 +7,7 @@
  * from any ChatProvider; a status line with a rolling-die spinner shows
  * "Scribe is thinking…", running-tool activity, and provider errors.
  * Supports three modes: plain streaming, plain streaming with a system prompt
- * (The Tome), and the agent loop with tools (planning/report).
+ * (Drafting Table), and the agent loop with tools (planning/report).
  */
 import {
   BoxRenderable,
@@ -36,12 +36,12 @@ export interface ChatScreenOptions {
   provider: ChatProvider;
   /** Shown on the right of the title bar. */
   model?: string;
-  /** Left of the title bar. Defaults to "The Tome". */
+  /** Left of the title bar. Defaults to "Drafting Table". */
   title?: string;
   /**
    * When set, sends go through the agent loop with these tools and this base
    * system prompt (planning/report mode). When omitted, plain text streaming
-   * only — if `systemPrompt` is still set (The Tome), it is prepended to the
+   * only — if `systemPrompt` is still set (Drafting Table), it is prepended to the
    * conversation as a system message.
    */
   systemPrompt?: string;
@@ -66,7 +66,7 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
     width: "100%",
     marginBottom: 1,
   });
-  titleRow.add(new TextRenderable(renderer, { content: options.title ?? "The Tome", fg: theme.accent }));
+  titleRow.add(new TextRenderable(renderer, { content: options.title ?? "Drafting Table", fg: theme.accent }));
   if (options.model) {
     titleRow.add(new TextRenderable(renderer, { content: options.model, fg: theme.textMuted }));
   }
@@ -248,7 +248,7 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
         // Keep the full conversation (minus the system message) for context.
         messages.splice(0, messages.length, ...result.messages.filter((m) => m.role !== "system"));
       } else {
-        // Scratch / The Tome: plain text streaming. Prepend the system prompt
+        // Scratch / Drafting Table: plain text streaming. Prepend the system prompt
         // (if any) to a local copy so it never pollutes the transcript/log.
         const context: ChatMessage[] =
           options.systemPrompt && options.systemPrompt.trim() !== ""

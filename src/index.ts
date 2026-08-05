@@ -98,7 +98,7 @@ async function showOneshotPlanner(): Promise<void> {
   showScreen(
     await makeChatScreen(renderer, {
       ...makeChatOptions(),
-      title: "The Tome",
+      title: "Drafting Table",
       systemPrompt: await buildOneshotSystemPrompt(),
       onBack: () => navigate(showMainMenu),
     }),

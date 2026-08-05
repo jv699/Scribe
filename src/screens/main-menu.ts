@@ -23,7 +23,7 @@ export interface MainMenuOptions {
   onCreateCampaign: () => void;
   onSelectCampaign: (campaign: Campaign) => void;
   onSettings: () => void;
-  /** Open the one-shot planner (The Tome) — free-form ideas chat. */
+  /** Open the one-shot planner (Drafting Table) — free-form ideas chat. */
   onOneshotPlanner: () => void;
   onQuit: () => void;
 }
@@ -33,7 +33,7 @@ export function makeMainMenuScreen(renderer: CliRenderer, options: MainMenuOptio
     { name: "Create New Campaign", description: "" },
     ...options.campaigns.map((c) => ({ name: c.name, description: c.system })),
     { name: "Settings", description: "" },
-    { name: "The Tome", description: "one-shot and ideas planner" },
+    { name: "Drafting Table", description: "one-shot and ideas planner" },
     { name: "Quit", description: "" },
   ];
 

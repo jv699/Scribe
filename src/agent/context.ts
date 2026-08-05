@@ -60,7 +60,7 @@ anything that will matter for future sessions.
 }
 
 /**
- * One-shot mode ("The Tome"): standalone planning with no campaign context or
+ * One-shot mode ("Drafting Table"): standalone planning with no campaign context or
  * tools — just the user's one-shot prompt file.
  */
 export async function buildOneshotSystemPrompt(): Promise<string> {
