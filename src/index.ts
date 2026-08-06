@@ -16,9 +16,11 @@ import { createCampaign, listCampaigns, loadCampaign, type Campaign } from "./st
 import { createProviderFromSettings, DEFAULT_MODEL } from "./provider/openai.ts";
 import type { ChatProvider } from "./provider/types.ts";
 import { toolsFor } from "./agent/agents.ts";
+import { makeAskChannel } from "./agent/ask.ts";
 import { buildOneshotSystemPrompt, buildPlanningSystemPrompt, buildReportSystemPrompt } from "./agent/context.ts";
-import type { Session } from "./store/sessions.ts";
+import { listSessions, type Session } from "./store/sessions.ts";
 import { loadChatLog, saveChatLog, type ChatLogMode } from "./store/chat-log.ts";
+import type { CompletionItem, CompletionSource } from "./components/autocomplete.ts";
 
 const renderer = await createCliRenderer({
   exitOnCtrlC: true,
@@ -95,13 +97,17 @@ function makeChatOptions(): { provider: ChatProvider; model: string } {
 }
 
 async function showOneshotPlanner(): Promise<void> {
+  // One channel per chat screen: the tools ask through it, the screen answers.
+  // It has to exist before either, since tools are resolved up front.
+  const ask = makeAskChannel();
   showScreen(
     await makeChatScreen(renderer, {
       ...makeChatOptions(),
       title: "Drafting Table",
       systemPrompt: await buildOneshotSystemPrompt(),
       // Granted save_session via the gateway; declined when no one-shots dir is configured.
-      tools: toolsFor("oneshot", { oneshotsDir: settings.oneshotsDir }),
+      tools: toolsFor("oneshot", { oneshotsDir: settings.oneshotsDir, ask }),
+      ask,
       onBack: () => navigate(showMainMenu),
     }),
   );
@@ -123,7 +129,8 @@ async function showCampaignHome(campaign: Campaign): Promise<void> {
 
 async function showPlanningChat(campaign: Campaign, session: Session): Promise<void> {
   const systemPrompt = await buildPlanningSystemPrompt(campaign, session);
-  const tools = toolsFor("planning", { campaign, session });
+  const ask = makeAskChannel();
+  const tools = toolsFor("planning", { campaign, session, ask });
   showScreen(
     await makeChatScreen(renderer, {
       ...makeChatOptions(),
@@ -131,6 +138,8 @@ async function showPlanningChat(campaign: Campaign, session: Session): Promise<v
       systemPrompt,
       tools,
       chatLog: makeChatLog(campaign, session, "plan"),
+      ask,
+      completions: campaignCompletions(campaign),
       onBack: () => navigate(() => showCampaignHome(campaign)),
     }),
   );
@@ -138,7 +147,8 @@ async function showPlanningChat(campaign: Campaign, session: Session): Promise<v
 
 async function showReportChat(campaign: Campaign, session: Session): Promise<void> {
   const systemPrompt = await buildReportSystemPrompt(campaign, session);
-  const tools = toolsFor("report", { campaign, session });
+  const ask = makeAskChannel();
+  const tools = toolsFor("report", { campaign, session, ask });
   showScreen(
     await makeChatScreen(renderer, {
       ...makeChatOptions(),
@@ -146,9 +156,58 @@ async function showReportChat(campaign: Campaign, session: Session): Promise<voi
       systemPrompt,
       tools,
       chatLog: makeChatLog(campaign, session, "report"),
+      ask,
+      completions: campaignCompletions(campaign),
       onBack: () => navigate(() => showCampaignHome(campaign)),
     }),
   );
+}
+
+/**
+ * `@` mentions for a campaign chat: the campaign's two summary documents and
+ * every session. Picking one inserts a plain-language reference rather than a
+ * markup token, because that is what the agent can act on — "session 3
+ * ("The Bell Tower")" points straight at `read_session_notes(3)`, whereas
+ * `@session-3` would be syntax the model has never been taught.
+ *
+ * Resolved on each keystroke rather than snapshotted, so sessions added while
+ * the chat is open (or edited on disk) show up.
+ */
+function campaignCompletions(campaign: Campaign): CompletionSource[] {
+  return [
+    {
+      trigger: "@",
+      items: async (query) => {
+        const fresh = (await loadCampaign(campaign.dir)) ?? campaign;
+        const sessions = await listSessions(fresh);
+        const items: CompletionItem[] = [
+          {
+            label: "@background",
+            description: "The campaign premise",
+            insert: "the campaign background",
+          },
+          {
+            label: "@story-so-far",
+            description: "The running campaign summary",
+            insert: "the campaign's story so far",
+          },
+          ...sessions.map((session) => ({
+            label: `@session-${session.number}`,
+            description: `${session.title} · ${session.status}`,
+            insert: `session ${session.number} ("${session.title}")`,
+          })),
+        ];
+
+        // Match titles too, so "@bell" finds the session called "The Bell
+        // Tower" and not just labels that happen to start that way.
+        const needle = query.toLowerCase();
+        if (needle === "") return items;
+        return items.filter((item) =>
+          `${item.label} ${item.description ?? ""}`.toLowerCase().includes(needle),
+        );
+      },
+    },
+  ];
 }
 
 function makeChatLog(campaign: Campaign, session: Session, mode: ChatLogMode): ChatLogStore {

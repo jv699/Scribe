@@ -20,7 +20,13 @@ export interface AgentDefinition {
 export const AGENTS = {
   /** Drafts and refines a single upcoming session's notes. */
   planning: {
-    tools: ["list_sessions", "read_campaign_summary", "read_session_notes", "update_session_notes"],
+    tools: [
+      "list_sessions",
+      "read_campaign_summary",
+      "read_session_notes",
+      "update_session_notes",
+      "ask_user",
+    ],
   },
   /** Records what actually happened after a session was played. */
   report: {
@@ -30,11 +36,12 @@ export const AGENTS = {
       "read_session_notes",
       "update_session_notes",
       "append_campaign_summary",
+      "ask_user",
     ],
   },
   /** Drafting Table: standalone one-shots and ideas, no campaign to touch. */
   oneshot: {
-    tools: ["save_session"],
+    tools: ["save_session", "ask_user"],
   },
 } as const satisfies Record<string, AgentDefinition>;
 

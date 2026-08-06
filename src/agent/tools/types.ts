@@ -15,6 +15,7 @@
 import type { ToolDefinition } from "../../provider/types.ts";
 import type { Campaign } from "../../store/campaigns.ts";
 import type { Session } from "../../store/sessions.ts";
+import type { AskChannel } from "../ask.ts";
 import type { AgentTool } from "../loop.ts";
 
 /** Re-exported so tool files import their whole contract from one module. */
@@ -34,6 +35,12 @@ export interface ToolContext {
   session?: Session;
   /** Directory where saved one-shot plans are written, when the app has one configured. */
   oneshotsDir?: string;
+  /**
+   * The seam back to the UI, for tools that need an answer from the person
+   * rather than the disk. Absent in headless contexts, which is what makes
+   * `ask_user` decline instead of blocking forever.
+   */
+  ask?: AskChannel;
 }
 
 export interface ToolSpec {

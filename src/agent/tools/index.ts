@@ -11,6 +11,7 @@
  * type error, not a silent no-op at runtime.
  */
 import { appendCampaignSummaryTool } from "./append-campaign-summary.ts";
+import { askUserTool } from "./ask-user.ts";
 import { listSessionsTool } from "./list-sessions.ts";
 import { readCampaignSummaryTool } from "./read-campaign-summary.ts";
 import { readSessionNotesTool } from "./read-session-notes.ts";
@@ -25,6 +26,7 @@ export const registry = {
   update_session_notes: updateSessionNotesTool,
   append_campaign_summary: appendCampaignSummaryTool,
   save_session: saveSessionTool,
+  ask_user: askUserTool,
 } as const satisfies Record<string, ToolSpec>;
 
 export type ToolName = keyof typeof registry;

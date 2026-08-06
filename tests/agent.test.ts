@@ -5,6 +5,14 @@ import { join } from "node:path";
 
 import { AGENTS, toolsFor, type AgentId } from "../src/agent/agents.ts";
 import { runAgent, type AgentTool } from "../src/agent/loop.ts";
+import {
+  ASK_DECLINED,
+  makeAskChannel,
+  parseAskResult,
+  type AskAnswer,
+  type AskChannel,
+  type AskQuestion,
+} from "../src/agent/ask.ts";
 import { registry, resolveTools, toolNames } from "../src/agent/tools/index.ts";
 import { buildPlanningSystemPrompt, buildReportSystemPrompt } from "../src/agent/context.ts";
 import type { ChatEvent, ChatMessage, ChatProvider } from "../src/provider/types.ts";
@@ -65,16 +73,36 @@ afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
+/**
+ * A channel whose UI always picks `answers`, so tool-level tests don't need a
+ * renderer. `asked` records what the widget would have been shown.
+ */
+function stubAskChannel(answers: string[] | null): AskChannel & { asked: AskQuestion[] } {
+  const channel = makeAskChannel();
+  const asked: AskQuestion[] = [];
+  channel.attach(async (question) => {
+    asked.push(question);
+    return answers === null ? null : { question: question.question, answers };
+  });
+  return Object.assign(channel, { asked });
+}
+
+/**
+ * A context with everything available, so `toolsFor` resolves a full grant.
+ * Individual tests narrow it to assert the decline paths.
+ */
+const fullContext = () => ({ campaign, ask: stubAskChannel(["ok"]) });
+
 /** Resolve an agent's tools against the fixture campaign and pick one by name. */
 function grantedTool(agent: AgentId, name: string): AgentTool {
-  const tool = toolsFor(agent, { campaign }).find((t) => t.definition.function.name === name);
+  const tool = toolsFor(agent, fullContext()).find((t) => t.definition.function.name === name);
   if (!tool) throw new Error(`"${name}" is not granted to the "${agent}" agent`);
   return tool;
 }
 
 /** Names an agent actually resolves to, for access-control assertions. */
 function grantedNames(agent: AgentId): string[] {
-  return toolsFor(agent, { campaign }).map((t) => t.definition.function.name);
+  return toolsFor(agent, fullContext()).map((t) => t.definition.function.name);
 }
 
 describe("agent loop", () => {
@@ -124,6 +152,58 @@ describe("agent loop", () => {
     const result = await runAgent({ provider, tools: [] }, [{ role: "user", content: "hi" }]);
     expect(result.answer).toBe("Just talking.");
     expect(result.messages).toHaveLength(2); // user + assistant
+  });
+
+  test("user-driven tool calls don't burn the runaway-loop budget", async () => {
+    // A long question-and-answer exchange is gated by the user's keystrokes, so
+    // it can't be a runaway loop — the budget must not cut the turn short.
+    let asks = 0;
+    const provider: ChatProvider = {
+      async *streamChat() {
+        if (asks < 5) {
+          asks++;
+          yield toolCallDelta(0, `c${asks}`, "ask", "{}");
+          return;
+        }
+        yield text("decided");
+      },
+    };
+    const askish: AgentTool = {
+      definition: {
+        type: "function",
+        function: { name: "ask", description: "asks", parameters: { type: "object", properties: {} } },
+      },
+      userDriven: true,
+      execute: () => "answered",
+    };
+
+    const result = await runAgent({ provider, tools: [askish], maxIterations: 2 }, [
+      { role: "user", content: "hi" },
+    ]);
+    expect(result.answer).toBe("decided");
+    expect(asks).toBe(5);
+  });
+
+  test("a mix of user-driven and model-driven calls still counts", async () => {
+    // Only turns made up *entirely* of user-driven calls are free; otherwise a
+    // model could hide real work behind one ask per turn and loop forever.
+    const provider: ChatProvider = {
+      async *streamChat() {
+        yield toolCallDelta(0, "c1", "ask", "{}");
+        yield toolCallDelta(1, "c2", "echo", '{"word":"x"}');
+      },
+    };
+    const askish: AgentTool = {
+      definition: {
+        type: "function",
+        function: { name: "ask", description: "asks", parameters: { type: "object", properties: {} } },
+      },
+      userDriven: true,
+      execute: () => "answered",
+    };
+    await expect(
+      runAgent({ provider, tools: [askish, echoTool], maxIterations: 2 }, [{ role: "user", content: "hi" }]),
+    ).rejects.toThrow(/exceeded/);
   });
 
   test("throws when the model loops too many times", async () => {
@@ -227,6 +307,129 @@ describe("save_session tool", () => {
     expect(await tool.execute({ title: "T", content: "" })).toBe("(title and content cannot be empty)");
     const entries = await readdir(oneshotsDir).catch(() => [] as string[]);
     expect(entries).toEqual([]);
+  });
+});
+
+describe("ask channel", () => {
+  test("declines when no UI is attached", async () => {
+    const channel = makeAskChannel();
+    expect(channel.available).toBe(false);
+    expect(await channel.ask({ question: "Which?", options: [{ label: "A" }] })).toBeNull();
+  });
+
+  test("detaching settles a question still on screen", async () => {
+    // The property that stops a turn hanging when the user leaves the chat
+    // mid-question: nothing ever resolves the widget, so detach must.
+    const channel = makeAskChannel();
+    const detach = channel.attach(() => new Promise<AskAnswer | null>(() => {}));
+    const pending = channel.ask({ question: "Which?", options: [{ label: "A" }] });
+    detach();
+    expect(await pending).toBeNull();
+    expect(channel.available).toBe(false);
+  });
+
+  test("a handler that throws reads as a decline, not an error", async () => {
+    const channel = makeAskChannel();
+    channel.attach(() => Promise.reject(new Error("widget exploded")));
+    expect(await channel.ask({ question: "Which?", options: [{ label: "A" }] })).toBeNull();
+  });
+
+  test("attaching replaces the previous handler", async () => {
+    const channel = makeAskChannel();
+    channel.attach(async () => ({ question: "q", answers: ["first"] }));
+    channel.attach(async () => ({ question: "q", answers: ["second"] }));
+    const answer = await channel.ask({ question: "q", options: [{ label: "x" }] });
+    expect(answer?.answers).toEqual(["second"]);
+  });
+});
+
+describe("ask_user tool", () => {
+  const askTool = (channel: AskChannel): AgentTool => {
+    const tool = toolsFor("planning", { campaign, ask: channel }).find(
+      (t) => t.definition.function.name === "ask_user",
+    );
+    if (!tool) throw new Error("ask_user was not granted");
+    return tool;
+  };
+
+  test("declines a context with no ask channel", () => {
+    // Same shape as the campaign tools' decline: headless runs get no tool
+    // rather than a call that blocks forever.
+    expect(grantedNames("planning")).toContain("ask_user");
+    expect(toolsFor("planning", { campaign }).map((t) => t.definition.function.name)).not.toContain(
+      "ask_user",
+    );
+  });
+
+  test("is marked user-driven so it can't be mistaken for a runaway loop", () => {
+    expect(askTool(stubAskChannel(["A"])).userDriven).toBe(true);
+  });
+
+  test("passes the question through and formats the answer as the result", async () => {
+    const channel = stubAskChannel(["The missing bell-ringer"]);
+    const result = await askTool(channel).execute({
+      question: "Which hook should drive session 2?",
+      header: "Session hook",
+      options: [{ label: "The missing bell-ringer", description: "A quiet disappearance" }],
+    });
+
+    expect(channel.asked[0]?.question).toBe("Which hook should drive session 2?");
+    expect(channel.asked[0]?.header).toBe("Session hook");
+    expect(channel.asked[0]?.options[0]?.description).toBe("A quiet disappearance");
+    expect(result).toBe("Asked: Which hook should drive session 2?\nAnswer: The missing bell-ringer");
+    // The result is also what the transcript renders, so it must parse back.
+    expect(parseAskResult(String(result))?.answer).toBe("The missing bell-ringer");
+  });
+
+  test("joins multiple answers", async () => {
+    const result = await askTool(stubAskChannel(["Rain", "Fog"])).execute({
+      question: "Which omens?",
+      options: [{ label: "Rain" }, { label: "Fog" }],
+      multiple: true,
+    });
+    expect(result).toBe("Asked: Which omens?\nAnswer: Rain, Fog");
+  });
+
+  test("a dismissed question is a normal result, not an error", async () => {
+    const result = await askTool(stubAskChannel(null)).execute({
+      question: "Which?",
+      options: [{ label: "A" }],
+    });
+    expect(result).toBe(ASK_DECLINED);
+  });
+
+  test("accepts plain-string options, dedupes, and caps at nine", async () => {
+    // Models ignore the object schema often enough that strings must work.
+    const channel = stubAskChannel(["A"]);
+    await askTool(channel).execute({
+      question: "Which?",
+      options: ["A", "A", "  ", "B", ...Array.from({ length: 12 }, (_, i) => `Opt ${i}`)],
+    });
+    const labels = channel.asked[0]!.options.map((o) => o.label);
+    expect(labels.slice(0, 3)).toEqual(["A", "B", "Opt 0"]);
+    expect(labels).toHaveLength(9);
+    expect(new Set(labels).size).toBe(9);
+  });
+
+  test("coerces string booleans, which models emit for flags", async () => {
+    const channel = stubAskChannel(["A"]);
+    await askTool(channel).execute({
+      question: "Which?",
+      options: ["A"],
+      multiple: "true",
+      custom: "false",
+    });
+    expect(channel.asked[0]?.multiple).toBe(true);
+    expect(channel.asked[0]?.custom).toBe(false);
+  });
+
+  test("rejects an empty question or missing options without asking", async () => {
+    const channel = stubAskChannel(["A"]);
+    const tool = askTool(channel);
+    expect(await tool.execute({ question: "  ", options: ["A"] })).toBe("(question cannot be empty)");
+    expect(await tool.execute({ question: "Which?", options: [] })).toBe("(provide at least one option)");
+    expect(await tool.execute({ question: "Which?" })).toBe("(provide at least one option)");
+    expect(channel.asked).toEqual([]);
   });
 });
 

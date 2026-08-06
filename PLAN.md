@@ -85,6 +85,11 @@ tools.**
   - `read_session_notes(n)` / `update_session_notes(n, content)`
   - `append_campaign_summary(entry)` — report phase only
   - `list_sessions()`
+- **Asking the user** — `ask_user(question, options)` blocks the turn on a
+  multiple-choice question shown where the prompt box was, so the agent
+  resolves a genuine fork by asking rather than guessing. Granted to every
+  agent; it declines when no UI is attached, and turns spent only on it don't
+  count against the runaway-iteration budget.
 - **Tool registry + agent gateway** — tools live one-per-file in
   `src/agent/tools/` and are granted to agents by name in `src/agent/agents.ts`.
   Access is a declaration, not a branch; names are compile-time checked.
@@ -110,7 +115,9 @@ the chat transcript renders streamed markdown directly.
 Main menu          → list campaigns, create, settings, quit        (exists)
 Campaign home      → system, story-so-far peek, session list w/ statuses,
                      actions: "Plan next session" / "Report outcome" / open folder
-Chat screen        → shared by planning & report modes (different prompt/tools)
+Chat screen        → shared by planning & report modes (different prompt/tools);
+                     agent questions replace the prompt box until answered;
+                     `/` commands and `@` mentions complete in a popup above it
 Settings           → provider, model, key env var, campaigns dir
 ```
 
@@ -125,8 +132,10 @@ Each phase leaves the app runnable.
 | **2. Planning mode** | Agent loop + campaign tools + system-prompt file → agent writes `sessions/00N.md` | ✅ done |
 | **3. Report mode** | Outcome chat → summary appended; session → `played` | ✅ done |
 | **4. Polish** | Resume conversations, status guards (trash confirm), error handling, tests | ✅ done |
+| **5. Interaction** | `ask_user` question widget (agent asks, turn blocks) + prompt completion popup (`/` commands, `@` campaign mentions) | ✅ done |
 
-Roadmap complete. Remaining ideas are in **Deferred / future ideas** below.
+Roadmap complete through phase 5. Remaining ideas are in **Deferred / future
+ideas** below.
 
 Phase 0 is a useful campaign organizer with zero AI risk and is fully testable
 headlessly (`createTestRenderer` + temp dirs). Phases 2–3 are thin once 0–1
@@ -141,7 +150,7 @@ exist.
   now have a defined landing spot — add a `ToolSpec` file under
   `src/agent/tools/`, register it, and grant it in `src/agent/agents.ts`. The
   context-free ones (dice, names) are candidates for the `oneshot` agent
-  (which has `save_session` today). Plan export shipped as `save_session`:
-  the Drafting Table saves a one-shot to the configured one-shots directory,
-  only on the user's explicit request.
+  (which has `save_session` and `ask_user` today). Plan export shipped as
+  `save_session`: the Drafting Table saves a one-shot to the configured
+  one-shots directory, only on the user's explicit request.
 - File-watching for external edits to campaign files while the app is open.
