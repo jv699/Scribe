@@ -32,6 +32,8 @@ export interface ToolContext {
   campaign?: Campaign;
   /** The session the agent is working on, when there is one. */
   session?: Session;
+  /** Directory where saved one-shot plans are written, when the app has one configured. */
+  oneshotsDir?: string;
 }
 
 export interface ToolSpec {

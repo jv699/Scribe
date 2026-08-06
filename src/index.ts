@@ -100,9 +100,8 @@ async function showOneshotPlanner(): Promise<void> {
       ...makeChatOptions(),
       title: "Drafting Table",
       systemPrompt: await buildOneshotSystemPrompt(),
-      // Empty today; goes through the gateway so granting it a tool (export,
-      // dice) is a one-line change in agent/agents.ts.
-      tools: toolsFor("oneshot", {}),
+      // Granted save_session via the gateway; declined when no one-shots dir is configured.
+      tools: toolsFor("oneshot", { oneshotsDir: settings.oneshotsDir }),
       onBack: () => navigate(showMainMenu),
     }),
   );

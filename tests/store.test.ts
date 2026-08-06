@@ -9,6 +9,7 @@ import { createCampaign, listCampaigns, loadCampaign, updateCampaignMeta, append
 import { createSession, listSessions, setSessionStatus, trashSession } from "../src/store/sessions.ts";
 import { loadChatLog, saveChatLog, clearChatLog, chatLogPath } from "../src/store/chat-log.ts";
 import { loadOneshotPrompt, loadSystemPrompt } from "../src/store/system-prompt.ts";
+import { saveOneshot } from "../src/store/oneshots.ts";
 
 let dir: string;
 
@@ -286,5 +287,50 @@ describe("chat log", () => {
     expect(await loadChatLog(campaign.dir, 1, "plan")).toHaveLength(1);
     expect(await loadChatLog(campaign.dir, 2, "plan")).toEqual([]);
     expect(await loadChatLog(campaign.dir, 2, "report")).toHaveLength(1);
+  });
+});
+
+describe("saveOneshot", () => {
+  test("writes a markdown file with frontmatter and body", async () => {
+    const path = await saveOneshot(dir, {
+      title: "Lighthouse Siege",
+      system: "D&D 5e",
+      content: "## Plan\n\nThe keep burns at dawn.",
+    });
+
+    expect(path).toBe(join(dir, "lighthouse-siege.md"));
+    const raw = await readFile(path, "utf8");
+    expect(raw).toContain("title: Lighthouse Siege");
+    expect(raw).toContain("system: D&D 5e");
+    expect(raw).toContain("created: ");
+    expect(raw).toContain("## Plan");
+    expect(raw).toContain("The keep burns at dawn.");
+  });
+
+  test("slugifies the filename", async () => {
+    const path = await saveOneshot(dir, { title: "Lighthouse Siege!", content: "boom" });
+    expect(path).toBe(join(dir, "lighthouse-siege.md"));
+  });
+
+  test("a second save with the same title writes to -2, leaving the original untouched", async () => {
+    const first = await saveOneshot(dir, { title: "Lighthouse Siege", content: "original plan" });
+    const second = await saveOneshot(dir, { title: "Lighthouse Siege", content: "second plan" });
+
+    expect(first).toBe(join(dir, "lighthouse-siege.md"));
+    expect(second).toBe(join(dir, "lighthouse-siege-2.md"));
+    expect(await readFile(first, "utf8")).toContain("original plan");
+    expect(await readFile(second, "utf8")).toContain("second plan");
+  });
+
+  test("creates a missing target directory", async () => {
+    const target = join(dir, "nested", "plans");
+    const path = await saveOneshot(target, { title: "Ritual", content: "x" });
+    expect(path).toBe(join(target, "ritual.md"));
+    expect(await readFile(path, "utf8")).toContain("title: Ritual");
+  });
+
+  test("punctuation-only title falls back to oneshot.md", async () => {
+    const path = await saveOneshot(dir, { title: "!!!", content: "x" });
+    expect(path).toBe(join(dir, "oneshot.md"));
   });
 });

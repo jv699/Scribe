@@ -137,9 +137,11 @@ exist.
 - Running-summary compression when it outgrows the context window.
 - Anthropic-native provider client.
 - Search/stats across campaigns (would be the trigger to reconsider SQLite).
-- Extra agent tools: dice roller, stat-block lookup, name generators, plan
-  export. These now have a defined landing spot — add a `ToolSpec` file under
+- Extra agent tools: dice roller, stat-block lookup, name generators. These
+  now have a defined landing spot — add a `ToolSpec` file under
   `src/agent/tools/`, register it, and grant it in `src/agent/agents.ts`. The
-  context-free ones (dice, names) are the first candidates for the currently
-  tool-less `oneshot` agent.
+  context-free ones (dice, names) are candidates for the `oneshot` agent
+  (which has `save_session` today). Plan export shipped as `save_session`:
+  the Drafting Table saves a one-shot to the configured one-shots directory,
+  only on the user's explicit request.
 - File-watching for external edits to campaign files while the app is open.

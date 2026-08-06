@@ -142,7 +142,7 @@ describe("provider client", () => {
   test("createProviderFromSettings resolves the key from its env var", async () => {
     const baseUrl = await startServer("stream");
     process.env["SCRIBE_TEST_KEY"] = "secret-value";
-    const settings: Settings = { campaignsDir: "/tmp/x", baseUrl, model: "env-model", apiKeyEnv: "SCRIBE_TEST_KEY" };
+    const settings: Settings = { campaignsDir: "/tmp/x", oneshotsDir: "/tmp/o", baseUrl, model: "env-model", apiKeyEnv: "SCRIBE_TEST_KEY" };
     const provider = createProviderFromSettings(settings);
     await collect(provider);
     expect(seenAuth).toBe("Bearer secret-value");

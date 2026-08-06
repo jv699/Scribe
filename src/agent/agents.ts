@@ -34,7 +34,7 @@ export const AGENTS = {
   },
   /** Drafting Table: standalone one-shots and ideas, no campaign to touch. */
   oneshot: {
-    tools: [],
+    tools: ["save_session"],
   },
 } as const satisfies Record<string, AgentDefinition>;
 

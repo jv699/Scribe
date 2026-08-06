@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -200,6 +200,36 @@ describe("campaign tools", () => {
   });
 });
 
+describe("save_session tool", () => {
+  test("writes the one-shot file with frontmatter and returns the abbreviated path", async () => {
+    const oneshotsDir = join(dir, "One-Shots");
+    const tool = toolsFor("oneshot", { oneshotsDir })[0]!;
+    const res = await tool.execute({
+      title: "Lighthouse Siege",
+      system: "5e",
+      content: "## Hook\n\nA ghost crew attacks the harbor at dusk.",
+    });
+
+    expect(res).toContain('Saved one-shot "Lighthouse Siege"');
+    expect(res).toContain("lighthouse-siege"); // the file name shows in the result
+
+    const raw = await readFile(join(oneshotsDir, "lighthouse-siege.md"), "utf8");
+    expect(raw).toContain("title: Lighthouse Siege");
+    expect(raw).toContain("system: 5e");
+    expect(raw).toContain("## Hook");
+    expect(raw).toContain("A ghost crew attacks the harbor at dusk.");
+  });
+
+  test("empty title or content is rejected without writing a file", async () => {
+    const oneshotsDir = join(dir, "One-Shots");
+    const tool = toolsFor("oneshot", { oneshotsDir })[0]!;
+    expect(await tool.execute({ title: "   ", content: "x" })).toBe("(title and content cannot be empty)");
+    expect(await tool.execute({ title: "T", content: "" })).toBe("(title and content cannot be empty)");
+    const entries = await readdir(oneshotsDir).catch(() => [] as string[]);
+    expect(entries).toEqual([]);
+  });
+});
+
 describe("tool registry", () => {
   test("every spec's name matches its registry key and definition", () => {
     for (const [key, spec] of Object.entries(registry)) {
@@ -232,8 +262,11 @@ describe("agent gateway", () => {
     expect(grantedNames("report")).toContain("append_campaign_summary");
   });
 
-  test("oneshot is granted nothing", () => {
-    expect(AGENTS.oneshot.tools).toEqual([]);
+  test("oneshot resolves save_session only when a one-shots dir is configured", () => {
+    const oneshotsDir = join(dir, "One-Shots");
+    expect(toolsFor("oneshot", { oneshotsDir }).map((t) => t.definition.function.name)).toEqual(["save_session"]);
+    // Declines without a dir — plain streaming remains the fallback.
+    expect(toolsFor("oneshot", {})).toEqual([]);
     expect(toolsFor("oneshot", { campaign })).toEqual([]);
   });
 

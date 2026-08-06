@@ -14,6 +14,8 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 export interface Settings {
   /** Directory containing one folder per campaign. Default: ~/Scribe */
   campaignsDir: string;
+  /** Directory where saved one-shot plans are written. Default: ~/Scribe/One-Shots */
+  oneshotsDir: string;
   /** OpenAI-compatible base URL (Phase 1). */
   baseUrl?: string;
   /** Model name (Phase 1). */
@@ -24,6 +26,7 @@ export interface Settings {
 
 const DEFAULT_SETTINGS: Settings = {
   campaignsDir: join(homedir(), "Scribe"),
+  oneshotsDir: join(homedir(), "Scribe", "One-Shots"),
 };
 
 /** Directory holding the app config files (config.json + prompts). */
@@ -71,12 +74,14 @@ export async function loadSettings(configPath: string = defaultConfigPath()): Pr
   }
 
   settings.campaignsDir = expandHome(settings.campaignsDir);
+  settings.oneshotsDir = expandHome(settings.oneshotsDir);
 
   if (raw === null) {
     await mkdir(join(configPath, ".."), { recursive: true });
     await writeFile(configPath, JSON.stringify(settings, null, 2) + "\n", "utf8");
   }
   await mkdir(settings.campaignsDir, { recursive: true });
+  await mkdir(settings.oneshotsDir, { recursive: true });
 
   return settings;
 }
