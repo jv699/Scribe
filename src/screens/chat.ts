@@ -39,10 +39,10 @@ export interface ChatScreenOptions {
   /** Left of the title bar. Defaults to "Drafting Table". */
   title?: string;
   /**
-   * When set, sends go through the agent loop with these tools and this base
-   * system prompt (planning/report mode). When omitted, plain text streaming
-   * only — if `systemPrompt` is still set (Drafting Table), it is prepended to the
-   * conversation as a system message.
+   * When non-empty, sends go through the agent loop with these tools and this
+   * base system prompt (planning/report mode). When omitted *or empty*, plain
+   * text streaming only — if `systemPrompt` is still set (Drafting Table), it
+   * is prepended to the conversation as a system message.
    */
   systemPrompt?: string;
   tools?: AgentTool[];
@@ -239,10 +239,14 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
     render();
 
     try {
-      if (options.tools) {
+      if (options.tools && options.tools.length > 0) {
         // Planning mode: run the agent loop (system prompt + tools). The
         // pending assistant message is for streaming display only —
         // runAgent manages its own conversation copy.
+        //
+        // Length-checked, not just truthy: an agent granted no tools (see
+        // AGENTS in agent/agents.ts) resolves to [], which must take the
+        // cheaper plain-streaming path rather than a tool-less agent loop.
         const result = await runAgent(
           {
             provider: options.provider,

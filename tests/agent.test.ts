@@ -3,11 +3,12 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { AGENTS, toolsFor, type AgentId } from "../src/agent/agents.ts";
 import { runAgent, type AgentTool } from "../src/agent/loop.ts";
-import { makeCampaignTools } from "../src/agent/tools.ts";
+import { registry, resolveTools, toolNames } from "../src/agent/tools/index.ts";
 import { buildPlanningSystemPrompt, buildReportSystemPrompt } from "../src/agent/context.ts";
 import type { ChatEvent, ChatMessage, ChatProvider } from "../src/provider/types.ts";
-import { createCampaign, loadCampaign } from "../src/store/campaigns.ts";
+import { createCampaign, loadCampaign, type Campaign } from "../src/store/campaigns.ts";
 import { createSession, listSessions } from "../src/store/sessions.ts";
 
 // --- fake provider helpers ---
@@ -51,10 +52,11 @@ const echoTool: AgentTool = {
 
 let dir: string;
 let campaignDir: string;
+let campaign: Campaign;
 
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), "scribe-agent-"));
-  const campaign = await createCampaign(dir, { name: "CoS", system: "5e", description: "Gothic horror." });
+  campaign = await createCampaign(dir, { name: "CoS", system: "5e", description: "Gothic horror." });
   campaignDir = campaign.dir;
   await createSession(campaign, "Death House");
 });
@@ -62,6 +64,18 @@ beforeEach(async () => {
 afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
 });
+
+/** Resolve an agent's tools against the fixture campaign and pick one by name. */
+function grantedTool(agent: AgentId, name: string): AgentTool {
+  const tool = toolsFor(agent, { campaign }).find((t) => t.definition.function.name === name);
+  if (!tool) throw new Error(`"${name}" is not granted to the "${agent}" agent`);
+  return tool;
+}
+
+/** Names an agent actually resolves to, for access-control assertions. */
+function grantedNames(agent: AgentId): string[] {
+  return toolsFor(agent, { campaign }).map((t) => t.definition.function.name);
+}
 
 describe("agent loop", () => {
   test("executes tool calls and feeds results back until a text answer", async () => {
@@ -126,55 +140,107 @@ describe("agent loop", () => {
 
 describe("campaign tools", () => {
   test("update_session_notes writes the session file body", async () => {
-    const tools = await makeCampaignTools(campaignDir);
-    const update = tools.find((t) => t.definition.function.name === "update_session_notes")!;
+    const update = grantedTool("planning", "update_session_notes");
     const res = await update.execute({ number: 1, content: "## Plan\n\nAmbush!" });
     expect(res).toContain("Updated notes");
 
-    const campaign = await loadCampaign(campaignDir)!;
-    const sessions = await listSessions(campaign!);
+    const fresh = (await loadCampaign(campaignDir))!;
+    const sessions = await listSessions(fresh);
     const raw = await readFile(sessions[0]!.path, "utf8");
     expect(raw).toContain("Ambush!");
     expect(raw).toContain("title: Death House"); // frontmatter preserved
   });
 
   test("rejects non-numeric session numbers", async () => {
-    const tools = await makeCampaignTools(campaignDir);
-    const update = tools.find((t) => t.definition.function.name === "update_session_notes")!;
-    const res = await update.execute({ number: 999, content: "x" });
-    expect(res).toBe("(session not found)");
+    const update = grantedTool("planning", "update_session_notes");
+    expect(await update.execute({ number: 999, content: "x" })).toBe("(session not found)");
+    expect(await update.execute({ number: 0, content: "x" })).toBe("(session not found)");
+    expect(await update.execute({ number: "1", content: "x" })).toBe("(session not found)");
   });
 
   test("read_session_notes returns the session body", async () => {
-    const tools = await makeCampaignTools(campaignDir);
-    const read = tools.find((t) => t.definition.function.name === "read_session_notes")!;
-    const res = await read.execute({ number: 1 });
-    expect(res).toContain("## Plan");
+    const read = grantedTool("planning", "read_session_notes");
+    expect(await read.execute({ number: 1 })).toContain("## Plan");
+  });
+
+  test("read_session_notes sees writes made earlier in the same run", async () => {
+    // The agent drafts, then re-reads to refine — the read must not be served
+    // from the campaign snapshot captured when tools were resolved.
+    const update = grantedTool("planning", "update_session_notes");
+    const read = grantedTool("planning", "read_session_notes");
+    await update.execute({ number: 1, content: "## Plan\n\nThe windmill." });
+    expect(await read.execute({ number: 1 })).toContain("The windmill.");
   });
 
   test("list_sessions returns formatted entries", async () => {
-    const tools = await makeCampaignTools(campaignDir);
-    const list = tools.find((t) => t.definition.function.name === "list_sessions")!;
-    const res = await list.execute({});
-    expect(res).toContain('1. "Death House" [planning]');
-  });
-
-  test("append_campaign_summary is only present in report mode", async () => {
-    const planning = await makeCampaignTools(campaignDir);
-    expect(planning.find((t) => t.definition.function.name === "append_campaign_summary")).toBeUndefined();
-
-    const report = await makeCampaignTools(campaignDir, { report: true });
-    expect(report.find((t) => t.definition.function.name === "append_campaign_summary")).toBeDefined();
+    const list = grantedTool("planning", "list_sessions");
+    expect(await list.execute({})).toContain('1. "Death House" [planning]');
   });
 
   test("append_campaign_summary writes to the story so far", async () => {
-    const tools = await makeCampaignTools(campaignDir, { report: true });
-    const append = tools.find((t) => t.definition.function.name === "append_campaign_summary")!;
-    const res = await append.execute({ entry: "They defeated the vampire spawn." });
-    expect(res).toContain("Appended");
+    const append = grantedTool("report", "append_campaign_summary");
+    expect(await append.execute({ entry: "They defeated the vampire spawn." })).toContain("Appended");
 
-    const campaign = (await loadCampaign(campaignDir))!;
-    expect(campaign.storySoFar).toContain("They defeated the vampire spawn.");
+    const fresh = (await loadCampaign(campaignDir))!;
+    expect(fresh.storySoFar).toContain("They defeated the vampire spawn.");
+  });
+
+  test("append_campaign_summary rejects an empty entry", async () => {
+    const append = grantedTool("report", "append_campaign_summary");
+    expect(await append.execute({ entry: "   " })).toBe("(entry cannot be empty)");
+    expect(await append.execute({})).toBe("(entry cannot be empty)");
+  });
+
+  test("read_campaign_summary reflects an append from the same run", async () => {
+    const append = grantedTool("report", "append_campaign_summary");
+    const read = grantedTool("report", "read_campaign_summary");
+    expect(await read.execute({})).toBe("(no story yet)");
+    await append.execute({ entry: "Strahd showed himself." });
+    expect(await read.execute({})).toContain("Strahd showed himself.");
+  });
+});
+
+describe("tool registry", () => {
+  test("every spec's name matches its registry key and definition", () => {
+    for (const [key, spec] of Object.entries(registry)) {
+      expect(spec.name).toBe(key);
+      expect(spec.definition.function.name).toBe(key);
+    }
+  });
+
+  test("toolNames covers the whole registry", () => {
+    expect(toolNames.map(String).sort()).toEqual(Object.keys(registry).sort());
+  });
+
+  test("resolveTools preserves the requested order", () => {
+    const tools = resolveTools(["update_session_notes", "list_sessions"], { campaign });
+    expect(tools.map((t) => t.definition.function.name)).toEqual(["update_session_notes", "list_sessions"]);
+  });
+
+  test("campaign tools decline a context with no campaign", () => {
+    // The property the Drafting Table depends on: resolving is safe, not fatal.
+    expect(resolveTools(toolNames, {})).toEqual([]);
+  });
+});
+
+describe("agent gateway", () => {
+  test("planning cannot append to the campaign summary", () => {
+    expect(grantedNames("planning")).not.toContain("append_campaign_summary");
+  });
+
+  test("report can append to the campaign summary", () => {
+    expect(grantedNames("report")).toContain("append_campaign_summary");
+  });
+
+  test("oneshot is granted nothing", () => {
+    expect(AGENTS.oneshot.tools).toEqual([]);
+    expect(toolsFor("oneshot", { campaign })).toEqual([]);
+  });
+
+  test("every granted name resolves to a real tool for a campaign agent", () => {
+    for (const agent of ["planning", "report"] as const) {
+      expect(grantedNames(agent)).toEqual(AGENTS[agent].tools.map(String));
+    }
   });
 });
 

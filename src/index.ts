@@ -15,7 +15,7 @@ import { loadSettings, saveSettings } from "./store/settings.ts";
 import { createCampaign, listCampaigns, loadCampaign, type Campaign } from "./store/campaigns.ts";
 import { createProviderFromSettings, DEFAULT_MODEL } from "./provider/openai.ts";
 import type { ChatProvider } from "./provider/types.ts";
-import { makeCampaignTools } from "./agent/tools.ts";
+import { toolsFor } from "./agent/agents.ts";
 import { buildOneshotSystemPrompt, buildPlanningSystemPrompt, buildReportSystemPrompt } from "./agent/context.ts";
 import type { Session } from "./store/sessions.ts";
 import { loadChatLog, saveChatLog, type ChatLogMode } from "./store/chat-log.ts";
@@ -100,6 +100,9 @@ async function showOneshotPlanner(): Promise<void> {
       ...makeChatOptions(),
       title: "Drafting Table",
       systemPrompt: await buildOneshotSystemPrompt(),
+      // Empty today; goes through the gateway so granting it a tool (export,
+      // dice) is a one-line change in agent/agents.ts.
+      tools: toolsFor("oneshot", {}),
       onBack: () => navigate(showMainMenu),
     }),
   );
@@ -120,10 +123,8 @@ async function showCampaignHome(campaign: Campaign): Promise<void> {
 }
 
 async function showPlanningChat(campaign: Campaign, session: Session): Promise<void> {
-  const [systemPrompt, tools] = await Promise.all([
-    buildPlanningSystemPrompt(campaign, session),
-    makeCampaignTools(campaign.dir),
-  ]);
+  const systemPrompt = await buildPlanningSystemPrompt(campaign, session);
+  const tools = toolsFor("planning", { campaign, session });
   showScreen(
     await makeChatScreen(renderer, {
       ...makeChatOptions(),
@@ -137,10 +138,8 @@ async function showPlanningChat(campaign: Campaign, session: Session): Promise<v
 }
 
 async function showReportChat(campaign: Campaign, session: Session): Promise<void> {
-  const [systemPrompt, tools] = await Promise.all([
-    buildReportSystemPrompt(campaign, session),
-    makeCampaignTools(campaign.dir, { report: true }),
-  ]);
+  const systemPrompt = await buildReportSystemPrompt(campaign, session);
+  const tools = toolsFor("report", { campaign, session });
   showScreen(
     await makeChatScreen(renderer, {
       ...makeChatOptions(),
