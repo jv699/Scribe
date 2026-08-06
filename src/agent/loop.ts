@@ -65,7 +65,10 @@ export async function runAgent(
   for (let turns = 0; spent < maxIterations && turns < HARD_MAX_ITERATIONS; turns++) {
     const { content, toolCalls } = await streamTurn(options, messages, toolDefs);
 
-    const assistant: ChatMessage = { role: "assistant", content, tool_calls: toolCalls };
+    const assistant: ChatMessage =
+      toolCalls.length > 0
+        ? { role: "assistant", content, tool_calls: toolCalls }
+        : { role: "assistant", content };
     messages.push(assistant);
 
     if (toolCalls.length === 0) {
