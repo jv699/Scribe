@@ -11,6 +11,13 @@ export interface AgentTool {
   definition: ToolDefinition;
   /** Executes the tool with parsed JSON args; result string is fed back. */
   execute: (args: Record<string, unknown>) => string | Promise<string>;
+  /**
+   * This tool blocks on the user (e.g. `ask_user`). Iterations spent only on
+   * user-driven tools don't count against `maxIterations`: that budget exists
+   * to stop a model spinning on its own, and a turn the person has to answer
+   * with a keystroke can't spin. `HARD_MAX_ITERATIONS` still bounds the loop.
+   */
+  userDriven?: boolean;
 }
 
 export interface AgentOptions {
@@ -34,6 +41,13 @@ export interface AgentResult {
 
 const DEFAULT_MAX_ITERATIONS = 10;
 
+/**
+ * Absolute ceiling on turns, including user-driven ones. High enough that a
+ * long question-and-answer exchange never hits it, low enough that nothing can
+ * loop indefinitely.
+ */
+const HARD_MAX_ITERATIONS = 100;
+
 export async function runAgent(
   options: AgentOptions,
   initialMessages: ChatMessage[],
@@ -45,7 +59,10 @@ export async function runAgent(
       ? [{ role: "system", content: options.systemPrompt }, ...initialMessages]
       : [...initialMessages];
 
-  for (let iteration = 0; iteration < maxIterations; iteration++) {
+  // Two budgets: `spent` tracks model-driven iterations (the runaway guard),
+  // `turns` bounds the loop overall. See AgentTool.userDriven.
+  let spent = 0;
+  for (let turns = 0; spent < maxIterations && turns < HARD_MAX_ITERATIONS; turns++) {
     const { content, toolCalls } = await streamTurn(options, messages, toolDefs);
 
     const assistant: ChatMessage = { role: "assistant", content, tool_calls: toolCalls };
@@ -55,14 +72,18 @@ export async function runAgent(
       return { messages, answer: content };
     }
 
+    let userDrivenOnly = true;
     for (const call of toolCalls) {
       const tool = options.tools.find((t) => t.definition.function.name === call.function.name);
+      // An unknown tool is a model mistake, so it counts against the budget.
+      if (!tool?.userDriven) userDrivenOnly = false;
       options.onTool?.(call.function.name);
       const result = tool
         ? await runTool(tool, call)
         : `Unknown tool: ${call.function.name}`;
       messages.push({ role: "tool", tool_call_id: call.id, content: result });
     }
+    if (!userDrivenOnly) spent++;
   }
 
   throw new Error(`Agent exceeded ${maxIterations} tool iterations`);
