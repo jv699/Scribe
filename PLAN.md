@@ -78,12 +78,16 @@ tools.**
   `chat(messages, tools) → async stream of chunks`.
 - **Agent loop** — standard tool-call loop: model streams text/tool calls →
   app executes tools → results fed back → repeat until done.
-- **Tools, scoped strictly to the active campaign folder** (path-traversal
-  guard):
+- **Tools, scoped strictly to the active campaign folder** — confined by
+  addressing resources by identity (session number) and resolving them through
+  the store, never by accepting model-supplied paths:
   - `read_campaign_summary()`
   - `read_session_notes(n)` / `update_session_notes(n, content)`
   - `append_campaign_summary(entry)` — report phase only
   - `list_sessions()`
+- **Tool registry + agent gateway** — tools live one-per-file in
+  `src/agent/tools/` and are granted to agents by name in `src/agent/agents.ts`.
+  Access is a declaration, not a branch; names are compile-time checked.
 - **Two modes, two prompts:**
   - *Planning*: "You are a TTRPG co-designer. System: X. Background + story so
     far: … Help plan session N; keep `sessions/00N.md` updated via tools."
@@ -133,5 +137,9 @@ exist.
 - Running-summary compression when it outgrows the context window.
 - Anthropic-native provider client.
 - Search/stats across campaigns (would be the trigger to reconsider SQLite).
-- Extra agent tools: dice roller, stat-block lookup, name generators.
+- Extra agent tools: dice roller, stat-block lookup, name generators, plan
+  export. These now have a defined landing spot — add a `ToolSpec` file under
+  `src/agent/tools/`, register it, and grant it in `src/agent/agents.ts`. The
+  context-free ones (dice, names) are the first candidates for the currently
+  tool-less `oneshot` agent.
 - File-watching for external edits to campaign files while the app is open.

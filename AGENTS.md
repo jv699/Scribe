@@ -63,7 +63,7 @@ bun test
 - `src/screens/main-menu.ts`: main menu — create / campaign list (loaded from disk) / quit, plus the intro animation on first show.
 - `src/screens/campaign-home.ts`: campaign view — background & story-so-far peeks, session list with statuses, new-session dialog, session detail dialog ("Plan with Agent" for planning sessions, "Report outcome" for ready sessions, mark ready/played, trash), Escape goes back.
 - `src/screens/settings.ts`: settings screen — edit base URL, model, API key env var, campaigns dir; persists to config.json via `saveSettings`.
-- `src/screens/chat.ts`: chat screen (harness) — markdown transcript + prompt (via `makePrompt` from `components/prompt.ts`). Streams assistant replies from any `ChatProvider`; surfaces provider errors. In **planning mode** (`tools` + `systemPrompt` options) sends run through `runAgent`. With a `chatLog` store it **resumes** the conversation.
+- `src/screens/chat.ts`: chat screen (harness) — markdown transcript + prompt (via `makePrompt` from `components/prompt.ts`). Streams assistant replies from any `ChatProvider`; surfaces provider errors. When `tools` is **non-empty** (planning/report) sends run through `runAgent`; when omitted or empty, plain streaming with `systemPrompt` prepended to a local copy. With a `chatLog` store it **resumes** the conversation.
 - `src/components/`: reusable UI widgets (opencode-style).
   - `ui.ts`: shared primitives — focusable/mouse-aware buttons (`makeButton`, click + Enter) and Tab/Shift+Tab focus traversal (`tabWalk`).
   - `dialog.ts`: generic centered modal primitive (`makeDialog`) — absolute full-screen layer + `zIndex`, toggled via `visible`. Callers handle focus.
@@ -74,8 +74,17 @@ bun test
   - `dice-spinner.ts`: `DiceSpinnerRenderable` — rolling-die "thinking" indicator built on `opentui-spinner` (tumbling die faces in a pulsing fire gradient).
 - `src/agent/`: the harness core (Phase 2).
   - `loop.ts`: `runAgent` — tool-call loop (stream → execute tools → feed back → repeat until a text answer), `AgentTool`.
-  - `tools.ts`: campaign-scoped tools (`list_sessions`, `read_campaign_summary`, `read_session_notes`, `update_session_notes`; report mode adds `append_campaign_summary`) with a path-traversal guard.
-  - `context.ts`: `buildPlanningSystemPrompt` / `buildReportSystemPrompt` — base system prompt file + campaign background/story + session draft (or report framing).
+  - `agents.ts`: **the gateway** — `AGENTS` maps each agent (`planning` / `report` / `oneshot`) to the tool names it may call, and `toolsFor(agent, ctx)` resolves them. This is the one place to read when auditing what an agent can do. Tool names are checked against the registry at compile time, so a typo is a `tsc` error.
+  - `tools/`: one file per tool, each exporting a `ToolSpec` (`name` + `definition` + `create(ctx)`).
+    - `types.ts`: `ToolContext` (optional `campaign` / `session`) and `ToolSpec`. `create` returns `null` when a tool can't run in the given context — that's how campaign tools drop out of a campaign-less agent.
+    - `index.ts`: the `registry` object literal, `ToolName` (derived from its keys), and `resolveTools(names, ctx)`. Explicit literal, **not** filesystem discovery — that's what makes `ToolName` a compile-time union.
+    - `shared.ts`: arg coercion (`stringArg` / `numberArg`) and `findSession` / `freshCampaign`, which re-read from disk so the agent observes its own writes mid-run.
+    - Tools: `list-sessions.ts`, `read-campaign-summary.ts`, `read-session-notes.ts`, `update-session-notes.ts`, `append-campaign-summary.ts`.
+  - `context.ts`: `buildPlanningSystemPrompt` / `buildReportSystemPrompt` / `buildOneshotSystemPrompt` — base system prompt file + campaign background/story + session draft (or report framing). Prompts are deliberately **not** owned by the gateway.
+
+  Adding a tool: new file in `tools/` + one line in `tools/index.ts`. Granting it: one string in `agents.ts`. Adding an agent: one entry in `AGENTS` + a prompt builder in `context.ts`.
+
+  **Tool security invariant**: tools never accept filesystem paths from the model. Resources are addressed by identity (session *number*, the active campaign) and resolved through `src/store/`, which is what confines reads and writes to the campaign folder. A future tool needing a path must resolve it internally, not take it as an argument.
 - `src/provider/`: model provider abstraction (Phase 1).
   - `types.ts`: `ChatMessage`, `ToolCall`/`ToolDefinition`, `ChatEvent` (`text` | `tool_call`), `ChatProvider.streamChat(messages, options?)`.
   - `openai.ts`: OpenAI-compatible client (SSE streaming + JSON fallback) and `createProviderFromSettings`. `DEFAULT_BASE_URL`/`DEFAULT_MODEL`.
