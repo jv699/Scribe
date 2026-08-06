@@ -6,8 +6,9 @@
  * assistant replies flow as markdown beneath them. Streams assistant replies
  * from any ChatProvider; a status line with a rolling-die spinner shows
  * "Scribe is thinking…", running-tool activity, and provider errors.
- * Supports three modes: plain streaming, plain streaming with a system prompt
- * (Drafting Table), and the agent loop with tools (planning/report).
+ * Supports two modes: the agent loop with tools (planning/report, and
+ * Drafting Table when it has tools), and plain streaming as the fallback
+ * when an agent has no tools (the system prompt, if set, is prepended).
  */
 import {
   BoxRenderable,
@@ -40,9 +41,9 @@ export interface ChatScreenOptions {
   title?: string;
   /**
    * When non-empty, sends go through the agent loop with these tools and this
-   * base system prompt (planning/report mode). When omitted *or empty*, plain
-   * text streaming only — if `systemPrompt` is still set (Drafting Table), it
-   * is prepended to the conversation as a system message.
+   * base system prompt (planning/report, and Drafting Table when it has tools).
+   * When omitted *or empty*, plain text streaming only — if `systemPrompt` is
+   * still set, it is prepended to the conversation as a system message.
    */
   systemPrompt?: string;
   tools?: AgentTool[];
@@ -262,8 +263,8 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
         // Keep the full conversation (minus the system message) for context.
         messages.splice(0, messages.length, ...result.messages.filter((m) => m.role !== "system"));
       } else {
-        // Scratch / Drafting Table: plain text streaming. Prepend the system prompt
-        // (if any) to a local copy so it never pollutes the transcript/log.
+        // No tools (agent declined or has none): plain text streaming. Prepend the
+        // system prompt (if any) to a local copy so it never pollutes the transcript/log.
         const context: ChatMessage[] =
           options.systemPrompt && options.systemPrompt.trim() !== ""
             ? [{ role: "system", content: options.systemPrompt }, ...messages]

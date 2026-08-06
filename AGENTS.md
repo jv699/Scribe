@@ -62,8 +62,8 @@ bun test
 - `src/screens/screen.ts`: `Screen` interface (`node` + optional `focus()`/`dispose()`).
 - `src/screens/main-menu.ts`: main menu — create / campaign list (loaded from disk) / quit, plus the intro animation on first show.
 - `src/screens/campaign-home.ts`: campaign view — background & story-so-far peeks, session list with statuses, new-session dialog, session detail dialog ("Plan with Agent" for planning sessions, "Report outcome" for ready sessions, mark ready/played, trash), Escape goes back.
-- `src/screens/settings.ts`: settings screen — edit base URL, model, API key env var, campaigns dir; persists to config.json via `saveSettings`.
-- `src/screens/chat.ts`: chat screen (harness) — markdown transcript + prompt (via `makePrompt` from `components/prompt.ts`). Streams assistant replies from any `ChatProvider`; surfaces provider errors. When `tools` is **non-empty** (planning/report) sends run through `runAgent`; when omitted or empty, plain streaming with `systemPrompt` prepended to a local copy. With a `chatLog` store it **resumes** the conversation.
+- `src/screens/settings.ts`: settings screen — edit base URL, model, API key env var, campaigns dir, one-shots dir; persists to config.json via `saveSettings`.
+- `src/screens/chat.ts`: chat screen (harness) — markdown transcript + prompt (via `makePrompt` from `components/prompt.ts`). Streams assistant replies from any `ChatProvider`; surfaces provider errors. When `tools` is **non-empty** (planning/report/oneshot) sends run through `runAgent`; when omitted or empty, plain streaming with `systemPrompt` prepended to a local copy. With a `chatLog` store it **resumes** the conversation.
 - `src/components/`: reusable UI widgets (opencode-style).
   - `ui.ts`: shared primitives — focusable/mouse-aware buttons (`makeButton`, click + Enter) and Tab/Shift+Tab focus traversal (`tabWalk`).
   - `dialog.ts`: generic centered modal primitive (`makeDialog`) — absolute full-screen layer + `zIndex`, toggled via `visible`. Callers handle focus.
@@ -76,10 +76,10 @@ bun test
   - `loop.ts`: `runAgent` — tool-call loop (stream → execute tools → feed back → repeat until a text answer), `AgentTool`.
   - `agents.ts`: **the gateway** — `AGENTS` maps each agent (`planning` / `report` / `oneshot`) to the tool names it may call, and `toolsFor(agent, ctx)` resolves them. This is the one place to read when auditing what an agent can do. Tool names are checked against the registry at compile time, so a typo is a `tsc` error.
   - `tools/`: one file per tool, each exporting a `ToolSpec` (`name` + `definition` + `create(ctx)`).
-    - `types.ts`: `ToolContext` (optional `campaign` / `session`) and `ToolSpec`. `create` returns `null` when a tool can't run in the given context — that's how campaign tools drop out of a campaign-less agent.
+    - `types.ts`: `ToolContext` (optional `campaign` / `session` / `oneshotsDir`) and `ToolSpec`. `create` returns `null` when a tool can't run in the given context — that's how campaign tools drop out of a campaign-less agent.
     - `index.ts`: the `registry` object literal, `ToolName` (derived from its keys), and `resolveTools(names, ctx)`. Explicit literal, **not** filesystem discovery — that's what makes `ToolName` a compile-time union.
     - `shared.ts`: arg coercion (`stringArg` / `numberArg`) and `findSession` / `freshCampaign`, which re-read from disk so the agent observes its own writes mid-run.
-    - Tools: `list-sessions.ts`, `read-campaign-summary.ts`, `read-session-notes.ts`, `update-session-notes.ts`, `append-campaign-summary.ts`.
+    - Tools: `list-sessions.ts`, `read-campaign-summary.ts`, `read-session-notes.ts`, `update-session-notes.ts`, `append-campaign-summary.ts`, `save-session.ts` (oneshot only — saves a one-shot plan to the one-shots dir; the agent may call it **only on explicit user request**, enforced by the tool description + one-shot prompt wording, not the UI).
   - `context.ts`: `buildPlanningSystemPrompt` / `buildReportSystemPrompt` / `buildOneshotSystemPrompt` — base system prompt file + campaign background/story + session draft (or report framing). Prompts are deliberately **not** owned by the gateway.
 
   Adding a tool: new file in `tools/` + one line in `tools/index.ts`. Granting it: one string in `agents.ts`. Adding an agent: one entry in `AGENTS` + a prompt builder in `context.ts`.
@@ -91,14 +91,15 @@ bun test
 - `src/theme.ts`: unified palette (`theme`) — burnt-orange accent over flat dark surfaces. ALL UI colors come from here; never hardcode hex literals.
 - `src/consts.ts`: ASCII art logos.
 - `src/intro.ts`: startup animation helpers — `dissolveIn` (per-character shade-ramp dissolve for text) and `chunkyFadeIn` (stepped opacity fade). Driven by `setInterval`, need real renderable instances (not the `Box()`/`Text()` VNode factory proxies).
-- `src/store/`: markdown-first persistence (Phase 0). Campaign data lives in `<campaignsDir>/<Campaign Name>/campaign.md` + `sessions/00N-slug.md`; settings in `~/.config/scribe/config.json` (`campaignsDir`, default `~/Scribe`).
+- `src/store/`: markdown-first persistence (Phase 0). Campaign data lives in `<campaignsDir>/<Campaign Name>/campaign.md` + `sessions/00N-slug.md`; saved one-shots in `<oneshotsDir>/<slug>.md`; settings in `~/.config/scribe/config.json` (`campaignsDir` default `~/Scribe`, `oneshotsDir` default `~/Scribe/One-Shots`).
   - `frontmatter.ts`: flat `key: value` frontmatter parse/serialize (no YAML).
   - `naming.ts`: folder-name sanitize, session-file slugify, collision-proof `uniqueName`. Regex classes use `\xNN` escapes — do not paste raw control chars into source.
-  - `settings.ts`: `loadSettings()`/`saveSettings()` — creates config + campaigns dir on first run, expands `~`.
-  - `system-prompt.ts`: user-owned base system prompt file (`~/.config/scribe/system-prompt.md`), created with a default if missing.
+  - `settings.ts`: `loadSettings()`/`saveSettings()` — creates config + campaigns/one-shots dirs on first run, expands `~`.
+  - `system-prompt.ts`: user-owned base system prompt files (`~/.config/scribe/system-prompt.md` + `oneshot-prompt.md`), created with a default if missing. The oneshot default carries the save_session "only on explicit user request" rule — existing installs keep their old file, so prompt changes don't auto-apply.
   - `campaigns.ts`: `Campaign` type, `createCampaign`/`listCampaigns`/`loadCampaign`/`updateCampaignMeta`/`appendStorySoFar`. `campaign.md` body holds Background + The Story So Far sections.
   - `sessions.ts`: `Session` type, `createSession` (bumps campaign `nextSession`), `listSessions`, `setSessionStatus` (stamps dates), `trashSession` (soft-delete to `.scribe/trash/`).
   - `chat-log.ts`: conversation persistence per session+mode as JSONL in `.scribe/` (`loadChatLog`/`saveChatLog`/`clearChatLog`) — resumes planning/report chats across app sessions.
+  - `oneshots.ts`: `saveOneshot(dir, { title, system?, content })` — writes one-shot plans as `<slug>.md` (frontmatter: title/system/created) with numeric collision suffixes; used by the `save_session` tool.
 
 ## Gotchas
 

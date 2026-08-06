@@ -1,7 +1,7 @@
 /**
  * Settings screen: edit model provider config (base URL, model, API key env
- * var name) and the campaigns directory. Values persist to config.json on
- * save. Escape or Back returns without saving.
+ * var name) and the campaigns / one-shots directories. Values persist to
+ * config.json on save. Escape or Back returns without saving.
  */
 import {
   BoxRenderable,
@@ -71,6 +71,10 @@ export async function makeSettingsScreen(
   const dirInput = field(options.settings.campaignsDir, "~/Scribe");
   container.add(dirInput);
 
+  container.add(fieldLabel("One-shots directory"));
+  const oneshotsInput = field(options.settings.oneshotsDir, "~/Scribe/One-Shots");
+  container.add(oneshotsInput);
+
   const status = new TextRenderable(renderer, { content: "", fg: theme.danger, height: 1 });
   container.add(status);
 
@@ -82,7 +86,7 @@ export async function makeSettingsScreen(
   buttonRow.add(backButton);
   container.add(buttonRow);
 
-  const focusChain: Renderable[] = [baseUrlInput, modelInput, keyInput, dirInput, saveButton, backButton];
+  const focusChain: Renderable[] = [baseUrlInput, modelInput, keyInput, dirInput, oneshotsInput, saveButton, backButton];
 
   function save(): void {
     const campaignsDir = dirInput.value.trim();
@@ -91,7 +95,16 @@ export async function makeSettingsScreen(
       dirInput.focus();
       return;
     }
-    const next: Settings = { campaignsDir: expandHome(campaignsDir) };
+    const oneshotsDir = oneshotsInput.value.trim();
+    if (oneshotsDir === "") {
+      status.content = "One-shots directory is required";
+      oneshotsInput.focus();
+      return;
+    }
+    const next: Settings = {
+      campaignsDir: expandHome(campaignsDir),
+      oneshotsDir: expandHome(oneshotsDir),
+    };
     const baseUrl = baseUrlInput.value.trim();
     if (baseUrl !== "") next.baseUrl = baseUrl;
     const model = modelInput.value.trim();
@@ -125,7 +138,7 @@ export async function makeSettingsScreen(
     const index = focusChain.indexOf(from);
     focusChain[index + 1]?.focus();
   };
-  for (const input of [baseUrlInput, modelInput, keyInput, dirInput]) {
+  for (const input of [baseUrlInput, modelInput, keyInput, dirInput, oneshotsInput]) {
     input.on(InputRenderableEvents.ENTER, () => advance(input));
   }
 

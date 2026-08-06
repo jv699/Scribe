@@ -60,8 +60,8 @@ anything that will matter for future sessions.
 }
 
 /**
- * One-shot mode ("Drafting Table"): standalone planning with no campaign context or
- * tools — just the user's one-shot prompt file.
+ * One-shot mode ("Drafting Table"): standalone planning with no campaign context —
+ * just the user's one-shot prompt file.
  */
 export async function buildOneshotSystemPrompt(): Promise<string> {
   return loadOneshotPrompt();
