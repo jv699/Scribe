@@ -53,6 +53,7 @@ describe("settings screen", () => {
     await open({
       campaignsDir: "/tmp/x",
       oneshotsDir: "/tmp/o",
+      sourcesDir: "/tmp/s",
       baseUrl: "https://localhost:11434/v1",
       model: "llama3.1",
     });
@@ -62,6 +63,7 @@ describe("settings screen", () => {
     expect(frame.includes("https://localhost:11434/v1")).toBe(true);
     expect(frame.includes("llama3.1")).toBe(true);
     expect(frame.includes("/tmp/x")).toBe(true);
+    expect(frame.includes("/tmp/s")).toBe(true);
     expect(frame.includes(".config/scribe")).toBe(true);
 
     await keys.typeText("http://other/v1", 5);
@@ -72,12 +74,12 @@ describe("settings screen", () => {
   });
 
   test("saves edited values", async () => {
-    await open({ campaignsDir: "/tmp/x", oneshotsDir: "/tmp/o" });
+    await open({ campaignsDir: "/tmp/x", oneshotsDir: "/tmp/o", sourcesDir: "/tmp/s" });
 
     await keys.typeText("https://ollama.local/v1", 5); // base URL
     await keys.pressKeys(["TAB"], 20); // -> model
     await keys.typeText("llama3.1", 5);
-    await keys.pressKeys(["TAB", "TAB", "TAB", "TAB"], 20); // -> key, dir, one-shots, Save
+    await keys.pressKeys(["TAB", "TAB", "TAB", "TAB", "TAB"], 20); // -> key, dir, one-shots, sources, Save
     keys.pressEnter();
     await wait();
 
@@ -85,10 +87,11 @@ describe("settings screen", () => {
     expect(saved?.model).toBe("llama3.1");
     expect(saved?.campaignsDir).toBe("/tmp/x"); // untouched field preserved
     expect(saved?.oneshotsDir).toBe("/tmp/o"); // untouched field preserved
+    expect(saved?.sourcesDir).toBe("/tmp/s"); // untouched field preserved
   });
 
   test("escape goes back without saving", async () => {
-    await open({ campaignsDir: "/tmp/x", oneshotsDir: "/tmp/o" });
+    await open({ campaignsDir: "/tmp/x", oneshotsDir: "/tmp/o", sourcesDir: "/tmp/s" });
     await keys.typeText("zzz", 5);
     keys.pressKey("ESCAPE");
     await wait(500);
@@ -124,5 +127,23 @@ describe("settings loadSettings", () => {
     expect(settings.oneshotsDir.startsWith("~")).toBe(false);
     // loadSettings mkdirs the expanded dir; remove the stray one we created
     await rm(settings.oneshotsDir, { recursive: true, force: true });
+  });
+
+  test("defaults sourcesDir to <home>/Scribe/Sources", async () => {
+    const settings = await loadSettings(join(tmp, "config.json"));
+    expect(settings.sourcesDir).toBe(join(homedir(), "Scribe", "Sources"));
+  });
+
+  test("expands a ~/... custom sourcesDir value", async () => {
+    const configPath = join(tmp, "config.json");
+    await Bun.write(
+      configPath,
+      JSON.stringify({ campaignsDir: "~/Scribe", oneshotsDir: "~/Scribe/One-Shots", sourcesDir: "~/My Sources" }),
+    );
+    const settings = await loadSettings(configPath);
+    expect(settings.sourcesDir).toBe(join(homedir(), "My Sources"));
+    expect(settings.sourcesDir.startsWith("~")).toBe(false);
+    // loadSettings mkdirs the expanded dir; remove the stray one we created
+    await rm(settings.sourcesDir, { recursive: true, force: true });
   });
 });

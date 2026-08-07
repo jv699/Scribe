@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@opentui/core": "^0.5.1",
-    "opentui-spinner": "^0.0.7"
+    "opentui-spinner": "^0.0.7",
+    "unpdf": "^1.8.0"
   }
 }

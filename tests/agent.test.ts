@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -61,12 +61,15 @@ const echoTool: AgentTool = {
 let dir: string;
 let campaignDir: string;
 let campaign: Campaign;
+/** No PDFs by default — enough for the decline/grant assertions; sources tests populate it themselves. */
+let sourcesDir: string;
 
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), "scribe-agent-"));
   campaign = await createCampaign(dir, { name: "CoS", system: "5e", description: "Gothic horror." });
   campaignDir = campaign.dir;
   await createSession(campaign, "Death House");
+  sourcesDir = join(dir, "Sources");
 });
 
 afterEach(async () => {
@@ -91,7 +94,7 @@ function stubAskChannel(answers: string[] | null): AskChannel & { asked: AskQues
  * A context with everything available, so `toolsFor` resolves a full grant.
  * Individual tests narrow it to assert the decline paths.
  */
-const fullContext = () => ({ campaign, ask: stubAskChannel(["ok"]) });
+const fullContext = () => ({ campaign, ask: stubAskChannel(["ok"]), sourcesDir, defaultSystem: campaign.system });
 
 /** Resolve an agent's tools against the fixture campaign and pick one by name. */
 function grantedTool(agent: AgentId, name: string): AgentTool {
@@ -307,6 +310,98 @@ describe("save_session tool", () => {
     expect(await tool.execute({ title: "T", content: "" })).toBe("(title and content cannot be empty)");
     const entries = await readdir(oneshotsDir).catch(() => [] as string[]);
     expect(entries).toEqual([]);
+  });
+});
+
+describe("source-document tools", () => {
+  const FIXTURES = join(import.meta.dir, "fixtures");
+  const RULES_PDF = join(FIXTURES, "rules.pdf");
+  const BESTIARY_PDF = join(FIXTURES, "bestiary.pdf");
+
+  test("granted to planning and oneshot but not report", () => {
+    expect(grantedNames("planning")).toEqual(
+      expect.arrayContaining(["list_sources", "search_sources", "read_source_pages"]),
+    );
+    const oneshotNames = toolsFor("oneshot", { oneshotsDir: join(dir, "One-Shots"), sourcesDir }).map(
+      (t) => t.definition.function.name,
+    );
+    expect(oneshotNames).toEqual(
+      expect.arrayContaining(["list_sources", "search_sources", "read_source_pages"]),
+    );
+    expect(grantedNames("report")).not.toEqual(
+      expect.arrayContaining(["list_sources", "search_sources", "read_source_pages"]),
+    );
+  });
+
+  test("all three tools decline a context with no sourcesDir", () => {
+    const names = toolsFor("planning", { campaign, ask: stubAskChannel(["ok"]) }).map(
+      (t) => t.definition.function.name,
+    );
+    expect(names).not.toContain("list_sources");
+    expect(names).not.toContain("search_sources");
+    expect(names).not.toContain("read_source_pages");
+  });
+
+  test("end-to-end over the wave-1 fixtures: list, search, and read a page", async () => {
+    await mkdir(join(sourcesDir, "Shadowdark"), { recursive: true });
+    await copyFile(RULES_PDF, join(sourcesDir, "Shadowdark", "rules.pdf"));
+    await copyFile(BESTIARY_PDF, join(sourcesDir, "Shadowdark", "bestiary.pdf"));
+
+    const list = grantedTool("planning", "list_sources");
+    const listing = String(await list.execute({}));
+    expect(listing).toContain("Shadowdark:");
+    expect(listing).toContain("rules");
+    expect(listing).toContain("bestiary");
+
+    // The fixture campaign's system is "5e", but the fixtures live under
+    // "Shadowdark" — search across everything rather than the (mismatched)
+    // default scope; that scoping is exercised separately below.
+    const search = grantedTool("planning", "search_sources");
+    const hits = String(await search.execute({ query: "grapple", all_systems: true }));
+    expect(hits).toContain("p.2");
+    expect(hits.toLowerCase()).toContain("grapple");
+    expect(hits).toContain("read_source_pages");
+
+    const slugMatch = hits.match(/^\[([^\]]+)\]/);
+    expect(slugMatch).not.toBeNull();
+    const slug = slugMatch![1]!;
+
+    const read = grantedTool("planning", "read_source_pages");
+    const page = String(await read.execute({ document: slug, from: 2 }));
+    expect(page.toLowerCase()).toContain("grapple");
+  });
+
+  test("an explicit system scopes search and does not widen", async () => {
+    await mkdir(join(sourcesDir, "Shadowdark"), { recursive: true });
+    await mkdir(join(sourcesDir, "Knave"), { recursive: true });
+    await copyFile(RULES_PDF, join(sourcesDir, "Shadowdark", "rules.pdf"));
+    await copyFile(BESTIARY_PDF, join(sourcesDir, "Knave", "bestiary.pdf"));
+
+    const search = grantedTool("planning", "search_sources");
+    // "grapple" lives only in the Shadowdark rulebook.
+    expect(await search.execute({ query: "grapple", system: "Knave" })).toBe('(no matches for "grapple")');
+  });
+
+  test("a defaultSystem that matches no folder widens the search and says so", async () => {
+    await mkdir(join(sourcesDir, "Shadowdark"), { recursive: true });
+    await copyFile(RULES_PDF, join(sourcesDir, "Shadowdark", "rules.pdf"));
+
+    // Campaigns store the system as free text ("D&D 5e"), which need not match
+    // a folder name — the tool falls back to the whole library rather than
+    // reporting a miss the user can't diagnose.
+    const context = { campaign, ask: stubAskChannel(["ok"]), sourcesDir, defaultSystem: "D&D 5e" };
+    const search = toolsFor("planning", context).find((t) => t.definition.function.name === "search_sources")!;
+
+    const hits = String(await search.execute({ query: "grapple" }));
+    expect(hits).toContain("searched every system instead");
+    expect(hits).toContain("p.2");
+  });
+
+  test("read_source_pages reports an unknown document without throwing", async () => {
+    const read = grantedTool("planning", "read_source_pages");
+    expect(await read.execute({ document: "nope", from: 1 })).toBe(
+      "(no such source document — call list_sources to see what is available)",
+    );
   });
 });
 

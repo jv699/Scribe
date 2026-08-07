@@ -13,9 +13,12 @@
 import { appendCampaignSummaryTool } from "./append-campaign-summary.ts";
 import { askUserTool } from "./ask-user.ts";
 import { listSessionsTool } from "./list-sessions.ts";
+import { listSourcesTool } from "./list-sources.ts";
 import { readCampaignSummaryTool } from "./read-campaign-summary.ts";
 import { readSessionNotesTool } from "./read-session-notes.ts";
+import { readSourcePagesTool } from "./read-source-pages.ts";
 import { saveSessionTool } from "./save-session.ts";
+import { searchSourcesTool } from "./search-sources.ts";
 import { updateSessionNotesTool } from "./update-session-notes.ts";
 import type { AgentTool, ToolContext, ToolSpec } from "./types.ts";
 
@@ -27,6 +30,9 @@ export const registry = {
   append_campaign_summary: appendCampaignSummaryTool,
   save_session: saveSessionTool,
   ask_user: askUserTool,
+  list_sources: listSourcesTool,
+  search_sources: searchSourcesTool,
+  read_source_pages: readSourcePagesTool,
 } as const satisfies Record<string, ToolSpec>;
 
 export type ToolName = keyof typeof registry;

@@ -16,6 +16,8 @@ export interface Settings {
   campaignsDir: string;
   /** Directory where saved one-shot plans are written. Default: ~/Scribe/One-Shots */
   oneshotsDir: string;
+  /** Directory containing source PDFs (rulebooks, bestiaries, etc.), organized by system folder. Default: ~/Scribe/Sources */
+  sourcesDir: string;
   /** OpenAI-compatible base URL (Phase 1). */
   baseUrl?: string;
   /** Model name (Phase 1). */
@@ -27,6 +29,7 @@ export interface Settings {
 const DEFAULT_SETTINGS: Settings = {
   campaignsDir: join(homedir(), "Scribe"),
   oneshotsDir: join(homedir(), "Scribe", "One-Shots"),
+  sourcesDir: join(homedir(), "Scribe", "Sources"),
 };
 
 /** Directory holding the app config files (config.json + prompts). */
@@ -75,6 +78,7 @@ export async function loadSettings(configPath: string = defaultConfigPath()): Pr
 
   settings.campaignsDir = expandHome(settings.campaignsDir);
   settings.oneshotsDir = expandHome(settings.oneshotsDir);
+  settings.sourcesDir = expandHome(settings.sourcesDir);
 
   if (raw === null) {
     await mkdir(join(configPath, ".."), { recursive: true });
@@ -82,6 +86,7 @@ export async function loadSettings(configPath: string = defaultConfigPath()): Pr
   }
   await mkdir(settings.campaignsDir, { recursive: true });
   await mkdir(settings.oneshotsDir, { recursive: true });
+  await mkdir(settings.sourcesDir, { recursive: true });
 
   return settings;
 }

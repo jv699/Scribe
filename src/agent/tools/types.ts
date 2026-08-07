@@ -35,6 +35,10 @@ export interface ToolContext {
   session?: Session;
   /** Directory where saved one-shot plans are written, when the app has one configured. */
   oneshotsDir?: string;
+  /** The source-document library (PDFs of rulebooks, bestiaries, etc.), when the app has one configured. */
+  sourcesDir?: string;
+  /** The campaign's game system, used to scope source-document searches by default. */
+  defaultSystem?: string;
   /**
    * The seam back to the UI, for tools that need an answer from the person
    * rather than the disk. Absent in headless contexts, which is what makes

@@ -62,6 +62,11 @@ A **Session** has three statuses:
       002-village-of-barovia.md
     .scribe/
       chat-001.jsonl         # conversation logs (resumable), hidden
+  Sources/
+    Shadowdark/
+      Shadowdark Core Rules.pdf
+      extracted/             # text cache, visible: nothing hidden from the user
+        shadowdark-core-rules.md
 ```
 
 Frontmatter is kept to flat `key: value` lines so a tiny hand-rolled parser
@@ -133,8 +138,9 @@ Each phase leaves the app runnable.
 | **3. Report mode** | Outcome chat → summary appended; session → `played` | ✅ done |
 | **4. Polish** | Resume conversations, status guards (trash confirm), error handling, tests | ✅ done |
 | **5. Interaction** | `ask_user` question widget (agent asks, turn blocks) + prompt completion popup (`/` commands, `@` campaign mentions) | ✅ done |
+| **6. Source documents** | `~/Scribe/Sources` PDF library, cached as page-marked markdown; `list_sources` / `search_sources` / `read_source_pages` for the planning and one-shot agents | ✅ done |
 
-Roadmap complete through phase 5. Remaining ideas are in **Deferred / future
+Roadmap complete through phase 6. Remaining ideas are in **Deferred / future
 ideas** below.
 
 Phase 0 is a useful campaign organizer with zero AI risk and is fully testable
@@ -146,6 +152,13 @@ exist.
 - Running-summary compression when it outgrows the context window.
 - Anthropic-native provider client.
 - Search/stats across campaigns (would be the trigger to reconsider SQLite).
+  Note the source library already does keyword search over cached page text
+  without a database (`src/store/sources.ts`) — the same BM25-lite approach
+  would likely serve campaigns too.
+- OCR for scanned PDFs. Extraction is text-layer only today, so an image-only
+  scan indexes as an empty document.
+- A sources browser screen (list indexed documents, force a re-index). The
+  library is agent-and-Finder-managed for now.
 - Extra agent tools: dice roller, stat-block lookup, name generators. These
   now have a defined landing spot — add a `ToolSpec` file under
   `src/agent/tools/`, register it, and grant it in `src/agent/agents.ts`. The
