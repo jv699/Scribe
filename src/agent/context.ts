@@ -9,7 +9,40 @@
 import { basename } from "node:path";
 import type { Campaign } from "../store/campaigns.ts";
 import { readSessionNotes, type Session } from "../store/sessions.ts";
+import { listSources } from "../store/sources.ts";
 import { loadOneshotPrompt, loadSystemPrompt } from "../store/system-prompt.ts";
+
+/**
+ * Summarize the source-document library for the system prompt, or `""` when
+ * there is no library configured or it is empty — so users without a Sources
+ * folder see no change to their prompt.
+ */
+async function sourcesSection(sourcesDir: string | undefined): Promise<string> {
+  if (!sourcesDir) return "";
+  const docs = await listSources(sourcesDir);
+  if (docs.length === 0) return "";
+
+  const bySystem = new Map<string, string[]>();
+  for (const doc of docs) {
+    const titles = bySystem.get(doc.system);
+    if (titles) titles.push(doc.title);
+    else bySystem.set(doc.system, [doc.title]);
+  }
+
+  const lines: string[] = [];
+  for (const [system, titles] of bySystem) {
+    lines.push(`- ${system}: ${titles.join(", ")}`);
+  }
+
+  return `
+# Source Documents
+
+The user has these reference PDFs available. Consult them via search_sources
+for system-specific rules rather than inventing them.
+
+${lines.join("\n")}
+`;
+}
 
 function campaignSection(campaign: Campaign): string {
   return `
@@ -28,11 +61,16 @@ ${campaign.storySoFar.trim() || "(nothing yet)"}
 `;
 }
 
-export async function buildPlanningSystemPrompt(campaign: Campaign, session: Session): Promise<string> {
+export async function buildPlanningSystemPrompt(
+  campaign: Campaign,
+  session: Session,
+  sourcesDir?: string,
+): Promise<string> {
   const base = await loadSystemPrompt();
   const notes = await readSessionNotes(session);
+  const sources = await sourcesSection(sourcesDir);
 
-  return `${base}${campaignSection(campaign)}
+  return `${base}${campaignSection(campaign)}${sources}
 
 # Current Session
 
@@ -63,6 +101,8 @@ anything that will matter for future sessions.
  * One-shot mode ("Drafting Table"): standalone planning with no campaign context —
  * just the user's one-shot prompt file.
  */
-export async function buildOneshotSystemPrompt(): Promise<string> {
-  return loadOneshotPrompt();
+export async function buildOneshotSystemPrompt(sourcesDir?: string): Promise<string> {
+  const base = await loadOneshotPrompt();
+  const sources = await sourcesSection(sourcesDir);
+  return `${base}${sources}`;
 }

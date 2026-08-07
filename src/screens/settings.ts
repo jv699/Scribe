@@ -75,6 +75,10 @@ export async function makeSettingsScreen(
   const oneshotsInput = field(options.settings.oneshotsDir, "~/Scribe/One-Shots");
   container.add(oneshotsInput);
 
+  container.add(fieldLabel("Sources directory"));
+  const sourcesInput = field(options.settings.sourcesDir, "~/Scribe/Sources");
+  container.add(sourcesInput);
+
   const status = new TextRenderable(renderer, { content: "", fg: theme.danger, height: 1 });
   container.add(status);
 
@@ -86,7 +90,16 @@ export async function makeSettingsScreen(
   buttonRow.add(backButton);
   container.add(buttonRow);
 
-  const focusChain: Renderable[] = [baseUrlInput, modelInput, keyInput, dirInput, oneshotsInput, saveButton, backButton];
+  const focusChain: Renderable[] = [
+    baseUrlInput,
+    modelInput,
+    keyInput,
+    dirInput,
+    oneshotsInput,
+    sourcesInput,
+    saveButton,
+    backButton,
+  ];
 
   function save(): void {
     const campaignsDir = dirInput.value.trim();
@@ -101,9 +114,16 @@ export async function makeSettingsScreen(
       oneshotsInput.focus();
       return;
     }
+    const sourcesDir = sourcesInput.value.trim();
+    if (sourcesDir === "") {
+      status.content = "Sources directory is required";
+      sourcesInput.focus();
+      return;
+    }
     const next: Settings = {
       campaignsDir: expandHome(campaignsDir),
       oneshotsDir: expandHome(oneshotsDir),
+      sourcesDir: expandHome(sourcesDir),
     };
     const baseUrl = baseUrlInput.value.trim();
     if (baseUrl !== "") next.baseUrl = baseUrl;
@@ -138,7 +158,7 @@ export async function makeSettingsScreen(
     const index = focusChain.indexOf(from);
     focusChain[index + 1]?.focus();
   };
-  for (const input of [baseUrlInput, modelInput, keyInput, dirInput, oneshotsInput]) {
+  for (const input of [baseUrlInput, modelInput, keyInput, dirInput, oneshotsInput, sourcesInput]) {
     input.on(InputRenderableEvents.ENTER, () => advance(input));
   }
 

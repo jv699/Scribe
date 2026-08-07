@@ -26,6 +26,9 @@ export const AGENTS = {
       "read_session_notes",
       "update_session_notes",
       "ask_user",
+      "list_sources",
+      "search_sources",
+      "read_source_pages",
     ],
   },
   /** Records what actually happened after a session was played. */
@@ -41,7 +44,7 @@ export const AGENTS = {
   },
   /** Drafting Table: standalone one-shots and ideas, no campaign to touch. */
   oneshot: {
-    tools: ["save_session", "ask_user"],
+    tools: ["save_session", "ask_user", "list_sources", "search_sources", "read_source_pages"],
   },
 } as const satisfies Record<string, AgentDefinition>;
 
