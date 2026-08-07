@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { createOpenAIProvider, createProviderFromSettings } from "../src/provider/openai.ts";
+import { createOpenAIProvider, createProviderFromSettings, listModels } from "../src/provider/openai.ts";
 import type { ChatEvent, ChatMessage } from "../src/provider/types.ts";
 import type { Settings } from "../src/store/settings.ts";
 
@@ -25,7 +25,7 @@ function sseResponse(chunks: string[]): Response {
   return new Response(body, { headers: { "content-type": "text/event-stream" } });
 }
 
-type MockBehavior = "stream" | "json" | "error" | "tools";
+type MockBehavior = "stream" | "json" | "error" | "tools" | "models" | "models-error";
 
 let server: ReturnType<typeof Bun.serve> | null = null;
 let lastRequest: { model?: string; messages?: ChatMessage[]; tools?: unknown } | null = null;
@@ -77,6 +77,16 @@ async function startServer(behavior: MockBehavior): Promise<string> {
     port: 0,
     async fetch(req) {
       const url = new URL(req.url);
+      if (url.pathname === "/v1/models") {
+        seenAuth = req.headers.get("authorization");
+        if (behavior === "models-error") {
+          return new Response(JSON.stringify({ error: { message: "nope" } }), { status: 401 });
+        }
+        return new Response(
+          JSON.stringify({ data: [{ id: "gpt-4o-mini" }, { id: "gpt-4o" }, { id: "" }, {}] }),
+          { headers: { "content-type": "application/json" } },
+        );
+      }
       if (url.pathname !== "/v1/chat/completions") {
         return new Response("not found", { status: 404 });
       }
@@ -193,5 +203,17 @@ describe("provider client", () => {
     }
     expect(lastRequest?.tools).toEqual([toolDef]);
     expect(withTools.length).toBeGreaterThan(0);
+  });
+
+  test("listModels fetches and sorts ids, dropping entries without one", async () => {
+    const baseUrl = await startServer("models");
+    const models = await listModels({ baseUrl, apiKey: "test-key" });
+    expect(models).toEqual(["gpt-4o", "gpt-4o-mini"]);
+    expect(seenAuth).toBe("Bearer test-key");
+  });
+
+  test("listModels throws a readable error on non-2xx", async () => {
+    const baseUrl = await startServer("models-error");
+    await expect(listModels({ baseUrl, apiKey: "k" })).rejects.toThrow(/401/);
   });
 });

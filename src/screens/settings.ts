@@ -13,8 +13,10 @@ import {
   type Renderable,
 } from "@opentui/core";
 import { makeButton, tabWalk } from "../components/ui.ts";
+import { showModelPickerDialog } from "../components/model-picker-dialog.ts";
 import { theme } from "../theme.ts";
 import { abbreviateHome, defaultConfigDir, expandHome, type Settings } from "../store/settings.ts";
+import { DEFAULT_BASE_URL, listModels } from "../provider/openai.ts";
 import type { Screen } from "./screen.ts";
 
 export interface SettingsScreenOptions {
@@ -60,8 +62,19 @@ export async function makeSettingsScreen(
   container.add(baseUrlInput);
 
   container.add(fieldLabel("Model"));
-  const modelInput = field(options.settings.model ?? "", "gpt-4o-mini");
-  container.add(modelInput);
+  const modelRow = new BoxRenderable(renderer, { flexDirection: "row", width: "100%", marginBottom: 1 });
+  const modelInput = new InputRenderable(renderer, {
+    value: options.settings.model ?? "",
+    placeholder: "gpt-4o-mini",
+    flexGrow: 1,
+    backgroundColor: theme.surfaceRaised,
+    focusedBackgroundColor: theme.surfaceActive,
+  });
+  modelRow.add(modelInput);
+  modelRow.add(new BoxRenderable(renderer, { width: 2 }));
+  const browseButton = makeButton(renderer, { label: "Browse...", onClick: browseModels });
+  modelRow.add(browseButton);
+  container.add(modelRow);
 
   container.add(fieldLabel("API key env var (never the key itself)"));
   const keyInput = field(options.settings.apiKeyEnv ?? "", "OPENAI_API_KEY");
@@ -82,6 +95,37 @@ export async function makeSettingsScreen(
   const status = new TextRenderable(renderer, { content: "", fg: theme.danger, height: 1 });
   container.add(status);
 
+  function setStatus(message: string, tone: "error" | "info" = "error"): void {
+    status.content = message;
+    status.fg = tone === "error" ? theme.danger : theme.textMuted;
+  }
+
+  async function browseModels(): Promise<void> {
+    setStatus("Loading models...", "info");
+    try {
+      const apiKeyEnv = keyInput.value.trim();
+      const models = await listModels({
+        baseUrl: baseUrlInput.value.trim() || DEFAULT_BASE_URL,
+        apiKey: apiKeyEnv ? (process.env[apiKeyEnv] ?? "") : "",
+      });
+      if (models.length === 0) {
+        setStatus("No models returned by the provider");
+        return;
+      }
+      setStatus("", "info");
+      showModelPickerDialog(renderer, {
+        models,
+        onPick: (model) => {
+          modelInput.value = model;
+          modelInput.focus();
+        },
+        onClose: () => modelInput.focus(),
+      });
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Failed to load models");
+    }
+  }
+
   const saveButton = makeButton(renderer, { label: "Save", variant: "primary", onClick: save });
   const backButton = makeButton(renderer, { label: "Back", onClick: leave });
   const buttonRow = new BoxRenderable(renderer, { flexDirection: "row" });
@@ -93,6 +137,7 @@ export async function makeSettingsScreen(
   const focusChain: Renderable[] = [
     baseUrlInput,
     modelInput,
+    browseButton,
     keyInput,
     dirInput,
     oneshotsInput,

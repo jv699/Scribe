@@ -79,7 +79,7 @@ describe("settings screen", () => {
     await keys.typeText("https://ollama.local/v1", 5); // base URL
     await keys.pressKeys(["TAB"], 20); // -> model
     await keys.typeText("llama3.1", 5);
-    await keys.pressKeys(["TAB", "TAB", "TAB", "TAB", "TAB"], 20); // -> key, dir, one-shots, sources, Save
+    await keys.pressKeys(["TAB", "TAB", "TAB", "TAB", "TAB", "TAB"], 20); // -> browse, key, dir, one-shots, sources, Save
     keys.pressEnter();
     await wait();
 
@@ -88,6 +88,49 @@ describe("settings screen", () => {
     expect(saved?.campaignsDir).toBe("/tmp/x"); // untouched field preserved
     expect(saved?.oneshotsDir).toBe("/tmp/o"); // untouched field preserved
     expect(saved?.sourcesDir).toBe("/tmp/s"); // untouched field preserved
+  });
+
+  test("browse fetches models and picking one fills the model field", async () => {
+    const server = Bun.serve({
+      port: 0,
+      fetch(req) {
+        const url = new URL(req.url);
+        if (url.pathname === "/v1/models") {
+          return new Response(JSON.stringify({ data: [{ id: "gpt-4o" }, { id: "gpt-4o-mini" }] }), {
+            headers: { "content-type": "application/json" },
+          });
+        }
+        return new Response("not found", { status: 404 });
+      },
+    });
+    try {
+      await open({
+        campaignsDir: "/tmp/x",
+        oneshotsDir: "/tmp/o",
+        sourcesDir: "/tmp/s",
+        baseUrl: `http://localhost:${server.port}/v1`,
+      });
+
+      await keys.pressKeys(["TAB"], 20); // -> model
+      await keys.pressKeys(["TAB"], 20); // -> Browse...
+      keys.pressEnter();
+      await wait();
+      await renderOnce();
+
+      let frame = captureCharFrame();
+      expect(frame.includes("Select a model")).toBe(true);
+      expect(frame.includes("gpt-4o-mini")).toBe(true);
+
+      keys.pressEnter(); // pick the first (alphabetically: gpt-4o)
+      await wait();
+      await renderOnce();
+
+      frame = captureCharFrame();
+      expect(frame.includes("Select a model")).toBe(false);
+      expect(frame.includes("gpt-4o")).toBe(true);
+    } finally {
+      server.stop();
+    }
   });
 
   test("escape goes back without saving", async () => {

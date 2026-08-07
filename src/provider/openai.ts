@@ -110,6 +110,25 @@ export function createOpenAIProvider(options: OpenAIProviderOptions): ChatProvid
   };
 }
 
+/** Fetch available model ids from an OpenAI-compatible `GET /models` endpoint. */
+export async function listModels(options: { baseUrl: string; apiKey: string }): Promise<string[]> {
+  const baseUrl = options.baseUrl.replace(/\/+$/, "");
+  const response = await fetch(`${baseUrl}/models`, {
+    headers: options.apiKey ? { Authorization: `Bearer ${options.apiKey}` } : {},
+  });
+
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    throw new Error(`Failed to list models (${response.status}): ${detail.slice(0, 200)}`);
+  }
+
+  const json = (await response.json()) as { data?: { id?: string }[] };
+  const ids = (json.data ?? [])
+    .map((entry) => entry.id)
+    .filter((id): id is string => typeof id === "string" && id !== "");
+  return ids.sort((a, b) => a.localeCompare(b));
+}
+
 /** Build a provider from app settings, resolving the API key from its env var. */
 export function createProviderFromSettings(settings: Settings): ChatProvider {
   const apiKey = settings.apiKeyEnv ? (process.env[settings.apiKeyEnv] ?? "") : "";
