@@ -114,6 +114,7 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
   const transcriptBox = new BoxRenderable(renderer, {
     width: "100%",
     flexDirection: "column",
+    paddingRight: "1%"
   });
   scrollBox.content.add(transcriptBox);
   container.add(scrollBox);
