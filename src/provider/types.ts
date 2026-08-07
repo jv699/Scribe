@@ -45,9 +45,36 @@ export interface ToolCallDelta {
   arguments?: string;
 }
 
+/** Token accounting for one request/response pair, when the provider reports it. */
+export interface UsageInfo {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+}
+
 export type ChatEvent =
   | { type: "text"; delta: string }
-  | { type: "tool_call"; toolCall: ToolCallDelta };
+  | { type: "tool_call"; toolCall: ToolCallDelta }
+  | { type: "usage"; usage: UsageInfo };
+
+/** Per-token cost, in dollars, when the provider's model listing includes pricing. */
+export interface ModelPricing {
+  promptPerToken?: number;
+  completionPerToken?: number;
+}
+
+/**
+ * Model metadata from a provider's `GET /models` listing. Only `id` is
+ * guaranteed by the OpenAI schema — the rest are populated opportunistically
+ * when a provider includes them (OpenRouter does; OpenAI/Ollama/LM Studio
+ * generally don't).
+ */
+export interface ModelInfo {
+  id: string;
+  name?: string;
+  contextLength?: number;
+  pricing?: ModelPricing;
+}
 
 /**
  * Streams assistant output for a conversation. Yields text deltas and

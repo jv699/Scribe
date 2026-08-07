@@ -4,7 +4,7 @@
  * repeat until the model produces a plain-text answer. This is the "harness"
  * core that planning (and later report) mode is built on.
  */
-import type { ChatMessage, ChatProvider, ToolCall, ToolDefinition } from "../provider/types.ts";
+import type { ChatMessage, ChatProvider, ToolCall, ToolDefinition, UsageInfo } from "../provider/types.ts";
 
 export interface AgentTool {
   /** The description sent to the model. */
@@ -29,6 +29,8 @@ export interface AgentOptions {
   onText?: (delta: string) => void;
   /** Called just before a tool executes. */
   onTool?: (name: string) => void;
+  /** Called with token usage after each turn, when the provider reports it. */
+  onUsage?: (usage: UsageInfo) => void;
   maxIterations?: number;
 }
 
@@ -110,6 +112,10 @@ async function streamTurn(
     if (event.type === "text") {
       content += event.delta;
       options.onText?.(event.delta);
+      continue;
+    }
+    if (event.type === "usage") {
+      options.onUsage?.(event.usage);
       continue;
     }
     const delta = event.toolCall;

@@ -861,3 +861,70 @@ describe("chat screen", () => {
     expect(stored.some((m) => m.content === "new msg")).toBe(true);
   });
 });
+
+describe("model header", () => {
+  test("upgrades from the bare id to name/usage/context/price once modelInfo and usage arrive", async () => {
+    const provider: ChatProvider = {
+      async *streamChat() {
+        yield { type: "text", delta: "hi" };
+        yield {
+          type: "usage",
+          usage: { promptTokens: 6400, completionTokens: 1600, totalTokens: 8000 },
+        };
+      },
+    };
+
+    current = await makeChatScreen(renderer, {
+      provider,
+      model: "gpt-4o-mini",
+      modelInfo: Promise.resolve({
+        id: "gpt-4o-mini",
+        name: "GPT-4o Mini",
+        contextLength: 128000,
+        pricing: { promptPerToken: 0.00000015, completionPerToken: 0.0000006 },
+      }),
+      onBack: () => {},
+    });
+    renderer.root.add(current.node);
+    current.focus?.();
+    await renderOnce();
+
+    await keys.typeText("hello", 5);
+    keys.pressEnter();
+    await wait();
+    await renderOnce();
+
+    const frame = captureCharFrame();
+    expect(frame.includes("GPT-4o Mini")).toBe(true);
+    expect(frame.includes("8k/128k")).toBe(true);
+    expect(frame.includes("6%")).toBe(true); // 8000 / 128000
+    expect(frame.includes("$0.0")).toBe(true);
+  });
+
+  test("falls back to the raw token count when context length is unknown", async () => {
+    const provider: ChatProvider = {
+      async *streamChat() {
+        yield { type: "text", delta: "hi" };
+        yield { type: "usage", usage: { promptTokens: 100, completionTokens: 20, totalTokens: 120 } };
+      },
+    };
+
+    current = await makeChatScreen(renderer, {
+      provider,
+      model: "local-model",
+      onBack: () => {},
+    });
+    renderer.root.add(current.node);
+    current.focus?.();
+    await renderOnce();
+
+    await keys.typeText("hello", 5);
+    keys.pressEnter();
+    await wait();
+    await renderOnce();
+
+    const frame = captureCharFrame();
+    expect(frame.includes("local-model")).toBe(true);
+    expect(frame.includes("120 tokens")).toBe(true);
+  });
+});

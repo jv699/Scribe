@@ -16,7 +16,7 @@ import { makeButton, tabWalk } from "../components/ui.ts";
 import { showModelPickerDialog } from "../components/model-picker-dialog.ts";
 import { theme } from "../theme.ts";
 import { abbreviateHome, defaultConfigDir, expandHome, type Settings } from "../store/settings.ts";
-import { DEFAULT_BASE_URL, listModels } from "../provider/openai.ts";
+import { DEFAULT_BASE_URL, listModelInfos } from "../provider/openai.ts";
 import type { Screen } from "./screen.ts";
 
 export interface SettingsScreenOptions {
@@ -104,7 +104,7 @@ export async function makeSettingsScreen(
     setStatus("Loading models...", "info");
     try {
       const apiKeyEnv = keyInput.value.trim();
-      const models = await listModels({
+      const models = await listModelInfos({
         baseUrl: baseUrlInput.value.trim() || DEFAULT_BASE_URL,
         apiKey: apiKeyEnv ? (process.env[apiKeyEnv] ?? "") : "",
       });

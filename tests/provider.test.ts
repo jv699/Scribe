@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { createOpenAIProvider, createProviderFromSettings, listModels } from "../src/provider/openai.ts";
+import { createOpenAIProvider, createProviderFromSettings, listModelInfos, listModels } from "../src/provider/openai.ts";
 import type { ChatEvent, ChatMessage } from "../src/provider/types.ts";
 import type { Settings } from "../src/store/settings.ts";
 
@@ -25,10 +25,24 @@ function sseResponse(chunks: string[]): Response {
   return new Response(body, { headers: { "content-type": "text/event-stream" } });
 }
 
-type MockBehavior = "stream" | "json" | "error" | "tools" | "models" | "models-error";
+type MockBehavior = "stream" | "json" | "error" | "tools" | "models" | "models-error" | "usage" | "json-usage";
+
+/** SSE events: some text, then a final usage-only chunk, then [DONE]. */
+function usageSseResponse(): Response {
+  const events = [
+    { choices: [{ delta: { content: "Hi" } }] },
+    { choices: [], usage: { prompt_tokens: 42, completion_tokens: 8, total_tokens: 50 } },
+  ];
+  const body = events
+    .map((e) => `data: ${JSON.stringify(e)}\n\n`)
+    .concat("data: [DONE]\n\n")
+    .join("");
+  return new Response(body, { headers: { "content-type": "text/event-stream" } });
+}
 
 let server: ReturnType<typeof Bun.serve> | null = null;
-let lastRequest: { model?: string; messages?: ChatMessage[]; tools?: unknown } | null = null;
+let lastRequest: { model?: string; messages?: ChatMessage[]; tools?: unknown; stream_options?: unknown } | null =
+  null;
 let seenAuth: string | null = null;
 
 /** SSE events: some text, then a split tool call, then [DONE]. */
@@ -83,7 +97,19 @@ async function startServer(behavior: MockBehavior): Promise<string> {
           return new Response(JSON.stringify({ error: { message: "nope" } }), { status: 401 });
         }
         return new Response(
-          JSON.stringify({ data: [{ id: "gpt-4o-mini" }, { id: "gpt-4o" }, { id: "" }, {}] }),
+          JSON.stringify({
+            data: [
+              {
+                id: "gpt-4o-mini",
+                name: "GPT-4o Mini",
+                context_length: 128000,
+                pricing: { prompt: "0.00000015", completion: "0.0000006" },
+              },
+              { id: "gpt-4o" },
+              { id: "" },
+              {},
+            ],
+          }),
           { headers: { "content-type": "application/json" } },
         );
       }
@@ -91,7 +117,12 @@ async function startServer(behavior: MockBehavior): Promise<string> {
         return new Response("not found", { status: 404 });
       }
       seenAuth = req.headers.get("authorization");
-      lastRequest = (await req.json()) as { model?: string; messages?: ChatMessage[]; tools?: unknown };
+      lastRequest = (await req.json()) as {
+        model?: string;
+        messages?: ChatMessage[];
+        tools?: unknown;
+        stream_options?: unknown;
+      };
 
       if (behavior === "error") {
         return new Response(JSON.stringify({ error: { message: "nope" } }), { status: 401 });
@@ -102,8 +133,20 @@ async function startServer(behavior: MockBehavior): Promise<string> {
           { headers: { "content-type": "application/json" } },
         );
       }
+      if (behavior === "json-usage") {
+        return new Response(
+          JSON.stringify({
+            choices: [{ message: { content: "plain reply" } }],
+            usage: { prompt_tokens: 12, completion_tokens: 3, total_tokens: 15 },
+          }),
+          { headers: { "content-type": "application/json" } },
+        );
+      }
       if (behavior === "tools") {
         return toolSseResponse();
+      }
+      if (behavior === "usage") {
+        return usageSseResponse();
       }
       return sseResponse(["Hel", "lo ", "world"]);
     },
@@ -215,5 +258,53 @@ describe("provider client", () => {
   test("listModels throws a readable error on non-2xx", async () => {
     const baseUrl = await startServer("models-error");
     await expect(listModels({ baseUrl, apiKey: "k" })).rejects.toThrow(/401/);
+  });
+
+  test("listModelInfos reads name, context length, and pricing when present", async () => {
+    const baseUrl = await startServer("models");
+    const infos = await listModelInfos({ baseUrl, apiKey: "k" });
+    expect(infos).toEqual([
+      { id: "gpt-4o" },
+      {
+        id: "gpt-4o-mini",
+        name: "GPT-4o Mini",
+        contextLength: 128000,
+        pricing: { promptPerToken: 0.00000015, completionPerToken: 0.0000006 },
+      },
+    ]);
+  });
+
+  test("requests stream_options.include_usage on every streaming request", async () => {
+    const baseUrl = await startServer("stream");
+    const provider = createOpenAIProvider({ baseUrl, model: "m", apiKey: "k" });
+    await collect(provider);
+    expect(lastRequest?.stream_options).toEqual({ include_usage: true });
+  });
+
+  test("yields a usage event parsed from the final SSE chunk", async () => {
+    const baseUrl = await startServer("usage");
+    const provider = createOpenAIProvider({ baseUrl, model: "m", apiKey: "k" });
+    const events: ChatEvent[] = [];
+    for await (const event of provider.streamChat([{ role: "user", content: "hi" }])) events.push(event);
+
+    expect(events.filter((e) => e.type === "text").map((e) => (e as { delta: string }).delta)).toEqual(["Hi"]);
+    const usageEvent = events.find((e) => e.type === "usage");
+    expect(usageEvent).toMatchObject({
+      type: "usage",
+      usage: { promptTokens: 42, completionTokens: 8, totalTokens: 50 },
+    });
+  });
+
+  test("yields a usage event from the non-streaming JSON fallback", async () => {
+    const baseUrl = await startServer("json-usage");
+    const provider = createOpenAIProvider({ baseUrl, model: "m", apiKey: "k" });
+    const events: ChatEvent[] = [];
+    for await (const event of provider.streamChat([{ role: "user", content: "hi" }])) events.push(event);
+
+    const usageEvent = events.find((e) => e.type === "usage");
+    expect(usageEvent).toMatchObject({
+      type: "usage",
+      usage: { promptTokens: 12, completionTokens: 3, totalTokens: 15 },
+    });
   });
 });

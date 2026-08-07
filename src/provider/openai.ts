@@ -5,7 +5,15 @@
  * non-stream fallback.
  */
 import type { Settings } from "../store/settings.ts";
-import type { ChatEvent, ChatMessage, ChatOptions, ChatProvider, ToolCallDelta } from "./types.ts";
+import type {
+  ChatEvent,
+  ChatMessage,
+  ChatOptions,
+  ChatProvider,
+  ModelInfo,
+  ToolCallDelta,
+  UsageInfo,
+} from "./types.ts";
 
 export interface OpenAIProviderOptions {
   /** Base URL without a trailing slash, e.g. "https://api.openai.com/v1". */
@@ -25,6 +33,20 @@ interface StreamChoice {
       id?: string;
       function?: { name?: string; arguments?: string };
     }[];
+  };
+}
+
+interface RawUsage {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  total_tokens?: number;
+}
+
+function toUsageInfo(raw: RawUsage): UsageInfo {
+  return {
+    promptTokens: raw.prompt_tokens ?? 0,
+    completionTokens: raw.completion_tokens ?? 0,
+    totalTokens: raw.total_tokens ?? 0,
   };
 }
 
@@ -51,7 +73,7 @@ async function* streamSSE(response: Response): AsyncGenerator<ChatEvent> {
         const payload = trimmed.slice(5).trim();
         if (payload === "[DONE]") return;
         try {
-          const json = JSON.parse(payload) as { choices?: StreamChoice[] };
+          const json = JSON.parse(payload) as { choices?: StreamChoice[]; usage?: RawUsage };
           const delta = json.choices?.[0]?.delta;
           if (delta?.content) yield { type: "text", delta: delta.content };
           for (const tc of delta?.tool_calls ?? []) {
@@ -63,6 +85,9 @@ async function* streamSSE(response: Response): AsyncGenerator<ChatEvent> {
             };
             yield { type: "tool_call", toolCall };
           }
+          // Only providers that support `stream_options.include_usage` (requested
+          // below) send this — usually on a final chunk with no choices.
+          if (json.usage) yield { type: "usage", usage: toUsageInfo(json.usage) };
         } catch {
           // Malformed keep-alive or partial line — ignore.
         }
@@ -76,7 +101,14 @@ export function createOpenAIProvider(options: OpenAIProviderOptions): ChatProvid
 
   return {
     async *streamChat(messages: ChatMessage[], chatOptions?: ChatOptions): AsyncGenerator<ChatEvent> {
-      const body: Record<string, unknown> = { model: options.model, messages, stream: true };
+      const body: Record<string, unknown> = {
+        model: options.model,
+        messages,
+        stream: true,
+        // Widely supported (OpenAI, OpenRouter, Ollama, LM Studio, vLLM); providers
+        // that don't recognize it just ignore it, so this is safe to send always.
+        stream_options: { include_usage: true },
+      };
       if (chatOptions?.tools?.length) body["tools"] = chatOptions.tools;
 
       const response = await fetch(`${baseUrl}/chat/completions`, {
@@ -99,19 +131,33 @@ export function createOpenAIProvider(options: OpenAIProviderOptions): ChatProvid
         // Non-streaming fallback (older endpoints / proxies).
         const json = (await response.json()) as {
           choices?: { message?: { content?: string; tool_calls?: ToolCallDelta[] } }[];
+          usage?: RawUsage;
         };
         const message = json.choices?.[0]?.message;
         if (message?.content) yield { type: "text", delta: message.content };
         for (const tc of message?.tool_calls ?? []) {
           yield { type: "tool_call", toolCall: tc };
         }
+        if (json.usage) yield { type: "usage", usage: toUsageInfo(json.usage) };
       }
     },
   };
 }
 
-/** Fetch available model ids from an OpenAI-compatible `GET /models` endpoint. */
-export async function listModels(options: { baseUrl: string; apiKey: string }): Promise<string[]> {
+interface RawModel {
+  id?: string;
+  name?: string;
+  context_length?: number;
+  pricing?: { prompt?: string | number; completion?: string | number };
+}
+
+/**
+ * Fetch model metadata from an OpenAI-compatible `GET /models` endpoint. Only
+ * `id` is part of the official schema; `name`, `context_length`, and
+ * `pricing` are read when present (OpenRouter includes them, most other
+ * providers don't) and simply omitted otherwise.
+ */
+export async function listModelInfos(options: { baseUrl: string; apiKey: string }): Promise<ModelInfo[]> {
   const baseUrl = options.baseUrl.replace(/\/+$/, "");
   const response = await fetch(`${baseUrl}/models`, {
     headers: options.apiKey ? { Authorization: `Bearer ${options.apiKey}` } : {},
@@ -122,11 +168,30 @@ export async function listModels(options: { baseUrl: string; apiKey: string }): 
     throw new Error(`Failed to list models (${response.status}): ${detail.slice(0, 200)}`);
   }
 
-  const json = (await response.json()) as { data?: { id?: string }[] };
-  const ids = (json.data ?? [])
-    .map((entry) => entry.id)
-    .filter((id): id is string => typeof id === "string" && id !== "");
-  return ids.sort((a, b) => a.localeCompare(b));
+  const json = (await response.json()) as { data?: RawModel[] };
+  const infos: ModelInfo[] = [];
+  for (const entry of json.data ?? []) {
+    if (typeof entry.id !== "string" || entry.id === "") continue;
+    const info: ModelInfo = { id: entry.id };
+    if (typeof entry.name === "string" && entry.name !== "") info.name = entry.name;
+    if (typeof entry.context_length === "number") info.contextLength = entry.context_length;
+
+    const promptPrice = entry.pricing?.prompt !== undefined ? Number(entry.pricing.prompt) : undefined;
+    const completionPrice = entry.pricing?.completion !== undefined ? Number(entry.pricing.completion) : undefined;
+    const pricing: ModelInfo["pricing"] = {
+      ...(promptPrice !== undefined && !Number.isNaN(promptPrice) ? { promptPerToken: promptPrice } : {}),
+      ...(completionPrice !== undefined && !Number.isNaN(completionPrice) ? { completionPerToken: completionPrice } : {}),
+    };
+    if (Object.keys(pricing).length > 0) info.pricing = pricing;
+
+    infos.push(info);
+  }
+  return infos.sort((a, b) => a.id.localeCompare(b.id));
+}
+
+/** Fetch available model ids from an OpenAI-compatible `GET /models` endpoint. */
+export async function listModels(options: { baseUrl: string; apiKey: string }): Promise<string[]> {
+  return (await listModelInfos(options)).map((info) => info.id);
 }
 
 /** Build a provider from app settings, resolving the API key from its env var. */
