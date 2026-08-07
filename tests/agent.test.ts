@@ -219,6 +219,30 @@ describe("agent loop", () => {
       runAgent({ provider, tools: [echoTool], maxIterations: 2 }, [{ role: "user", content: "hi" }]),
     ).rejects.toThrow(/exceeded/);
   });
+
+  test("reports usage per turn via onUsage", async () => {
+    const provider: ChatProvider = {
+      async *streamChat(messages) {
+        if (messages.some((m) => m.role === "tool")) {
+          yield { type: "usage", usage: { promptTokens: 120, completionTokens: 10, totalTokens: 130 } };
+          yield text("done");
+          return;
+        }
+        yield { type: "usage", usage: { promptTokens: 50, completionTokens: 5, totalTokens: 55 } };
+        yield toolCallDelta(0, "c1", "echo", '{"word":"x"}');
+      },
+    };
+    const usages: { promptTokens: number; completionTokens: number; totalTokens: number }[] = [];
+    const result = await runAgent(
+      { provider, tools: [echoTool], onUsage: (usage) => usages.push(usage) },
+      [{ role: "user", content: "hi" }],
+    );
+    expect(result.answer).toBe("done");
+    expect(usages).toEqual([
+      { promptTokens: 50, completionTokens: 5, totalTokens: 55 },
+      { promptTokens: 120, completionTokens: 10, totalTokens: 130 },
+    ]);
+  });
 });
 
 describe("campaign tools", () => {

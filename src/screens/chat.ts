@@ -38,7 +38,8 @@ import {
   type AskChannel,
   type AskQuestion,
 } from "../agent/ask.ts";
-import type { ChatMessage, ChatProvider } from "../provider/types.ts";
+import type { ChatMessage, ChatProvider, ModelInfo, UsageInfo } from "../provider/types.ts";
+import { formatDollars, formatTokenCount } from "../format.ts";
 import type { Screen } from "./screen.ts";
 
 /** Persistence seam for resuming a conversation across app sessions. */
@@ -51,6 +52,14 @@ export interface ChatScreenOptions {
   provider: ChatProvider;
   /** Shown on the right of the title bar. */
   model?: string;
+  /**
+   * Resolves to richer metadata for `model` (display name, context window,
+   * pricing) when the provider's `/models` listing includes it — OpenRouter
+   * does, most others don't. The title bar shows just `model` until this
+   * settles, then upgrades in place; a rejection or `undefined` leaves it as
+   * is.
+   */
+  modelInfo?: Promise<ModelInfo | undefined>;
   /** Left of the title bar. Defaults to "Drafting Table". */
   title?: string;
   /**
@@ -95,10 +104,40 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
     marginBottom: 1,
   });
   titleRow.add(new TextRenderable(renderer, { content: options.title ?? "Drafting Table", fg: theme.accent }));
-  if (options.model) {
-    titleRow.add(new TextRenderable(renderer, { content: options.model, fg: theme.textMuted }));
-  }
+  const modelText = new TextRenderable(renderer, { content: options.model ?? "", fg: theme.textMuted });
+  if (options.model) titleRow.add(modelText);
   container.add(titleRow);
+
+  // Model header: "Name | 45k/128k ctx (35%) | $0.02". Degrades gracefully as
+  // pieces of ModelInfo/usage go missing — see ChatScreenOptions.modelInfo.
+  let modelInfo: ModelInfo | undefined;
+  let lastUsage: UsageInfo | null = null;
+  let cumulativeCost = 0;
+
+  function updateModelHeader(): void {
+    if (!options.model) return;
+    const parts = [modelInfo?.name ?? options.model];
+    if (lastUsage) {
+      const contextLength = modelInfo?.contextLength;
+      parts.push(
+        contextLength
+          ? `${formatTokenCount(lastUsage.totalTokens)}/${formatTokenCount(contextLength)} ctx (${Math.min(100, Math.round((lastUsage.totalTokens / contextLength) * 100))}%)`
+          : `${formatTokenCount(lastUsage.totalTokens)} tokens`,
+      );
+      if (cumulativeCost > 0) parts.push(formatDollars(cumulativeCost));
+    }
+    modelText.content = parts.join("  |  ");
+  }
+
+  /** Approximate running cost: full resent context is priced every turn, so this overstates true billed cost when a provider caches the shared prefix. */
+  function recordUsage(usage: UsageInfo): void {
+    lastUsage = usage;
+    const pricing = modelInfo?.pricing;
+    if (pricing?.promptPerToken !== undefined && pricing.completionPerToken !== undefined) {
+      cumulativeCost += usage.promptTokens * pricing.promptPerToken + usage.completionTokens * pricing.completionPerToken;
+    }
+    updateModelHeader();
+  }
 
   // Transcript: user messages each get their own accent-strip panel (mirroring
   // the prompt box); assistant replies flow as markdown beneath them. The shared
@@ -147,6 +186,14 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
    * style, the transcript, the status line) is gone by then.
    */
   let disposed = false;
+
+  if (options.modelInfo) {
+    void options.modelInfo.then((info) => {
+      if (disposed) return;
+      modelInfo = info;
+      updateModelHeader();
+    });
+  }
 
   /** A rendered transcript row; updated in place as its message streams in. */
   interface TranscriptRow {
@@ -498,6 +545,7 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
               if (name === ASK_USER_TOOL_NAME) return;
               status.content = `running tool: ${name}…`;
             },
+            onUsage: (usage) => recordUsage(usage),
           },
           messages.slice(0, -1),
         );
@@ -512,6 +560,7 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
             : messages;
         for await (const event of options.provider.streamChat(context)) {
           if (event.type === "text") appendStreamed(event.delta);
+          else if (event.type === "usage") recordUsage(event.usage);
         }
       }
       if (!disposed) status.content = "";

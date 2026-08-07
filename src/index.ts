@@ -13,8 +13,8 @@ import { makeChatScreen, type ChatLogStore } from "./screens/chat.ts";
 import type { Screen } from "./screens/screen.ts";
 import { loadSettings, saveSettings } from "./store/settings.ts";
 import { createCampaign, listCampaigns, loadCampaign, type Campaign } from "./store/campaigns.ts";
-import { createProviderFromSettings, DEFAULT_MODEL } from "./provider/openai.ts";
-import type { ChatProvider } from "./provider/types.ts";
+import { createProviderFromSettings, DEFAULT_BASE_URL, DEFAULT_MODEL, listModelInfos } from "./provider/openai.ts";
+import type { ChatProvider, ModelInfo } from "./provider/types.ts";
 import { toolsFor } from "./agent/agents.ts";
 import { makeAskChannel } from "./agent/ask.ts";
 import { buildOneshotSystemPrompt, buildPlanningSystemPrompt, buildReportSystemPrompt } from "./agent/context.ts";
@@ -96,11 +96,30 @@ async function showSettingsScreen(): Promise<void> {
   );
 }
 
+/**
+ * Look up the current model's metadata (display name, context window,
+ * pricing) from the provider's `/models` listing. Never throws — a failed or
+ * unsupported lookup just leaves the chat header showing the bare model id.
+ */
+async function fetchModelInfo(model: string): Promise<ModelInfo | undefined> {
+  try {
+    const infos = await listModelInfos({
+      baseUrl: settings.baseUrl ?? DEFAULT_BASE_URL,
+      apiKey: settings.apiKeyEnv ? (process.env[settings.apiKeyEnv] ?? "") : "",
+    });
+    return infos.find((info) => info.id === model);
+  } catch {
+    return undefined;
+  }
+}
+
 /** Build a ChatProvider + model from the current settings. */
-function makeChatOptions(): { provider: ChatProvider; model: string } {
+function makeChatOptions(): { provider: ChatProvider; model: string; modelInfo: Promise<ModelInfo | undefined> } {
+  const model = settings.model ?? DEFAULT_MODEL;
   return {
     provider: createProviderFromSettings(settings),
-    model: settings.model ?? DEFAULT_MODEL,
+    model,
+    modelInfo: fetchModelInfo(model),
   };
 }
 
