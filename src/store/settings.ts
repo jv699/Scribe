@@ -24,6 +24,13 @@ export interface Settings {
   model?: string;
   /** Name of the env var holding the API key — never the key itself. */
   apiKeyEnv?: string;
+  /**
+   * Advanced, config-file only: path to a file replacing the built-in campaign
+   * core prompt. Campaign context and the user's instructions still apply.
+   */
+  systemPromptOverride?: string;
+  /** Advanced, config-file only: same, for the one-shot core prompt. */
+  oneshotPromptOverride?: string;
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -34,6 +41,10 @@ const DEFAULT_SETTINGS: Settings = {
 
 /** Directory holding the app config files (config.json + prompts). */
 export function defaultConfigDir(): string {
+  // SCRIBE_CONFIG_DIR relocates the whole config dir (config.json + the user's
+  // instruction files) — useful for separate profiles, and for tests.
+  const override = process.env["SCRIBE_CONFIG_DIR"];
+  if (override && override.trim() !== "") return expandHome(override);
   return join(homedir(), ".config", "scribe");
 }
 
@@ -79,6 +90,8 @@ export async function loadSettings(configPath: string = defaultConfigPath()): Pr
   settings.campaignsDir = expandHome(settings.campaignsDir);
   settings.oneshotsDir = expandHome(settings.oneshotsDir);
   settings.sourcesDir = expandHome(settings.sourcesDir);
+  if (settings.systemPromptOverride) settings.systemPromptOverride = expandHome(settings.systemPromptOverride);
+  if (settings.oneshotPromptOverride) settings.oneshotPromptOverride = expandHome(settings.oneshotPromptOverride);
 
   if (raw === null) {
     await mkdir(join(configPath, ".."), { recursive: true });

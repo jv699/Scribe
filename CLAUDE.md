@@ -56,9 +56,10 @@ There is no lint, formatter, or CI configured.
   - `ask.ts` — the `ask_user` channel seam between the agent loop and the chat screen.
   - `agents.ts` — **the gateway**: maps each agent (`planning` / `report` / `oneshot`) to the tool names it may call. This is the one place to read when auditing what an agent can do.
   - `tools/` — one file per tool (`ToolSpec`), explicit registry in `tools/index.ts` (not filesystem discovery, so `ToolName` is a compile-time union). Adding a tool: new file + one line in `index.ts` + grant it in `agents.ts`.
-  - `context.ts` — system prompt builders per mode.
+  - `prompts.ts` — the code-owned core prompts (never written to disk, so they always ship current).
+  - `context.ts` — system prompt builders per mode: core → campaign/session context → the user's optional instructions file.
 - **`src/provider/`** — model provider abstraction: `types.ts` (`ChatMessage`, `ToolCall`, `ChatEvent`, `ChatProvider`), `openai.ts` (OpenAI-compatible SSE client).
-- **`src/store/`** — markdown-first persistence: `campaigns.ts`, `sessions.ts`, `frontmatter.ts`, `naming.ts`, `settings.ts`, `system-prompt.ts` (user-owned prompt files), `chat-log.ts` (JSONL conversation resume), `oneshots.ts`.
+- **`src/store/`** — markdown-first persistence: `campaigns.ts`, `sessions.ts`, `frontmatter.ts`, `naming.ts`, `settings.ts`, `instructions.ts` (the user's optional, never-created instruction files), `chat-log.ts` (JSONL conversation resume), `oneshots.ts`.
 - **`src/theme.ts`** — unified palette; all UI colors must come from here, never hardcode hex literals.
 
 On-disk layout, the full per-file architecture notes (including UI event-handling patterns, `ask_user` semantics, and dialog composition), and known gotchas (headless testing setup, key-name quirks, `visible`/absolute-positioning tricks, `MarkdownRenderable` streaming requirements) are documented in detail in `AGENTS.md` — read it before touching `src/agent/`, `src/components/`, or `src/screens/chat.ts`.

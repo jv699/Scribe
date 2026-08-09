@@ -131,7 +131,7 @@ async function showOneshotPlanner(): Promise<void> {
     await makeChatScreen(renderer, {
       ...makeChatOptions(),
       title: "Drafting Table",
-      systemPrompt: await buildOneshotSystemPrompt(settings.sourcesDir),
+      systemPrompt: await buildOneshotSystemPrompt(settings),
       // Granted save_session via the gateway; declined when no one-shots dir is configured.
       tools: toolsFor("oneshot", { oneshotsDir: settings.oneshotsDir, sourcesDir: settings.sourcesDir, ask }),
       ask,
@@ -156,7 +156,7 @@ async function showCampaignHome(campaign: Campaign): Promise<void> {
 }
 
 async function showPlanningChat(campaign: Campaign, session: Session): Promise<void> {
-  const systemPrompt = await buildPlanningSystemPrompt(campaign, session, settings.sourcesDir);
+  const systemPrompt = await buildPlanningSystemPrompt(campaign, session, settings);
   const ask = makeAskChannel();
   const tools = toolsFor("planning", {
     campaign,
@@ -180,7 +180,7 @@ async function showPlanningChat(campaign: Campaign, session: Session): Promise<v
 }
 
 async function showReportChat(campaign: Campaign, session: Session): Promise<void> {
-  const systemPrompt = await buildReportSystemPrompt(campaign, session);
+  const systemPrompt = await buildReportSystemPrompt(campaign, session, settings);
   const ask = makeAskChannel();
   const tools = toolsFor("report", { campaign, session, ask });
   showScreen(

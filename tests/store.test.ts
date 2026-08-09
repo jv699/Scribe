@@ -8,7 +8,7 @@ import { loadSettings, saveSettings } from "../src/store/settings.ts";
 import { createCampaign, listCampaigns, loadCampaign, updateCampaignMeta, appendStorySoFar } from "../src/store/campaigns.ts";
 import { createSession, listSessions, setSessionStatus, trashSession } from "../src/store/sessions.ts";
 import { loadChatLog, saveChatLog, clearChatLog, chatLogPath } from "../src/store/chat-log.ts";
-import { loadOneshotPrompt, loadSystemPrompt } from "../src/store/system-prompt.ts";
+import { loadInstructions, loadOneshotInstructions, loadPromptOverride } from "../src/store/instructions.ts";
 import { saveOneshot } from "../src/store/oneshots.ts";
 
 let dir: string;
@@ -86,27 +86,52 @@ describe("settings", () => {
     expect(reloaded.apiKeyEnv).toBe("MY_KEY");
     expect(reloaded.campaignsDir).toBe(settings.campaignsDir);
   });
+
+  test("prompt overrides round-trip and expand ~", async () => {
+    const configPath = join(dir, "config.json");
+    const settings = await loadSettings(configPath);
+    await saveSettings(
+      { ...settings, systemPromptOverride: "~/my-core.md", oneshotPromptOverride: "/abs/oneshot.md" },
+      configPath,
+    );
+    const reloaded = await loadSettings(configPath);
+    expect(reloaded.systemPromptOverride?.startsWith("~")).toBe(false);
+    expect(reloaded.systemPromptOverride?.endsWith("/my-core.md")).toBe(true);
+    expect(reloaded.oneshotPromptOverride).toBe("/abs/oneshot.md");
+  });
 });
 
-describe("system prompts", () => {
-  test("creates the base system prompt file with the default when missing", async () => {
-    const path = join(dir, "prompts", "system-prompt.md");
-    const prompt = await loadSystemPrompt(path);
-    expect(prompt).toContain("You are Scribe");
-    expect(await readFile(path, "utf8")).toBe(prompt);
+describe("user instructions", () => {
+  test("missing instructions read as empty and are never created", async () => {
+    const path = join(dir, "instructions.md");
+    expect(await loadInstructions(path)).toBe("");
+    // The whole point of the rework: no file is written, so nothing can go stale.
+    expect(await Bun.file(path).exists()).toBe(false);
   });
 
-  test("creates the oneshot prompt file with the default when missing", async () => {
-    const path = join(dir, "prompts", "oneshot-prompt.md");
-    const prompt = await loadOneshotPrompt(path);
-    expect(prompt).toContain("one-shots");
-    expect(await readFile(path, "utf8")).toBe(prompt);
+  test("missing one-shot instructions read as empty and are never created", async () => {
+    const path = join(dir, "oneshot-instructions.md");
+    expect(await loadOneshotInstructions(path)).toBe("");
+    expect(await Bun.file(path).exists()).toBe(false);
   });
 
-  test("reads an existing oneshot prompt file untouched", async () => {
-    const path = join(dir, "oneshot-prompt.md");
-    await Bun.write(path, "custom oneshot prompt");
-    expect(await loadOneshotPrompt(path)).toBe("custom oneshot prompt");
+  test("reads an existing instructions file verbatim", async () => {
+    const path = join(dir, "instructions.md");
+    await Bun.write(path, "Always speak like a pirate.\n");
+    expect(await loadInstructions(path)).toBe("Always speak like a pirate.\n");
+  });
+
+  test("prompt override reads the file, or null when unset/missing/blank", async () => {
+    const path = join(dir, "core.md");
+    await Bun.write(path, "You are a minimal assistant.\n");
+    expect(await loadPromptOverride(path)).toBe("You are a minimal assistant.\n");
+
+    expect(await loadPromptOverride(undefined)).toBeNull();
+    expect(await loadPromptOverride(join(dir, "nope.md"))).toBeNull();
+
+    const blank = join(dir, "blank.md");
+    await Bun.write(blank, "   \n");
+    expect(await loadPromptOverride(blank)).toBeNull();
   });
 });
 
