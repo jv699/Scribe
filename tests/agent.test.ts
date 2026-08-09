@@ -14,7 +14,6 @@ import {
   type AskQuestion,
 } from "../src/agent/ask.ts";
 import { registry, resolveTools, toolNames } from "../src/agent/tools/index.ts";
-import { buildPlanningSystemPrompt, buildReportSystemPrompt } from "../src/agent/context.ts";
 import type { ChatEvent, ChatMessage, ChatProvider } from "../src/provider/types.ts";
 import { createCampaign, loadCampaign, type Campaign } from "../src/store/campaigns.ts";
 import { createSession, listSessions } from "../src/store/sessions.ts";
@@ -599,25 +598,4 @@ describe("agent gateway", () => {
   });
 });
 
-describe("planning context", () => {
-  test("assembles system prompt from file, campaign, and session", async () => {
-    const campaign = (await loadCampaign(campaignDir))!;
-    const sessions = await listSessions(campaign);
-    const prompt = await buildPlanningSystemPrompt(campaign, sessions[0]!);
-
-    expect(prompt).toContain("You are Scribe"); // default system prompt
-    expect(prompt).toContain("Name: CoS");
-    expect(prompt).toContain("Gothic horror.");
-    expect(prompt).toContain('session 1 — "Death House"');
-  });
-
-  test("report prompt frames the session as played and points at the append tool", async () => {
-    const campaign = (await loadCampaign(campaignDir))!;
-    const sessions = await listSessions(campaign);
-    const prompt = await buildReportSystemPrompt(campaign, sessions[0]!);
-
-    expect(prompt).toContain("You are Scribe");
-    expect(prompt).toContain("The user just played session 1");
-    expect(prompt).toContain("append_campaign_summary");
-  });
-});
+// Prompt assembly (core + context + user instructions) lives in tests/context.test.ts.

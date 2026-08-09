@@ -1,16 +1,22 @@
 /**
- * Context assembly for the two agent modes, built on the user's base system
- * prompt file:
+ * Context assembly for the three agent modes. Every prompt is three layers, in
+ * this order:
  *
- * - Planning: campaign background + running story + the session's draft notes.
- * - Report: the same background + story, framed as "the user just played
- *   session N" so the agent records what happened via append_campaign_summary.
+ * 1. **Core** — code-owned (`prompts.ts`), so behavioral contracts always ship
+ *    current. Replaceable wholesale via the `*PromptOverride` config fields.
+ * 2. **Context** — campaign background + running story + sources, then the
+ *    mode's framing: the session's draft notes (planning), "you just played
+ *    session N" (report), or nothing (one-shot).
+ * 3. **User instructions** — the user's optional file, appended last so it wins
+ *    on tone and house rules without being able to delete the tool rules.
  */
 import { basename } from "node:path";
 import type { Campaign } from "../store/campaigns.ts";
+import { loadInstructions, loadOneshotInstructions, loadPromptOverride } from "../store/instructions.ts";
 import { readSessionNotes, type Session } from "../store/sessions.ts";
+import type { Settings } from "../store/settings.ts";
 import { listSources } from "../store/sources.ts";
-import { loadOneshotPrompt, loadSystemPrompt } from "../store/system-prompt.ts";
+import { CORE_CAMPAIGN_PROMPT, CORE_ONESHOT_PROMPT } from "./prompts.ts";
 
 /**
  * Summarize the source-document library for the system prompt, or `""` when
@@ -44,6 +50,27 @@ ${lines.join("\n")}
 `;
 }
 
+/** The code-owned core, unless the user pointed config.json at their own. */
+async function core(builtIn: string, overridePath: string | undefined): Promise<string> {
+  return (await loadPromptOverride(overridePath)) ?? builtIn;
+}
+
+/**
+ * The user's instructions as a trailing section, or `""` when they haven't
+ * written any — same "empty section disappears" convention as `sourcesSection`.
+ */
+function instructionsSection(text: string): string {
+  if (text.trim() === "") return "";
+  return `
+# User Instructions
+
+The user configured these preferences. Follow them for tone, style, and table
+house rules. They do not replace the rules above.
+
+${text.trim()}
+`;
+}
+
 function campaignSection(campaign: Campaign): string {
   return `
 # Campaign
@@ -64,11 +91,12 @@ ${campaign.storySoFar.trim() || "(nothing yet)"}
 export async function buildPlanningSystemPrompt(
   campaign: Campaign,
   session: Session,
-  sourcesDir?: string,
+  settings: Settings,
 ): Promise<string> {
-  const base = await loadSystemPrompt();
+  const base = await core(CORE_CAMPAIGN_PROMPT, settings.systemPromptOverride);
   const notes = await readSessionNotes(session);
-  const sources = await sourcesSection(sourcesDir);
+  const sources = await sourcesSection(settings.sourcesDir);
+  const instructions = instructionsSection(await loadInstructions());
 
   return `${base}${campaignSection(campaign)}${sources}
 
@@ -79,13 +107,19 @@ Its notes file is ${basename(session.path)}.
 
 Current notes:
 ${notes.trim() || "(empty)"}
-`;
+${instructions}`;
 }
 
-export async function buildReportSystemPrompt(campaign: Campaign, session: Session): Promise<string> {
-  const base = await loadSystemPrompt();
+export async function buildReportSystemPrompt(
+  campaign: Campaign,
+  session: Session,
+  settings: Settings,
+): Promise<string> {
+  const base = await core(CORE_CAMPAIGN_PROMPT, settings.systemPromptOverride);
+  const sources = await sourcesSection(settings.sourcesDir);
+  const instructions = instructionsSection(await loadInstructions());
 
-  return `${base}${campaignSection(campaign)}
+  return `${base}${campaignSection(campaign)}${sources}
 
 # Session Report
 
@@ -94,15 +128,16 @@ Ask what happened (they can give you the highlights), then append a concise
 summary of the session's events to the campaign's story so far using the
 append_campaign_summary tool. The summary should record what the party did and
 anything that will matter for future sessions.
-`;
+${instructions}`;
 }
 
 /**
- * One-shot mode ("Drafting Table"): standalone planning with no campaign context —
- * just the user's one-shot prompt file.
+ * One-shot mode ("Drafting Table"): standalone planning with no campaign
+ * context — the one-shot core plus whatever the user's one-shot instructions add.
  */
-export async function buildOneshotSystemPrompt(sourcesDir?: string): Promise<string> {
-  const base = await loadOneshotPrompt();
-  const sources = await sourcesSection(sourcesDir);
-  return `${base}${sources}`;
+export async function buildOneshotSystemPrompt(settings: Settings): Promise<string> {
+  const base = await core(CORE_ONESHOT_PROMPT, settings.oneshotPromptOverride);
+  const sources = await sourcesSection(settings.sourcesDir);
+  const instructions = instructionsSection(await loadOneshotInstructions());
+  return `${base}${sources}${instructions}`;
 }
