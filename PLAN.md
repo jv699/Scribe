@@ -47,7 +47,9 @@ A **Session** has three statuses:
   report, derived summary.
 - **Conversation** — planning/report chat transcripts, kept so planning can
   span multiple sittings.
-- **Settings** — provider, model, API key env var name, campaigns directory.
+- **Settings** — provider (base URL), model (with a "Browse..." picker that
+  lists models from the configured provider), API key env var name, campaigns
+  directory, one-shots directory, sources directory.
 
 ## On-disk layout
 
@@ -90,6 +92,11 @@ tools.**
   - `read_session_notes(n)` / `update_session_notes(n, content)`
   - `append_campaign_summary(entry)` — report phase only
   - `list_sessions()`
+
+  Plus, added in later phases: `save_session` (one-shot only, on explicit user
+  request) and the source-document tools `list_sources` / `search_sources` /
+  `read_source_pages` (granted to planning and one-shot, not report). See
+  `AGENTS.md` for the full current tool list and per-agent grants.
 - **Asking the user** — `ask_user(question, options)` blocks the turn on a
   multiple-choice question shown where the prompt box was, so the agent
   resolves a genuine fork by asking rather than guessing. Granted to every
@@ -103,13 +110,25 @@ tools.**
     far: … Help plan session N; keep `sessions/00N.md` updated via tools."
   - *Report*: "The user played session N. Ask what happened, then append a
     concise summary via `append_campaign_summary`."
-- **System prompt is a user-owned file** — the shared base instruction lives
-  in `~/.config/scribe/system-prompt.md` (plain markdown, editable in any
-  editor), defaulting to a sensible TTRPG co-designer prompt. The two mode
-  prompts above layer on top of it; the app reads the file into context.
-- **Context assembly** — system prompt + background + running summary +
-  current draft + chat history. Known future issue: the running summary grows
-  unboundedly; add a compression step later (not v1).
+- **System prompt is code-owned, layered with an optional user file** — the
+  core prompts (`CORE_CAMPAIGN_PROMPT` / `CORE_ONESHOT_PROMPT`) live in
+  `src/agent/prompts.ts` and are never written to disk, so prompt changes
+  always ship current rather than freezing at whatever version a user file was
+  created from. `src/agent/context.ts` composes each mode's system prompt in
+  three layers, always in this order: **core** (code-owned, or wholesale
+  replaced via the config-file-only `systemPromptOverride` /
+  `oneshotPromptOverride` escape hatch) → **context** (campaign
+  background/story-so-far + source-document summary + the mode's framing —
+  session draft notes for planning, "you just played session N" for report,
+  nothing for one-shot) → **user instructions**, an optional, read-only file
+  (`~/.config/scribe/instructions.md`, or `oneshot-instructions.md` for
+  one-shots — see `src/store/instructions.ts`) appended last so it wins on
+  tone and house rules without being able to delete the tool rules above it.
+  These instruction files are never created by the app; if absent they
+  contribute nothing.
+- **Context assembly** — system prompt (as above) + campaign background +
+  running summary + current draft + chat history. Known future issue: the
+  running summary grows unboundedly; add a compression step later (not v1).
 
 UI notes: OpenTUI 0.4.5 already ships `Markdown` and `ScrollBox` renderables —
 the chat transcript renders streamed markdown directly.
@@ -123,7 +142,8 @@ Campaign home      → system, story-so-far peek, session list w/ statuses,
 Chat screen        → shared by planning & report modes (different prompt/tools);
                      agent questions replace the prompt box until answered;
                      `/` commands and `@` mentions complete in a popup above it
-Settings           → provider, model, key env var, campaigns dir
+Settings           → provider, model (with Browse... picker), key env var,
+                     campaigns/one-shots/sources dirs
 ```
 
 ## Roadmap
