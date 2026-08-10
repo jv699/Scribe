@@ -129,6 +129,42 @@ describe("agent loop", () => {
     expect(toolMsg?.content).toBe("echoed: hello");
   });
 
+  // The seam the chat transcript grows through: without it a tool result only
+  // reaches the screen when the whole turn resolves.
+  test("hands over each message as it is created, and by reference", async () => {
+    const provider = makeToolProvider();
+    const seen: ChatMessage[] = [];
+    /** What each message held at hand-over time, before any later mutation. */
+    const atHandover: string[] = [];
+
+    const result = await runAgent(
+      {
+        provider,
+        tools: [echoTool],
+        onMessage: (message) => {
+          seen.push(message);
+          atHandover.push(`${message.role}:${message.content}`);
+        },
+      },
+      [{ role: "user", content: "Plan session 1" }],
+    );
+
+    // Assistant announced empty (nothing streamed yet), then its tool result,
+    // then the final assistant message — all before runAgent resolved.
+    expect(atHandover).toEqual([
+      "assistant:",
+      "tool:echoed: hello",
+      "assistant:",
+    ]);
+    // Same objects, so a caller mirroring them ends up element-identical to the
+    // result and doesn't have to rebuild anything.
+    const fromResult = result.messages.filter((m) => m.role !== "user");
+    expect(fromResult).toHaveLength(seen.length);
+    for (const [i, message] of fromResult.entries()) expect(message).toBe(seen[i]!);
+    expect(seen[0]!.tool_calls?.[0]?.function.name).toBe("echo");
+    expect(seen[2]!.content).toBe("Plan written to session notes.");
+  });
+
   test("reports unknown and failing tools gracefully", async () => {
     const provider: ChatProvider = {
       async *streamChat(messages) {

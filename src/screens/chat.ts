@@ -223,10 +223,17 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
     status.content = "";
   }
 
-  /** Append a streamed delta to the pending assistant message. */
+  /**
+   * Append a streamed delta to the pending assistant message — the trailing
+   * placeholder in plain-streaming mode, or the live message `runAgent` handed
+   * over in agent mode. A message that already carries tool calls is settled,
+   * so text after it starts a new one rather than growing the old bubble.
+   */
   function appendStreamed(delta: string): void {
     stopThinking();
-    messages[messages.length - 1]!.content += delta;
+    const last = messages[messages.length - 1];
+    if (last?.role === "assistant" && !last.tool_calls) last.content += delta;
+    else messages.push({ role: "assistant", content: delta });
     render();
   }
 
@@ -359,7 +366,14 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
     if (text === "" || busy) return;
     prompt.input.clear();
     messages.push({ role: "user", content: text });
-    messages.push({ role: "assistant", content: "" });
+    // Length-checked, not just truthy: an agent granted no tools (see AGENTS in
+    // agent/agents.ts) resolves to [], which must take the cheaper
+    // plain-streaming path rather than a tool-less agent loop.
+    const agentTools = options.tools && options.tools.length > 0 ? options.tools : null;
+    // Agent mode gets its assistant messages from runAgent's `onMessage` (one
+    // per model turn, interleaved with tool results); only plain streaming
+    // needs a placeholder to stream into.
+    if (!agentTools) messages.push({ role: "assistant", content: "" });
     busy = true;
     status.fg = theme.textMuted;
     status.content = "";
@@ -367,20 +381,24 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
     render();
 
     try {
-      if (options.tools && options.tools.length > 0) {
-        // Planning mode: run the agent loop (system prompt + tools). The
-        // pending assistant message is for streaming display only —
-        // runAgent manages its own conversation copy.
-        //
-        // Length-checked, not just truthy: an agent granted no tools (see
-        // AGENTS in agent/agents.ts) resolves to [], which must take the
-        // cheaper plain-streaming path rather than a tool-less agent loop.
+      if (agentTools) {
+        // Planning mode: run the agent loop (system prompt + tools). runAgent
+        // keeps its own conversation array, but hands every message over as it
+        // is created, so the transcript grows during the turn — an answered
+        // ask_user shows up the moment it is answered, not when the turn ends.
         const result = await runAgent(
           {
             provider: options.provider,
             ...(options.systemPrompt !== undefined ? { systemPrompt: options.systemPrompt } : {}),
-            tools: options.tools,
+            tools: agentTools,
             onText: (delta) => appendStreamed(delta),
+            // The live objects runAgent is building; mirroring them by
+            // reference keeps this array element-identical to the result, so
+            // the splice below reuses every already-rendered row.
+            onMessage: (message) => {
+              messages.push(message);
+              render();
+            },
             onTool: (name) => {
               // ask_user drives the status line itself ("waiting for your
               // answer"); announcing it as a running tool would flash past and
@@ -390,7 +408,9 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
             },
             onUsage: (usage) => recordUsage(usage),
           },
-          messages.slice(0, -1),
+          // A snapshot taken before the turn starts: there is no placeholder to
+          // trim here, and `onMessage` appends to `messages` as the turn runs.
+          messages.slice(),
         );
         // Keep the full conversation (minus the system message) for context.
         messages.splice(0, messages.length, ...result.messages.filter((m) => m.role !== "system"));

@@ -301,12 +301,17 @@ describe("chat screen", () => {
     /** Counts turns so we can tell the loop actually resumed after an answer. */
     let turns = 0;
 
-    /** Calls ask_user on the first turn, then answers once a result comes back. */
-    function askingProvider(args: string): ChatProvider {
+    /**
+     * Calls ask_user on the first turn, then answers once a result comes back.
+     * `replyDelay` stalls that final reply, so a test can look at the screen
+     * while the turn is still in flight.
+     */
+    function askingProvider(args: string, replyDelay = 0): ChatProvider {
       return {
         async *streamChat(messages): AsyncGenerator<ChatEvent> {
           turns++;
           if (messages.some((m) => m.role === "tool")) {
+            if (replyDelay > 0) await new Promise((r) => setTimeout(r, replyDelay));
             yield { type: "text", delta: "Locked in." };
             return;
           }
@@ -316,11 +321,11 @@ describe("chat screen", () => {
     }
 
     /** Open a chat wired for ask_user and send a message so the question appears. */
-    async function ask(args: string, chatLog?: ChatLogStore): Promise<void> {
+    async function ask(args: string, chatLog?: ChatLogStore, replyDelay = 0): Promise<void> {
       turns = 0;
       const channel = makeAskChannel();
       current = await makeChatScreen(renderer, {
-        provider: askingProvider(args),
+        provider: askingProvider(args, replyDelay),
         tools: resolveTools(["ask_user"], { ask: channel }),
         ask: channel,
         ...(chatLog ? { chatLog } : {}),
@@ -364,6 +369,29 @@ describe("chat screen", () => {
       expect(frame.includes("→ A caravan gone silent")).toBe(true);
       // ...and the prompt box comes back.
       expect(frame.includes(PROMPT_HINT)).toBe(true);
+    });
+
+    // Regression: the screen used to adopt runAgent's conversation only once the
+    // whole turn resolved, so the Q&A row appeared *after* the model's follow-up
+    // had finished streaming — a long pause with nothing to show for the answer.
+    test("the answer lands in the transcript before the model replies", async () => {
+      await ask(ONE_OF_TWO, undefined, 400);
+      keys.pressKey("2");
+      await wait(80); // answered, but the reply is still stalled
+      await renderOnce();
+
+      const midTurn = captureCharFrame();
+      expect(midTurn.includes("→ A caravan gone silent")).toBe(true);
+      expect(midTurn.includes("Locked in.")).toBe(false);
+      // Back to waiting on the model, not on the user.
+      expect(midTurn.includes("Scribe is thinking")).toBe(true);
+
+      await wait(500);
+      await renderOnce();
+      const settled = captureCharFrame();
+      expect(settled.includes("Locked in.")).toBe(true);
+      // The row wasn't duplicated when the turn adopted the final conversation.
+      expect((settled.match(/→ A caravan gone silent/g) ?? []).length).toBe(1);
     });
 
     test("arrows move the selection and Enter chooses it", async () => {

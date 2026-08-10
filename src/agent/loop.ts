@@ -31,6 +31,20 @@ export interface AgentOptions {
   onTool?: (name: string) => void;
   /** Called with token usage after each turn, when the provider reports it. */
   onUsage?: (usage: UsageInfo) => void;
+  /**
+   * Called as each message joins the conversation, so a UI can mirror the turn
+   * as it happens instead of waiting for the whole thing to settle — without
+   * this, an answered `ask_user` only reaches the transcript once the model has
+   * finished its follow-up reply.
+   *
+   * The message is the **live object**, not a copy, and it is the same object
+   * that comes back in `AgentResult.messages`: an assistant message is reported
+   * empty *before* its text streams in, then mutated in place (content, then
+   * `tool_calls`) as the turn proceeds. Mirroring by reference means the caller's
+   * array ends up element-identical to the result, so nothing has to be rebuilt
+   * at the end.
+   */
+  onMessage?: (message: ChatMessage) => void;
   maxIterations?: number;
 }
 
@@ -65,12 +79,18 @@ export async function runAgent(
   // `turns` bounds the loop overall. See AgentTool.userDriven.
   let spent = 0;
   for (let turns = 0; spent < maxIterations && turns < HARD_MAX_ITERATIONS; turns++) {
-    const { content, toolCalls } = await streamTurn(options, messages, toolDefs);
+    // Announced before the request so a UI has somewhere to stream into, but
+    // deliberately not in `messages` yet: an empty assistant turn must not be
+    // sent to the provider. It is filled in and pushed once the stream ends.
+    const assistant: ChatMessage = { role: "assistant", content: "" };
+    options.onMessage?.(assistant);
 
-    const assistant: ChatMessage =
-      toolCalls.length > 0
-        ? { role: "assistant", content, tool_calls: toolCalls }
-        : { role: "assistant", content };
+    const { content, toolCalls } = await streamTurn(options, messages, toolDefs);
+    // Assigning (not appending) is what makes a mirroring caller and a headless
+    // one agree: a caller that appended every `onText` delta already holds this
+    // exact string, and one that ignored them gets it now.
+    assistant.content = content;
+    if (toolCalls.length > 0) assistant.tool_calls = toolCalls;
     messages.push(assistant);
 
     if (toolCalls.length === 0) {
@@ -86,7 +106,9 @@ export async function runAgent(
       const result = tool
         ? await runTool(tool, call)
         : `Unknown tool: ${call.function.name}`;
-      messages.push({ role: "tool", tool_call_id: call.id, content: result });
+      const toolMessage: ChatMessage = { role: "tool", tool_call_id: call.id, content: result };
+      messages.push(toolMessage);
+      options.onMessage?.(toolMessage);
     }
     if (!userDrivenOnly) spent++;
   }
