@@ -3,7 +3,7 @@
  * app sessions. One JSONL file per (session, mode) in the campaign's
  * `.scribe/` folder — e.g. `.scribe/plan-session-001.jsonl`.
  */
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import type { ChatMessage } from "../provider/types.ts";
 
@@ -46,7 +46,7 @@ export async function saveChatLog(
   messages: ChatMessage[],
 ): Promise<void> {
   const path = chatLogPath(campaignDir, sessionNumber, mode);
-  await mkdir(join(path, ".."), { recursive: true });
+  await mkdir(dirname(path), { recursive: true });
   const raw = messages.map((m) => JSON.stringify(m)).join("\n");
   await writeFile(path, raw + (raw ? "\n" : ""), "utf8");
 }

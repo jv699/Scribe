@@ -3,6 +3,7 @@
  * Deliberately NOT YAML — see PLAN.md ("no YAML dependency"). Multi-line
  * content belongs in the markdown body, not in frontmatter.
  */
+import { readFile, writeFile } from "node:fs/promises";
 
 export interface FrontmatterDoc {
   data: Record<string, string>;
@@ -48,4 +49,19 @@ export function serializeFrontmatter(data: Record<string, string>, body: string)
   }
   lines.push(FENCE, "");
   return lines.join("\n") + body.replace(/^\n+/, "");
+}
+
+/**
+ * Read a frontmatter file, let `update` compute the new data/body, and write
+ * the result back. Consolidates the read-parse-modify-serialize-write
+ * sequence duplicated across campaigns.ts and sessions.ts.
+ */
+export async function updateFrontmatterFile(
+  path: string,
+  update: (data: Record<string, string>, body: string) => FrontmatterDoc,
+): Promise<FrontmatterDoc> {
+  const { data, body } = parseFrontmatter(await readFile(path, "utf8"));
+  const next = update(data, body);
+  await writeFile(path, serializeFrontmatter(next.data, next.body), "utf8");
+  return next;
 }

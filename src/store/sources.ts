@@ -34,7 +34,7 @@ import { basename, dirname, extname, join } from "node:path";
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { extractText } from "unpdf";
 import { parseFrontmatter, serializeFrontmatter } from "./frontmatter.ts";
-import { slugify } from "./naming.ts";
+import { slugify, uniqueName } from "./naming.ts";
 
 export interface SourceDoc {
   slug: string;
@@ -106,15 +106,6 @@ async function discoverPdfs(sourcesDir: string): Promise<DiscoveredPdf[]> {
   return results;
 }
 
-/** Pick a slug that doesn't collide with others already assigned in the same directory. */
-function uniqueSlug(desired: string, existing: readonly string[]): string {
-  if (!existing.includes(desired)) return desired;
-  for (let i = 2; ; i++) {
-    const candidate = `${desired}-${i}`;
-    if (!existing.includes(candidate)) return candidate;
-  }
-}
-
 /**
  * Build the document index (identity + paths, `pages` left at 0) without
  * touching any cache.
@@ -138,7 +129,7 @@ async function buildIndex(sourcesDir: string, systemFilter?: string): Promise<So
     const containerDir = dirname(found.pdfPath);
     const title = basename(found.fileName, extname(found.fileName));
     const desired = slugify(title) || "document";
-    const slug = uniqueSlug(desired, assigned);
+    const slug = uniqueName(desired, assigned, { separator: "-" });
     assigned.push(slug);
 
     docs.push({
@@ -228,8 +219,8 @@ async function indexOne(doc: SourceDoc): Promise<void> {
   } catch {
     // Extraction failed — leave any stale cache alone and skip this doc.
     if (cached) {
-      const staleage = Number(cached["pages"]);
-      doc.pages = Number.isFinite(staleage) ? staleage : 0;
+      const cachedPages = Number(cached["pages"]);
+      doc.pages = Number.isFinite(cachedPages) ? cachedPages : 0;
     }
     return;
   }
@@ -309,7 +300,11 @@ export async function searchSources(
   const queryTerms = Array.from(new Set(tokenize(query)));
   if (queryTerms.length === 0) return [];
 
-  const docs = await listSources(sourcesDir, opts?.system);
+  // Build the index and read each cache file exactly once — the same file
+  // would otherwise be opened once for `pages` (via listSources) and again
+  // here for the body.
+  const docs = await buildIndex(sourcesDir, opts?.system);
+  docs.sort((a, b) => a.title.localeCompare(b.title));
 
   interface PageEntry {
     doc: SourceDoc;
@@ -325,7 +320,9 @@ export async function searchSources(
     } catch {
       continue;
     }
-    const { body } = parseFrontmatter(raw);
+    const { data, body } = parseFrontmatter(raw);
+    const pages = Number(data["pages"]);
+    doc.pages = Number.isFinite(pages) ? pages : 0;
     for (const p of splitCachePages(body)) {
       allPages.push({ doc, page: p.page, text: p.text, tokens: tokenize(p.text) });
     }

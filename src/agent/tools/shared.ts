@@ -14,9 +14,19 @@ export function stringArg(args: Record<string, unknown>, key: string): string {
   return typeof value === "string" ? value : "";
 }
 
+/**
+ * Coerce a number, tolerating the string forms models often emit ("3" instead
+ * of 3) for the same reason `boolArg` does. Anything else becomes NaN, which
+ * callers treat as "not found" rather than throwing.
+ */
 export function numberArg(args: Record<string, unknown>, key: string): number {
   const value = args[key];
-  return typeof value === "number" ? value : NaN;
+  if (typeof value === "number") return value;
+  if (typeof value === "string" && value.trim() !== "") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return NaN;
 }
 
 /**

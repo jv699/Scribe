@@ -88,15 +88,28 @@ ${campaign.storySoFar.trim() || "(nothing yet)"}
 `;
 }
 
+/**
+ * The three shared layers common to both campaign-mode prompts (planning and
+ * report): the code-owned core, the source-library summary, and the user's
+ * instructions. Factored out because both builders computed these
+ * identically before diverging into their mode-specific tail.
+ */
+async function campaignLayers(
+  settings: Settings,
+): Promise<{ base: string; sources: string; instructions: string }> {
+  const base = await core(CORE_CAMPAIGN_PROMPT, settings.systemPromptOverride);
+  const sources = await sourcesSection(settings.sourcesDir);
+  const instructions = instructionsSection(await loadInstructions());
+  return { base, sources, instructions };
+}
+
 export async function buildPlanningSystemPrompt(
   campaign: Campaign,
   session: Session,
   settings: Settings,
 ): Promise<string> {
-  const base = await core(CORE_CAMPAIGN_PROMPT, settings.systemPromptOverride);
+  const { base, sources, instructions } = await campaignLayers(settings);
   const notes = await readSessionNotes(session);
-  const sources = await sourcesSection(settings.sourcesDir);
-  const instructions = instructionsSection(await loadInstructions());
 
   return `${base}${campaignSection(campaign)}${sources}
 
@@ -115,9 +128,7 @@ export async function buildReportSystemPrompt(
   session: Session,
   settings: Settings,
 ): Promise<string> {
-  const base = await core(CORE_CAMPAIGN_PROMPT, settings.systemPromptOverride);
-  const sources = await sourcesSection(settings.sourcesDir);
-  const instructions = instructionsSection(await loadInstructions());
+  const { base, sources, instructions } = await campaignLayers(settings);
 
   return `${base}${campaignSection(campaign)}${sources}
 

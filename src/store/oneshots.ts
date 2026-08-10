@@ -7,7 +7,7 @@
 import { join } from "node:path";
 import { mkdir, readdir, writeFile } from "node:fs/promises";
 import { serializeFrontmatter } from "./frontmatter.ts";
-import { slugify } from "./naming.ts";
+import { slugify, today, uniqueName } from "./naming.ts";
 
 export interface OneshotInput {
   title: string;
@@ -21,14 +21,11 @@ export async function saveOneshot(dir: string, input: OneshotInput): Promise<str
 
   const slug = slugify(input.title) || "oneshot";
   const existing = await readdir(dir);
-  let fileName = `${slug}.md`;
-  for (let i = 2; existing.includes(fileName); i++) {
-    fileName = `${slug}-${i}.md`;
-  }
+  const fileName = uniqueName(slug, existing, { ext: ".md", separator: "-" });
 
   const data: Record<string, string> = {
     title: input.title,
-    created: new Date().toISOString().slice(0, 10),
+    created: today(),
   };
   if (input.system) data["system"] = input.system;
 

@@ -23,6 +23,8 @@ export interface OpenAIProviderOptions {
 }
 
 export const DEFAULT_BASE_URL = "https://api.openai.com/v1";
+// Fallback used only when settings/config omit a model. Not actively curated —
+// revisit periodically as OpenAI's lineup moves on.
 export const DEFAULT_MODEL = "gpt-4o-mini";
 
 interface StreamChoice {

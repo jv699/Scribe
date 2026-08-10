@@ -6,8 +6,8 @@
  */
 import { basename, join } from "node:path";
 import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
-import { parseFrontmatter, serializeFrontmatter } from "./frontmatter.ts";
-import { slugify, uniqueName } from "./naming.ts";
+import { parseFrontmatter, serializeFrontmatter, updateFrontmatterFile } from "./frontmatter.ts";
+import { slugify, today, uniqueName } from "./naming.ts";
 import { updateCampaignMeta, type Campaign } from "./campaigns.ts";
 
 export type SessionStatus = "planning" | "ready" | "played";
@@ -40,17 +40,16 @@ const SESSIONS_DIR = "sessions";
 const TRASH_DIR = join(".scribe", "trash");
 const VALID_STATUSES: readonly SessionStatus[] = ["planning", "ready", "played"];
 
-function today(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
 function sessionFromMarkdown(path: string, content: string): Session {
   const { data } = parseFrontmatter(content);
   const status = VALID_STATUSES.includes(data["status"] as SessionStatus)
     ? (data["status"] as SessionStatus)
     : "planning";
   return {
-    number: Number.parseInt(data["number"] ?? "0", 10) || 0,
+    // Clamped like campaignFromMarkdown's `nextSession` (campaigns.ts): session
+    // numbering starts at 1, so malformed/missing frontmatter should not
+    // produce a "session 0" that would sort before every real session.
+    number: Math.max(1, Number.parseInt(data["number"] ?? "1", 10) || 1),
     title: data["title"] ?? basename(path, ".md"),
     status,
     created: data["created"] ?? "",
@@ -64,8 +63,9 @@ export async function createSession(campaign: Campaign, title: string): Promise<
   const sessionsDir = join(campaign.dir, SESSIONS_DIR);
   const existing = await readdir(sessionsDir);
   const fileName = uniqueName(
-    `${String(number).padStart(3, "0")}-${slugify(title)}.md`,
+    `${String(number).padStart(3, "0")}-${slugify(title)}`,
     existing,
+    { ext: ".md", separator: "-" },
   );
   const path = join(sessionsDir, fileName);
 
@@ -101,11 +101,12 @@ export async function listSessions(campaign: Campaign): Promise<Session[]> {
 
 /** Transition status, stamping the corresponding date in frontmatter. */
 export async function setSessionStatus(session: Session, status: SessionStatus): Promise<void> {
-  const { data, body } = parseFrontmatter(await readFile(session.path, "utf8"));
-  const patch: Record<string, string> = { status };
-  if (status === "ready" && !data["ready"]) patch["ready"] = today();
-  if (status === "played" && !data["played"]) patch["played"] = today();
-  await writeFile(session.path, serializeFrontmatter({ ...data, ...patch }, body), "utf8");
+  await updateFrontmatterFile(session.path, (data, body) => {
+    const patch: Record<string, string> = { status };
+    if (status === "ready" && !data["ready"]) patch["ready"] = today();
+    if (status === "played" && !data["played"]) patch["played"] = today();
+    return { data: { ...data, ...patch }, body };
+  });
   session.status = status;
 }
 
@@ -117,8 +118,7 @@ export async function readSessionNotes(session: Session): Promise<string> {
 
 /** Replace the session's markdown body, preserving frontmatter. */
 export async function writeSessionNotes(session: Session, body: string): Promise<void> {
-  const { data } = parseFrontmatter(await readFile(session.path, "utf8"));
-  await writeFile(session.path, serializeFrontmatter(data, body), "utf8");
+  await updateFrontmatterFile(session.path, (data) => ({ data, body }));
 }
 
 /** Soft-delete: move the session file into the campaign's .scribe/trash/. */

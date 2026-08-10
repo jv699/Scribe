@@ -3,13 +3,14 @@ import { mkdtemp, readFile, rm, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { parseFrontmatter, serializeFrontmatter } from "../src/store/frontmatter.ts";
+import { parseFrontmatter, serializeFrontmatter, updateFrontmatterFile } from "../src/store/frontmatter.ts";
 import { loadSettings, saveSettings } from "../src/store/settings.ts";
 import { createCampaign, listCampaigns, loadCampaign, updateCampaignMeta, appendStorySoFar } from "../src/store/campaigns.ts";
 import { createSession, listSessions, setSessionStatus, trashSession } from "../src/store/sessions.ts";
 import { loadChatLog, saveChatLog, clearChatLog, chatLogPath } from "../src/store/chat-log.ts";
 import { loadInstructions, loadOneshotInstructions, loadPromptOverride } from "../src/store/instructions.ts";
 import { saveOneshot } from "../src/store/oneshots.ts";
+import { sanitizeFolderName, today, uniqueName } from "../src/store/naming.ts";
 
 let dir: string;
 
@@ -45,6 +46,25 @@ describe("frontmatter", () => {
     const { data, body } = parseFrontmatter("---\nname: x\nno fence");
     expect(data).toEqual({});
     expect(body).toBe("---\nname: x\nno fence");
+  });
+
+  test("updateFrontmatterFile reads, transforms, and writes back", async () => {
+    const path = join(dir, "doc.md");
+    await Bun.write(path, serializeFrontmatter({ name: "Strahd", status: "planning" }, "## Body\n\nhi\n"));
+
+    const result = await updateFrontmatterFile(path, (data, body) => ({
+      data: { ...data, status: "ready" },
+      body: body + "more\n",
+    }));
+    expect(result.data["status"]).toBe("ready");
+    expect(result.data["name"]).toBe("Strahd");
+    expect(result.body).toBe("## Body\n\nhi\nmore\n");
+
+    const raw = await readFile(path, "utf8");
+    const reparsed = parseFrontmatter(raw);
+    expect(reparsed.data["status"]).toBe("ready");
+    expect(reparsed.data["name"]).toBe("Strahd");
+    expect(reparsed.body).toBe("## Body\n\nhi\nmore\n");
   });
 });
 
@@ -208,7 +228,66 @@ describe("campaigns", () => {
   });
 });
 
+describe("naming", () => {
+  test("sanitizeFolderName replaces dot-only names that would escape the folder", () => {
+    expect(sanitizeFolderName(".")).toBe("Campaign");
+    expect(sanitizeFolderName("..")).toBe("Campaign");
+    expect(sanitizeFolderName("  ..  ")).toBe("Campaign");
+    expect(sanitizeFolderName("")).toBe("Campaign");
+    // ordinary names, including ones merely containing dots, are untouched
+    expect(sanitizeFolderName("Curse of Strahd")).toBe("Curse of Strahd");
+    expect(sanitizeFolderName("Vol. 2")).toBe("Vol. 2");
+  });
+
+  test("uniqueName keeps the extension last when disambiguating", () => {
+    expect(uniqueName("001-a", ["001-a.md"], { ext: ".md", separator: "-" })).toBe("001-a-2.md");
+    expect(uniqueName("Strahd", ["Strahd"])).toBe("Strahd 2");
+  });
+
+  test("uniqueName returns the desired name untouched when there is no collision", () => {
+    expect(uniqueName("rules", [])).toBe("rules");
+    expect(uniqueName("rules", ["other.md"], { ext: ".md" })).toBe("rules.md");
+  });
+
+  test("uniqueName walks past multiple collisions to find a free slot", () => {
+    expect(
+      uniqueName("rules", ["rules", "rules-2", "rules-3"], { separator: "-" }),
+    ).toBe("rules-4");
+  });
+
+  test("uniqueName with a bare separator (no ext) matches the sources.ts slug behavior", () => {
+    // Two docs that would slugify identically get "-2", "-3", ... suffixes,
+    // same as the old private uniqueSlug() in sources.ts.
+    expect(uniqueName("rules", ["rules"], { separator: "-" })).toBe("rules-2");
+    expect(uniqueName("rules", ["rules", "rules-2"], { separator: "-" })).toBe("rules-3");
+  });
+
+  test("today returns an ISO date string", () => {
+    expect(today()).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  test("a campaign named '..' stays inside the campaigns folder", async () => {
+    const campaign = await createCampaign(dir, { name: "..", system: "5e", description: "" });
+    // The campaign dir must be a child of `dir`, not `dir` itself or its parent.
+    expect(campaign.dir.startsWith(dir + "/")).toBe(true);
+    expect(await readdir(dir)).toEqual(["Campaign"]);
+  });
+});
+
 describe("sessions", () => {
+  test("a colliding session file keeps its .md extension and stays listable", async () => {
+    const campaign = await createCampaign(dir, { name: "CoS", system: "5e", description: "" });
+    await createSession(campaign, "Death House");
+    // Rewind the counter so the next create collides on both number and slug.
+    await updateCampaignMeta(campaign, { nextSession: 1 });
+    campaign.nextSession = 1;
+    const dup = await createSession(campaign, "Death House");
+
+    expect(dup.path.endsWith(".md")).toBe(true);
+    const sessions = await listSessions(campaign);
+    expect(sessions.map((s) => s.path)).toContain(dup.path);
+  });
+
   test("createSession writes 001-slug.md and bumps nextSession", async () => {
     const campaign = await createCampaign(dir, { name: "CoS", system: "5e", description: "" });
     const session = await createSession(campaign, "Death House");
