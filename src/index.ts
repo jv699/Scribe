@@ -18,10 +18,10 @@ import type { ChatProvider, ModelInfo } from "./provider/types.ts";
 import { toolsFor } from "./agent/agents.ts";
 import { makeAskChannel } from "./agent/ask.ts";
 import { buildOneshotSystemPrompt, buildPlanningSystemPrompt, buildReportSystemPrompt } from "./agent/context.ts";
-import { listSessions, type Session } from "./store/sessions.ts";
+import type { Session } from "./store/sessions.ts";
 import { loadChatLog, saveChatLog, type ChatLogMode } from "./store/chat-log.ts";
-import { indexSources, listSources } from "./store/sources.ts";
-import type { CompletionItem, CompletionSource } from "./components/autocomplete.ts";
+import { indexSources } from "./store/sources.ts";
+import { campaignCompletions, sourceCompletions } from "./completions.ts";
 
 const renderer = await createCliRenderer({
   exitOnCtrlC: true,
@@ -55,19 +55,28 @@ function showScreen(screen: Screen): void {
 
 let introPlayed = false;
 
-/** Navigate safely: if building a screen throws, log and fall back to the menu. */
+/** Set by a failed navigation, shown once on the menu it falls back to. */
+let pendingError: string | undefined;
+
+/**
+ * Navigate safely: if building a screen throws, fall back to the menu and
+ * report there — console output is invisible behind the alt screen.
+ */
 function navigate(fn: () => Promise<unknown>): void {
   void fn().catch((err: unknown) => {
-    console.error("Navigation failed:", err);
+    pendingError = `Navigation failed: ${err instanceof Error ? err.message : String(err)}`;
     void showMainMenu();
   });
 }
 
 async function showMainMenu(): Promise<void> {
   const campaigns = await listCampaigns(settings.campaignsDir);
+  const error = pendingError;
+  pendingError = undefined;
   showScreen(
     makeMainMenuScreen(renderer, {
       campaigns,
+      error,
       playIntro: !introPlayed,
       onCreateCampaign: () => campaignDialog.open(),
       onSelectCampaign: (campaign) => navigate(() => showCampaignHome(campaign)),
@@ -195,86 +204,6 @@ async function showReportChat(campaign: Campaign, session: Session): Promise<voi
       onBack: () => navigate(() => showCampaignHome(campaign)),
     }),
   );
-}
-
-/**
- * Case-insensitive filter over label+description, shared by every `@` source
- * below so each one only has to build its full item list.
- */
-function filterCompletions(items: CompletionItem[], query: string): CompletionItem[] {
-  const needle = query.toLowerCase();
-  if (needle === "") return items;
-  return items.filter((item) => `${item.label} ${item.description ?? ""}`.toLowerCase().includes(needle));
-}
-
-/**
- * `@` items for the source-document library: one per PDF, picking one inserts
- * a plain-language reference — "the ... source document" — rather than the
- * `@slug` markup, because that is what `search_sources`/`read_source_pages`
- * can act on, not a token the model has never been taught.
- */
-async function sourceItems(sourcesDir: string): Promise<CompletionItem[]> {
-  const docs = await listSources(sourcesDir);
-  return docs.map((doc) => ({
-    label: `@${doc.slug}`,
-    description: `${doc.system} · ${doc.pages} page${doc.pages === 1 ? "" : "s"}`,
-    insert: `the "${doc.title}" source document`,
-  }));
-}
-
-/** `@` completions for the Drafting Table, which has no campaign — sources only. */
-function sourceCompletions(sourcesDir: string): CompletionSource[] {
-  return [
-    {
-      trigger: "@",
-      items: async (query) => filterCompletions(await sourceItems(sourcesDir), query),
-    },
-  ];
-}
-
-/**
- * `@` mentions for a campaign chat: the campaign's two summary documents,
- * every session, and the source-document library. Picking one inserts a
- * plain-language reference rather than a markup token, because that is what
- * the agent can act on — "session 3 ("The Bell Tower")" points straight at
- * `read_session_notes(3)`, whereas `@session-3` would be syntax the model has
- * never been taught.
- *
- * Resolved on each keystroke rather than snapshotted, so sessions added while
- * the chat is open (or edited on disk) show up.
- */
-function campaignCompletions(campaign: Campaign, sourcesDir: string): CompletionSource[] {
-  return [
-    {
-      trigger: "@",
-      items: async (query) => {
-        const fresh = (await loadCampaign(campaign.dir)) ?? campaign;
-        const sessions = await listSessions(fresh);
-        const items: CompletionItem[] = [
-          {
-            label: "@background",
-            description: "The campaign premise",
-            insert: "the campaign background",
-          },
-          {
-            label: "@story-so-far",
-            description: "The running campaign summary",
-            insert: "the campaign's story so far",
-          },
-          ...sessions.map((session) => ({
-            label: `@session-${session.number}`,
-            description: `${session.title} · ${session.status}`,
-            insert: `session ${session.number} ("${session.title}")`,
-          })),
-          ...(await sourceItems(sourcesDir)),
-        ];
-
-        // Match titles too, so "@bell" finds the session called "The Bell
-        // Tower" and not just labels that happen to start that way.
-        return filterCompletions(items, query);
-      },
-    },
-  ];
 }
 
 function makeChatLog(campaign: Campaign, session: Session, mode: ChatLogMode): ChatLogStore {

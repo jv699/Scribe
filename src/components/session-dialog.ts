@@ -8,12 +8,11 @@ import {
   InputRenderableEvents,
   TextRenderable,
   type CliRenderer,
-  type KeyEvent,
   type Renderable,
 } from "@opentui/core";
 import { theme } from "../theme.ts";
-import { makeDialog } from "./dialog.ts";
-import { makeButton, tabWalk } from "./ui.ts";
+import { makeFormDialog } from "./form-dialog.ts";
+import { makeButton } from "./ui.ts";
 
 export interface SessionDialogOptions {
   onSubmit: (title: string) => void;
@@ -24,10 +23,16 @@ export interface SessionDialog {
   /** Add to the root (once) before use. */
   layer: BoxRenderable;
   open(nextSessionNumber: number): void;
+  /** Hide and release the keyboard. Safe to call when already closed. */
+  close(): void;
 }
 
 export function makeSessionDialog(renderer: CliRenderer, options: SessionDialogOptions): SessionDialog {
-  const dialog = makeDialog(renderer, { width: 44 });
+  const dialog = makeFormDialog(renderer, {
+    width: 44,
+    focusChain: () => focusChain,
+    onEscape: cancel,
+  });
 
   const title = new TextRenderable(renderer, { content: "New Session", fg: theme.accent, marginBottom: 1 });
 
@@ -65,12 +70,12 @@ export function makeSessionDialog(renderer: CliRenderer, options: SessionDialogO
       return;
     }
     options.onSubmit(sessionTitle);
-    close();
+    dialog.close();
   }
 
   function cancel(): void {
     options.onCancel();
-    close();
+    dialog.close();
   }
 
   function open(nextSessionNumber: number): void {
@@ -78,26 +83,11 @@ export function makeSessionDialog(renderer: CliRenderer, options: SessionDialogO
     hint.content = "";
     title.content = `New Session ${nextSessionNumber}`;
     dialog.open();
-    renderer.keyInput.on("keypress", onKeypress);
     titleInput.focus();
-  }
-
-  function close(): void {
-    renderer.keyInput.off("keypress", onKeypress);
-    dialog.close();
-  }
-
-  function onKeypress(key: KeyEvent): void {
-    if (key.name === "escape") {
-      key.preventDefault();
-      cancel();
-      return;
-    }
-    tabWalk(renderer, focusChain, key);
   }
 
   // Enter in the title field submits the dialog directly.
   titleInput.on(InputRenderableEvents.ENTER, () => submit());
 
-  return { layer: dialog.layer, open };
+  return { layer: dialog.layer, open, close: dialog.close };
 }

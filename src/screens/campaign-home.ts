@@ -13,6 +13,7 @@ import {
   type SelectOption,
 } from "@opentui/core";
 import { makeActionDialog, type ActionDialog } from "../components/action-dialog.ts";
+import { showConfirmDialog } from "../components/confirm-dialog.ts";
 import { makeSessionDialog } from "../components/session-dialog.ts";
 import { listSessions, createSession, setSessionStatus, trashSession, type Session } from "../store/sessions.ts";
 import { theme } from "../theme.ts";
@@ -93,6 +94,15 @@ export async function makeCampaignHomeScreen(
   });
   container.add(menu);
 
+  // Failures surface here: console output is invisible behind the alt screen,
+  // so a failed status change or trash would otherwise look like a success.
+  const status = new TextRenderable(renderer, { content: "", fg: theme.danger, marginTop: 1 });
+  container.add(status);
+
+  function showError(context: string, err: unknown): void {
+    status.content = `${context}: ${err instanceof Error ? err.message : String(err)}`;
+  }
+
   // While a dialog is open, the screen-level Escape handler stays out of
   // the way (the dialogs handle Escape themselves).
   let modalOpen = false;
@@ -105,7 +115,7 @@ export async function makeCampaignHomeScreen(
       void (async () => {
         await createSession(campaign, title);
         options.onChanged();
-      })();
+      })().catch((err: unknown) => showError("Failed to create session", err));
     },
     onCancel: () => {
       modalOpen = false;
@@ -114,6 +124,9 @@ export async function makeCampaignHomeScreen(
   });
   renderer.root.add(sessionDialog.layer);
   disposers.push(() => {
+    // close() first: if the screen is disposed while the dialog is open, its
+    // keypress listener would otherwise outlive the destroyed layer.
+    sessionDialog.close();
     renderer.root.remove(sessionDialog.layer);
     sessionDialog.layer.destroyRecursively();
   });
@@ -151,7 +164,7 @@ export async function makeCampaignHomeScreen(
         })
         .catch((err: unknown) => {
           dialog.close();
-          console.error("Action failed:", err);
+          showError("Action failed", err);
         });
     };
     if (session.status === "planning") {
@@ -178,33 +191,22 @@ export async function makeCampaignHomeScreen(
   // --- Trash confirmation (status guard for the destructive action) ---
   function confirmTrash(session: Session): void {
     modalOpen = true;
-    const dialog = makeActionDialog(renderer, {
+    showConfirmDialog(renderer, {
       width: 52,
+      title: `Move session ${session.number} — "${session.title}" to trash?`,
+      confirmLabel: "Trash",
+      // Keeps this dialog's long-standing focus order (see the screen's notes).
+      focusConfirm: true,
+      onConfirm: () => {
+        void trashSession(campaign, session)
+          .then(() => options.onChanged())
+          .catch((err: unknown) => showError("Failed to trash session", err));
+      },
       onClose: () => {
         modalOpen = false;
         menu.focus();
       },
     });
-
-    dialog.content.add(
-      new TextRenderable(renderer, {
-        content: `Move session ${session.number} — "${session.title}" to trash?`,
-        marginBottom: 1,
-      }),
-    );
-
-    dialog.addButton("Trash", "primary", () => {
-      void trashSession(campaign, session)
-        .then(() => {
-          dialog.close();
-          options.onChanged();
-        })
-        .catch((err: unknown) => {
-          dialog.close();
-          console.error("Failed to trash session:", err);
-        });
-    });
-    dialog.addButton("Cancel", "ghost", () => dialog.close());
   }
 
   // --- Menu wiring ---

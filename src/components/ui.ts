@@ -88,7 +88,7 @@ export function makeButton(ctx: RenderContext, options: ButtonOptions): BoxRende
     options.onClick?.();
   };
   button.onKeyDown = (key) => {
-    if (key.name === "return") options.onClick?.();
+    if (key.name === "return" || key.name === "kpenter") options.onClick?.();
   };
   button.onMouseOver = () => {
     button.backgroundColor = colors.hover;

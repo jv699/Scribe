@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { createTestRenderer, createMockKeys, type TestRenderer } from "@opentui/core/testing";
+import { type createMockKeys, type TestRenderer } from "@opentui/core/testing";
+import { setupRenderer, wait } from "./helpers/renderer.ts";
 import { makeSettingsScreen } from "../src/screens/settings.ts";
 import type { Screen } from "../src/screens/screen.ts";
 import { loadSettings, type Settings } from "../src/store/settings.ts";
@@ -15,14 +16,9 @@ let current: Screen | null = null;
 let saved: Settings | null = null;
 let wentBack = false;
 
-const wait = (ms = 300) => new Promise((r) => setTimeout(r, ms));
 
 beforeEach(async () => {
-  const setup = await createTestRenderer({ width: 90, height: 24 });
-  renderer = setup.renderer;
-  captureCharFrame = setup.captureCharFrame;
-  renderOnce = setup.renderOnce;
-  keys = createMockKeys(renderer);
+  ({ renderer, keys, captureCharFrame, renderOnce } = await setupRenderer({ width: 90, height: 24 }));
   current = null;
   saved = null;
   wentBack = false;
@@ -128,6 +124,111 @@ describe("settings screen", () => {
       frame = captureCharFrame();
       expect(frame.includes("Select a model")).toBe(false);
       expect(frame.includes("gpt-4o")).toBe(true);
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("the model picker filters as you type and wraps arrow selection", async () => {
+    const server = Bun.serve({
+      port: 0,
+      fetch(req) {
+        if (new URL(req.url).pathname === "/v1/models") {
+          // Ids deliberately unlike the Model field's "gpt-4o-mini" placeholder,
+          // which sits behind the dialog and would otherwise match.
+          return new Response(
+            JSON.stringify({ data: [{ id: "alpha-one" }, { id: "beta-two" }, { id: "gamma-three" }] }),
+            { headers: { "content-type": "application/json" } },
+          );
+        }
+        return new Response("not found", { status: 404 });
+      },
+    });
+    try {
+      await open({
+        campaignsDir: "/tmp/x",
+        oneshotsDir: "/tmp/o",
+        sourcesDir: "/tmp/s",
+        baseUrl: `http://localhost:${server.port}/v1`,
+      });
+
+      await keys.pressKeys(["TAB", "TAB"], 20); // -> Browse...
+      keys.pressEnter();
+      await wait();
+      await renderOnce();
+      expect(captureCharFrame().includes("gamma-three")).toBe(true);
+
+      // Typing narrows the list to matching ids.
+      await keys.typeText("beta", 5);
+      await wait();
+      await renderOnce();
+      let frame = captureCharFrame();
+      expect(frame.includes("beta-two")).toBe(true);
+      expect(frame.includes("alpha-one")).toBe(false);
+      expect(frame.includes("gamma-three")).toBe(false);
+
+      // A query matching nothing empties the list rather than leaving it stale.
+      await keys.typeText("zzz", 5);
+      await wait();
+      await renderOnce();
+      expect(captureCharFrame().includes("beta-two")).toBe(false);
+
+      // Clear the filter, then arrow up from the first row: selection wraps to
+      // the last model, so Enter picks it.
+      await keys.pressKeys(Array(7).fill("BACKSPACE"), 10);
+      await wait();
+      await renderOnce();
+      frame = captureCharFrame();
+      expect(frame.includes("alpha-one") && frame.includes("gamma-three")).toBe(true);
+
+      await keys.pressKeys(["ARROW_UP"], 20);
+      keys.pressEnter();
+      await wait();
+      await renderOnce();
+
+      frame = captureCharFrame();
+      expect(frame.includes("Select a model")).toBe(false);
+      // The model field now holds the last item, reached by wrapping upward.
+      expect(frame.includes("gamma-three")).toBe(true);
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("escape in the model picker closes only the picker, not the screen", async () => {
+    const server = Bun.serve({
+      port: 0,
+      fetch(req) {
+        if (new URL(req.url).pathname === "/v1/models") {
+          return new Response(JSON.stringify({ data: [{ id: "gpt-4o" }] }), {
+            headers: { "content-type": "application/json" },
+          });
+        }
+        return new Response("not found", { status: 404 });
+      },
+    });
+    try {
+      await open({
+        campaignsDir: "/tmp/x",
+        oneshotsDir: "/tmp/o",
+        sourcesDir: "/tmp/s",
+        baseUrl: `http://localhost:${server.port}/v1`,
+      });
+
+      await keys.pressKeys(["TAB", "TAB"], 20); // -> Browse...
+      keys.pressEnter();
+      await wait();
+      await renderOnce();
+      expect(captureCharFrame().includes("Select a model")).toBe(true);
+
+      keys.pressKey("ESCAPE");
+      await wait();
+      await renderOnce();
+
+      const frame = captureCharFrame();
+      expect(frame.includes("Select a model")).toBe(false);
+      expect(frame.includes("Base URL")).toBe(true); // settings screen still up
+      expect(wentBack).toBe(false);
     } finally {
       server.stop();
     }

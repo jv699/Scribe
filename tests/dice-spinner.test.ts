@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { createTestRenderer, type TestRenderer } from "@opentui/core/testing";
+import { type TestRenderer } from "@opentui/core/testing";
+import { setupRenderer, wait } from "./helpers/renderer.ts";
 import { DiceSpinnerRenderable } from "../src/components/dice-spinner.ts";
 
 let renderer: TestRenderer;
@@ -7,13 +8,9 @@ let captureCharFrame: () => string;
 let renderOnce: () => Promise<void>;
 const spinners: DiceSpinnerRenderable[] = [];
 
-const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 beforeEach(async () => {
-  const setup = await createTestRenderer({ width: 40, height: 10 });
-  renderer = setup.renderer;
-  captureCharFrame = setup.captureCharFrame;
-  renderOnce = setup.renderOnce;
+  ({ renderer, captureCharFrame, renderOnce } = await setupRenderer({ width: 40, height: 10 }));
   spinners.length = 0;
 });
 

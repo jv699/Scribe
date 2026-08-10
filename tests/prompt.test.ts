@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { createTestRenderer, createMockKeys, type TestRenderer } from "@opentui/core/testing";
+import { createMockKeys, type TestRenderer } from "@opentui/core/testing";
+import { setupRenderer, wait } from "./helpers/renderer.ts";
 import { makePrompt, type Prompt } from "../src/components/prompt.ts";
 
 let renderer: TestRenderer;
@@ -7,13 +8,9 @@ let captureCharFrame: () => string;
 let renderOnce: () => Promise<void>;
 let prompt: Prompt | null = null;
 
-const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 beforeEach(async () => {
-  const setup = await createTestRenderer({ width: 50, height: 8 });
-  renderer = setup.renderer;
-  captureCharFrame = setup.captureCharFrame;
-  renderOnce = setup.renderOnce;
+  ({ renderer, captureCharFrame, renderOnce } = await setupRenderer({ width: 50, height: 8 }));
   prompt = null;
 });
 
