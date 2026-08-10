@@ -1,9 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { createTestRenderer, createMockKeys, type TestRenderer } from "@opentui/core/testing";
+import { type createMockKeys, type TestRenderer } from "@opentui/core/testing";
+import { setupRenderer, wait } from "./helpers/renderer.ts";
+import type { KeyEvent } from "@opentui/core";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { makeButton } from "../src/components/ui.ts";
 import { makeCampaignDialog } from "../src/components/campaign-dialog.ts";
 import { makeMainMenuScreen } from "../src/screens/main-menu.ts";
 import { makeCampaignHomeScreen } from "../src/screens/campaign-home.ts";
@@ -62,15 +65,10 @@ async function showCampaignHome(campaign: Campaign): Promise<void> {
   );
 }
 
-const wait = (ms = 300) => new Promise((r) => setTimeout(r, ms));
 
 beforeEach(async () => {
   campaignsDir = await mkdtemp(join(tmpdir(), "scribe-ui-test-"));
-  const setup = await createTestRenderer({ width: 100, height: 30 });
-  renderer = setup.renderer;
-  captureCharFrame = setup.captureCharFrame;
-  renderOnce = setup.renderOnce;
-  keys = createMockKeys(renderer);
+  ({ renderer, keys, captureCharFrame, renderOnce } = await setupRenderer({ width: 100, height: 30 }));
 
   campaignDialog = makeCampaignDialog(renderer, {
     onSubmit: (input) => {
@@ -169,4 +167,23 @@ describe("phase-0 ui flow", () => {
     expect(frame.includes("Curse of Strahd")).toBe(true);
     expect(frame.includes("System: D&D 5e")).toBe(true);
   }, 15000);
+});
+
+describe("makeButton", () => {
+  // Numpad Enter is a distinct key name from Return; every other Enter-sensitive
+  // widget accepts both, and makeButton backs every button in the app.
+  test("activates on both Return and numpad Enter", () => {
+    let clicks = 0;
+    const button = makeButton(renderer, { label: "Go", onClick: () => clicks++ });
+    renderer.root.add(button);
+
+    button.onKeyDown?.({ name: "return" } as KeyEvent);
+    expect(clicks).toBe(1);
+
+    button.onKeyDown?.({ name: "kpenter" } as KeyEvent);
+    expect(clicks).toBe(2);
+
+    button.onKeyDown?.({ name: "a" } as KeyEvent);
+    expect(clicks).toBe(2);
+  });
 });

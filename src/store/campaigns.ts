@@ -5,8 +5,8 @@
  */
 import { join } from "node:path";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
-import { parseFrontmatter, serializeFrontmatter } from "./frontmatter.ts";
-import { sanitizeFolderName, uniqueName } from "./naming.ts";
+import { parseFrontmatter, serializeFrontmatter, updateFrontmatterFile } from "./frontmatter.ts";
+import { sanitizeFolderName, today, uniqueName } from "./naming.ts";
 
 /**
  * A campaign is a folder containing `campaign.md`:
@@ -89,7 +89,7 @@ export async function createCampaign(campaignsDir: string, input: NewCampaign): 
   await mkdir(join(dir, "sessions"), { recursive: true });
   await mkdir(join(dir, ".scribe"), { recursive: true });
 
-  const created = new Date().toISOString().slice(0, 10);
+  const created = today();
   const markdown = buildCampaignMarkdown({ ...input, created, nextSession: 1 });
   await writeFile(join(dir, CAMPAIGN_FILE), markdown, "utf8");
 
@@ -124,9 +124,10 @@ export async function updateCampaignMeta(
   patch: Partial<Pick<Campaign, "nextSession" | "name" | "system">>,
 ): Promise<void> {
   const filePath = join(campaign.dir, CAMPAIGN_FILE);
-  const { data, body } = parseFrontmatter(await readFile(filePath, "utf8"));
-  const merged = { ...data, ...Object.fromEntries(Object.entries(patch).map(([k, v]) => [k, String(v)])) };
-  await writeFile(filePath, serializeFrontmatter(merged, body), "utf8");
+  await updateFrontmatterFile(filePath, (data, body) => ({
+    data: { ...data, ...Object.fromEntries(Object.entries(patch).map(([k, v]) => [k, String(v)])) },
+    body,
+  }));
 }
 
 /**
@@ -136,17 +137,22 @@ export async function updateCampaignMeta(
  */
 export async function appendStorySoFar(campaign: Campaign, entry: string): Promise<void> {
   const filePath = join(campaign.dir, CAMPAIGN_FILE);
-  const { data, body } = parseFrontmatter(await readFile(filePath, "utf8"));
+  // Preserve the original quirk: when the heading is missing (freshly-added
+  // section), the in-memory campaign's storySoFar is intentionally left
+  // untouched — only the file gains the section.
+  let hadHeading = false;
+  let newBody = "";
+  await updateFrontmatterFile(filePath, (data, body) => {
+    const headingIndex = body.indexOf(STORY_HEADING);
+    if (headingIndex === -1) {
+      newBody = `${body.trimEnd()}\n\n${STORY_HEADING}\n\n${entry.trim()}\n`;
+      return { data, body: newBody };
+    }
 
-  const headingIndex = body.indexOf(STORY_HEADING);
-  if (headingIndex === -1) {
-    const newBody = `${body.trimEnd()}\n\n${STORY_HEADING}\n\n${entry.trim()}\n`;
-    await writeFile(filePath, serializeFrontmatter(data, newBody), "utf8");
-    return;
-  }
-
-  const rest = body.slice(headingIndex + STORY_HEADING.length).trim();
-  const newBody = `${body.slice(0, headingIndex + STORY_HEADING.length)}\n\n${rest ? `${rest}\n\n` : ""}${entry.trim()}\n`;
-  await writeFile(filePath, serializeFrontmatter(data, newBody), "utf8");
-  campaign.storySoFar = extractSection(newBody, STORY_HEADING);
+    hadHeading = true;
+    const rest = body.slice(headingIndex + STORY_HEADING.length).trim();
+    newBody = `${body.slice(0, headingIndex + STORY_HEADING.length)}\n\n${rest ? `${rest}\n\n` : ""}${entry.trim()}\n`;
+    return { data, body: newBody };
+  });
+  if (hadHeading) campaign.storySoFar = extractSection(newBody, STORY_HEADING);
 }

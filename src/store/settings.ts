@@ -4,7 +4,7 @@
  * first run; API keys are referenced by env var name, never stored.
  */
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 
 /**
@@ -94,7 +94,7 @@ export async function loadSettings(configPath: string = defaultConfigPath()): Pr
   if (settings.oneshotPromptOverride) settings.oneshotPromptOverride = expandHome(settings.oneshotPromptOverride);
 
   if (raw === null) {
-    await mkdir(join(configPath, ".."), { recursive: true });
+    await mkdir(dirname(configPath), { recursive: true });
     await writeFile(configPath, JSON.stringify(settings, null, 2) + "\n", "utf8");
   }
   await mkdir(settings.campaignsDir, { recursive: true });
@@ -106,6 +106,6 @@ export async function loadSettings(configPath: string = defaultConfigPath()): Pr
 
 /** Persist settings back to the config file. */
 export async function saveSettings(settings: Settings, configPath: string = defaultConfigPath()): Promise<void> {
-  await mkdir(join(configPath, ".."), { recursive: true });
+  await mkdir(dirname(configPath), { recursive: true });
   await writeFile(configPath, JSON.stringify(settings, null, 2) + "\n", "utf8");
 }

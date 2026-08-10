@@ -26,6 +26,8 @@ export interface MainMenuOptions {
   /** Open the one-shot planner (Drafting Table) — free-form ideas chat. */
   onOneshotPlanner: () => void;
   onQuit: () => void;
+  /** Message from a failed navigation, shown under the menu. */
+  error?: string | undefined;
 }
 
 export function makeMainMenuScreen(renderer: CliRenderer, options: MainMenuOptions): Screen {
@@ -87,6 +89,9 @@ export function makeMainMenuScreen(renderer: CliRenderer, options: MainMenuOptio
   container.add(new BoxRenderable(renderer, { flexGrow: 0.5 }));
   container.add(logo);
   container.add(menuPanel);
+  if (options.error) {
+    container.add(new TextRenderable(renderer, { content: options.error, fg: theme.danger, marginTop: 1 }));
+  }
   container.add(new BoxRenderable(renderer, { flexGrow: 2 }));
 
   if (options.playIntro) {
@@ -94,5 +99,8 @@ export function makeMainMenuScreen(renderer: CliRenderer, options: MainMenuOptio
     chunkyFadeIn(menuPanel, { delayMs: 500 });
   }
 
+  // No dispose(): this screen registers no renderer-level listeners of its own
+  // (SelectRenderable handles its own focus). Anything added here that does —
+  // a keypress handler, a timer — must be torn down like the other screens do.
   return { node: container, focus: () => mainMenu.focus() };
 }

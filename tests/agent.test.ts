@@ -261,7 +261,18 @@ describe("campaign tools", () => {
     const update = grantedTool("planning", "update_session_notes");
     expect(await update.execute({ number: 999, content: "x" })).toBe("(session not found)");
     expect(await update.execute({ number: 0, content: "x" })).toBe("(session not found)");
-    expect(await update.execute({ number: "1", content: "x" })).toBe("(session not found)");
+    expect(await update.execute({ number: "abc", content: "x" })).toBe("(session not found)");
+    expect(await update.execute({ number: "", content: "x" })).toBe("(session not found)");
+    expect(await update.execute({ number: 1.5, content: "x" })).toBe("(session not found)");
+  });
+
+  // Local models routinely send numbers as strings; numberArg coerces them for
+  // the same reason boolArg accepts "true"/"false".
+  test("accepts a session number sent as a string", async () => {
+    const update = grantedTool("planning", "update_session_notes");
+    expect(await update.execute({ number: "1", content: "## Plan\n\nFrom a string." })).toContain(
+      "Updated notes",
+    );
   });
 
   test("read_session_notes returns the session body", async () => {
@@ -458,6 +469,22 @@ describe("ask channel", () => {
     channel.attach(async () => ({ question: "q", answers: ["second"] }));
     const answer = await channel.ask({ question: "q", options: [{ label: "x" }] });
     expect(answer?.answers).toEqual(["second"]);
+  });
+
+  test("pending queue does not grow across sequential answered questions", async () => {
+    // Regression: a resolver was previously only ever removed from `pending`
+    // by the bulk clear in `detach`, so a resolver whose question was
+    // answered normally sat in the array for the life of the chat session —
+    // an unbounded leak over a long conversation.
+    const channel = makeAskChannel();
+    channel.attach(async (question) => ({ question: question.question, answers: ["ok"] }));
+
+    for (let i = 0; i < 25; i++) {
+      expect(channel.pendingCount).toBe(0);
+      const answer = await channel.ask({ question: `q${i}`, options: [{ label: "x" }] });
+      expect(answer?.answers).toEqual(["ok"]);
+      expect(channel.pendingCount).toBe(0);
+    }
   });
 });
 

@@ -67,6 +67,12 @@ export interface AskChannel {
   attach(handler: AskHandler): () => void;
   /** Whether a handler is currently attached (i.e. there is a UI to ask). */
   readonly available: boolean;
+  /**
+   * Count of questions currently awaiting an answer. Exists mainly so tests
+   * can assert the pending queue doesn't grow unboundedly across a long
+   * conversation of sequentially answered questions.
+   */
+  readonly pendingCount: number;
 }
 
 export function makeAskChannel(): AskChannel {
@@ -79,6 +85,10 @@ export function makeAskChannel(): AskChannel {
       return handler !== null;
     },
 
+    get pendingCount() {
+      return pending.length;
+    },
+
     ask: async (question) => {
       const active = handler;
       // No UI attached (headless run, or the screen already went away).
@@ -88,12 +98,21 @@ export function makeAskChannel(): AskChannel {
       // this promise dangling. Whichever settles first wins; the loser is
       // ignored because `resolve` after settlement is a no-op.
       return new Promise<AskAnswer | null>((resolve) => {
-        pending.push(resolve);
+        // Wrap `resolve` so a normally-answered question removes its own
+        // entry from `pending` instead of riding along until the next
+        // detach — otherwise a long session's answered questions pile up
+        // in the array forever.
+        const settle = (answer: AskAnswer | null) => {
+          const index = pending.indexOf(settle);
+          if (index !== -1) pending.splice(index, 1);
+          resolve(answer);
+        };
+        pending.push(settle);
         void active(question).then(
-          (answer) => resolve(answer),
+          (answer) => settle(answer),
           // A crashing widget must not take the agent turn down with it —
           // it reads as a decline, same as Escape.
-          () => resolve(null),
+          () => settle(null),
         );
       });
     },

@@ -9,12 +9,11 @@ import {
   TextareaRenderable,
   TextRenderable,
   type CliRenderer,
-  type KeyEvent,
   type Renderable,
 } from "@opentui/core";
 import { theme } from "../theme.ts";
-import { makeDialog } from "./dialog.ts";
-import { makeButton, tabWalk } from "./ui.ts";
+import { makeFormDialog } from "./form-dialog.ts";
+import { makeButton } from "./ui.ts";
 import type { NewCampaign } from "../store/campaigns.ts";
 
 export interface CampaignDialogOptions {
@@ -26,10 +25,16 @@ export interface CampaignDialog {
   /** Add this to the root once at startup. */
   layer: BoxRenderable;
   open(): void;
+  /** Hide and release the keyboard. Safe to call when already closed. */
+  close(): void;
 }
 
 export function makeCampaignDialog(renderer: CliRenderer, options: CampaignDialogOptions): CampaignDialog {
-  const dialog = makeDialog(renderer, { width: 52 });
+  const dialog = makeFormDialog(renderer, {
+    width: 52,
+    focusChain: () => focusChain,
+    onEscape: cancel,
+  });
 
   const title = new TextRenderable(renderer, {
     content: "New Campaign",
@@ -95,12 +100,12 @@ export function makeCampaignDialog(renderer: CliRenderer, options: CampaignDialo
       system: systemInput.value.trim(),
       description: descInput.plainText.trim(),
     });
-    close();
+    dialog.close();
   }
 
   function cancel(): void {
     options.onCancel();
-    close();
+    dialog.close();
   }
 
   function open(): void {
@@ -109,23 +114,7 @@ export function makeCampaignDialog(renderer: CliRenderer, options: CampaignDialo
     descInput.clear();
     hint.content = "";
     dialog.open();
-    renderer.keyInput.on("keypress", onKeypress);
     nameInput.focus();
-  }
-
-  function close(): void {
-    renderer.keyInput.off("keypress", onKeypress);
-    dialog.close();
-  }
-
-  // Global while open: Escape cancels, Tab/Shift+Tab walk the focus chain.
-  function onKeypress(key: KeyEvent): void {
-    if (key.name === "escape") {
-      key.preventDefault();
-      cancel();
-      return;
-    }
-    tabWalk(renderer, focusChain, key);
   }
 
   // Enter in a single-line field submits the dialog directly. Tab still
@@ -133,5 +122,5 @@ export function makeCampaignDialog(renderer: CliRenderer, options: CampaignDialo
   nameInput.on(InputRenderableEvents.ENTER, () => submit());
   systemInput.on(InputRenderableEvents.ENTER, () => submit());
 
-  return { layer: dialog.layer, open };
+  return { layer: dialog.layer, open, close: dialog.close };
 }

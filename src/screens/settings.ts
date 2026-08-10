@@ -29,6 +29,8 @@ export async function makeSettingsScreen(
   renderer: CliRenderer,
   options: SettingsScreenOptions,
 ): Promise<Screen> {
+  // True while the model picker owns the keyboard (see onKeypress).
+  let modalOpen = false;
   const container = new BoxRenderable(renderer, {
     width: "100%",
     height: "100%",
@@ -113,13 +115,17 @@ export async function makeSettingsScreen(
         return;
       }
       setStatus("", "info");
+      modalOpen = true;
       showModelPickerDialog(renderer, {
         models,
         onPick: (model) => {
           modelInput.value = model;
           modelInput.focus();
         },
-        onClose: () => modelInput.focus(),
+        onClose: () => {
+          modalOpen = false;
+          modelInput.focus();
+        },
       });
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Failed to load models");
@@ -180,6 +186,9 @@ export async function makeSettingsScreen(
   }
 
   const onKeypress = (key: KeyEvent): void => {
+    // The model picker registers its own keypress listener; without this guard
+    // its Escape would also reach us and navigate the whole screen away.
+    if (modalOpen) return;
     if (key.name === "escape") {
       key.preventDefault();
       leave();

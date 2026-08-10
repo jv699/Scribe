@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { createTestRenderer, createMockKeys, type TestRenderer } from "@opentui/core/testing";
+import { createMockKeys, type TestRenderer } from "@opentui/core/testing";
+import { setupRenderer, wait } from "./helpers/renderer.ts";
 import { MarkdownRenderable, TextareaRenderable, type Renderable } from "@opentui/core";
 import { makeChatScreen, type ChatLogStore } from "../src/screens/chat.ts";
 import type { Screen } from "../src/screens/screen.ts";
@@ -28,14 +29,9 @@ const errorProvider: ChatProvider = {
   },
 };
 
-const wait = (ms = 300) => new Promise((r) => setTimeout(r, ms));
 
 beforeEach(async () => {
-  const setup = await createTestRenderer({ width: 80, height: 24 });
-  renderer = setup.renderer;
-  captureCharFrame = setup.captureCharFrame;
-  renderOnce = setup.renderOnce;
-  keys = createMockKeys(renderer);
+  ({ renderer, keys, captureCharFrame, renderOnce } = await setupRenderer({ width: 80, height: 24 }));
   current = null;
   wentBack = false;
 });

@@ -16,7 +16,6 @@
  */
 import {
   BoxRenderable,
-  MarkdownRenderable,
   ScrollBoxRenderable,
   TextRenderable,
   type CliRenderer,
@@ -24,16 +23,15 @@ import {
 } from "@opentui/core";
 import { theme } from "../theme.ts";
 import { createMarkdownSyntaxStyle } from "../markdown-style.ts";
-import { makeAccentPanel } from "../components/ui.ts";
+import { makeTranscript } from "../components/transcript.ts";
 import { makePrompt } from "../components/prompt.ts";
-import { makeActionDialog } from "../components/action-dialog.ts";
+import { showConfirmDialog } from "../components/confirm-dialog.ts";
 import { makeAskWidget, type AskWidget } from "../components/ask-widget.ts";
 import { makeAutocomplete, type CompletionSource } from "../components/autocomplete.ts";
 import { DiceSpinnerRenderable } from "../components/dice-spinner.ts";
 import { runAgent, type AgentTool } from "../agent/loop.ts";
 import {
   ASK_USER_TOOL_NAME,
-  parseAskResult,
   type AskAnswer,
   type AskChannel,
   type AskQuestion,
@@ -139,9 +137,9 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
     updateModelHeader();
   }
 
-  // Transcript: user messages each get their own accent-strip panel (mirroring
-  // the prompt box); assistant replies flow as markdown beneath them. The shared
-  // SyntaxStyle themes every markdown block with Scribe's palette.
+  // Scrolling transcript (see components/transcript.ts for how rows render).
+  // The shared SyntaxStyle themes every markdown block with Scribe's palette;
+  // this screen owns it, and dispose() destroys it.
   const syntaxStyle = createMarkdownSyntaxStyle();
   const scrollBox = new ScrollBoxRenderable(renderer, {
     width: "100%",
@@ -150,12 +148,8 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
     stickyScroll: true,
     stickyStart: "bottom",
   });
-  const transcriptBox = new BoxRenderable(renderer, {
-    width: "100%",
-    flexDirection: "column",
-    paddingRight: "1%"
-  });
-  scrollBox.content.add(transcriptBox);
+  const transcript = makeTranscript(renderer, { syntaxStyle });
+  scrollBox.content.add(transcript.node);
   container.add(scrollBox);
 
   // Status line: die + text for thinking / tool activity / errors.
@@ -195,152 +189,12 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
     });
   }
 
-  /** A rendered transcript row; updated in place as its message streams in. */
-  interface TranscriptRow {
-    msg: ChatMessage;
-    node: BoxRenderable;
-    update: () => void;
-  }
-
-  const rows: TranscriptRow[] = [];
-
-  /**
-   * Ids of the tool calls that were `ask_user`, so their results can be told
-   * apart from every other tool message. Derived from the `tool_calls` already
-   * on the assistant messages rather than stamped onto the tool message: that
-   * keeps `ChatMessage` (and the JSONL log, and what goes over the wire)
-   * untouched, and makes resumed conversations render with no migration.
-   */
-  function askCallIds(): Set<string> {
-    const ids = new Set<string>();
-    for (const msg of messages) {
-      if (msg.role !== "assistant" || !msg.tool_calls) continue;
-      for (const call of msg.tool_calls) {
-        if (call.function.name === ASK_USER_TOOL_NAME) ids.add(call.id);
-      }
-    }
-    return ids;
-  }
-
-  /**
-   * The rows worth showing: user/assistant prose, plus answered questions.
-   * A dismissed question has no parseable answer and is left out — a skipped
-   * fork isn't part of the story.
-   */
-  function visibleMessages(): ChatMessage[] {
-    const askIds = askCallIds();
-    return messages.filter((msg) => {
-      if (msg.role === "user" || msg.role === "assistant") return msg.content.trim() !== "";
-      if (msg.role !== "tool") return false;
-      return (
-        msg.tool_call_id !== undefined &&
-        askIds.has(msg.tool_call_id) &&
-        parseAskResult(msg.content) !== null
-      );
-    });
-  }
-
-  function makeRow(msg: ChatMessage): TranscriptRow {
-    if (msg.role === "tool") return makeAskRow(msg);
-
-    const md = new MarkdownRenderable(renderer, {
-      content: msg.content,
-      width: "100%",
-      syntaxStyle,
-      fg: theme.text,
-      internalBlockMode: "top-level",
-      tableOptions: { style: "grid" },
-      // Always streaming, never toggled off. MarkdownRenderable only builds the
-      // synchronous "unstyled" first paint (`initialStyledText`) while streaming
-      // is on; with it off, every block waits on an async tree-sitter highlight
-      // and paints blank for a frame. That shows up as a full-transcript flicker
-      // when a reply finishes (true -> false rebuilds every block) and as a blank
-      // first frame for rows built from existing content (resume / agent mode).
-      // The settled output is identical either way, so we just leave it on.
-      streaming: true,
-    });
-    const update = (): void => {
-      md.content = msg.content;
-    };
-    if (msg.role === "user") {
-      // Same accent-strip treatment as the prompt box.
-      const { node, panel } = makeAccentPanel(renderer);
-      panel.add(md);
-      return { msg, node, update };
-    }
-    const node = new BoxRenderable(renderer, { width: "100%", flexShrink: 0, marginTop: 1 });
-    node.add(md);
-    return { msg, node, update };
-  }
-
-  /**
-   * A settled `ask_user` exchange: the question, dimmed, and the answer in
-   * accent. Plain text rather than markdown — this is a record of a decision,
-   * not model prose, and it should read as a quieter aside than either speaker.
-   * A muted left rule distinguishes it from the accent strip on user messages.
-   */
-  function makeAskRow(msg: ChatMessage): TranscriptRow {
-    const parsed = parseAskResult(msg.content);
-    const node = new BoxRenderable(renderer, {
-      width: "100%",
-      flexShrink: 0,
-      marginTop: 1,
-      border: ["left"],
-      borderColor: theme.textMuted,
-    });
-    const body = new BoxRenderable(renderer, {
-      width: "100%",
-      flexDirection: "column",
-      paddingLeft: 2,
-      paddingRight: 2,
-    });
-    body.add(new TextRenderable(renderer, { content: parsed?.question ?? "", fg: theme.textMuted }));
-    body.add(new TextRenderable(renderer, { content: `→ ${parsed?.answer ?? ""}`, fg: theme.accent }));
-    node.add(body);
-    // Content is final once the tool returned, so there is nothing to update.
-    return { msg, node, update: () => {} };
-  }
-
-  function removeRow(index: number): void {
-    const row = rows[index]!;
-    transcriptBox.remove(row.node);
-    row.node.destroyRecursively();
-    rows.splice(index, 1);
-  }
-
-  /** Line the transcript up with `messages`, reusing rows for surviving messages. */
+  /** Repaint the transcript. Skipped after dispose: building a row needs the
+   * SyntaxStyle, which dispose() destroys, and a turn still streaming after the
+   * user left must not paint into a dead tree. */
   function render(): void {
-    // Building a row needs the SyntaxStyle, which dispose() destroys. A turn
-    // still streaming after the user left must not paint into a dead tree.
     if (disposed) return;
-    const visible = visibleMessages();
-    const alive = new Set(visible);
-
-    for (let i = rows.length - 1; i >= 0; i--) {
-      if (!alive.has(rows[i]!.msg)) removeRow(i);
-    }
-
-    let cursor = 0;
-    for (const msg of visible) {
-      // Search manually from cursor (findIndex's 2nd arg is thisArg, not fromIndex).
-      let match = -1;
-      for (let i = cursor; i < rows.length; i++) {
-        if (rows[i]!.msg === msg) {
-          match = i;
-          break;
-        }
-      }
-      if (match === cursor) {
-        cursor++;
-        continue;
-      }
-      const row = match > cursor ? rows.splice(match, 1)[0]! : makeRow(msg);
-      rows.splice(cursor, 0, row);
-      transcriptBox.insertBefore(row.node, rows[cursor + 1]?.node);
-      cursor++;
-    }
-
-    for (const row of rows) row.update();
+    transcript.sync(messages);
   }
 
   // Resume: seed the transcript with any saved conversation.
@@ -362,7 +216,7 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
   }
 
   /** Stop the spinner, clearing the status line it was driving. */
-  function stopThinkingNow(): void {
+  function stopThinking(): void {
     if (!thinking) return;
     thinking = false;
     thinkingSpinner.stop();
@@ -371,7 +225,7 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
 
   /** Append a streamed delta to the pending assistant message. */
   function appendStreamed(delta: string): void {
-    stopThinkingNow();
+    stopThinking();
     messages[messages.length - 1]!.content += delta;
     render();
   }
@@ -406,7 +260,7 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
       askWidget = widget;
 
       // It isn't thinking, it's blocked on the user — stop the die.
-      stopThinkingNow();
+      stopThinking();
       status.fg = theme.textMuted;
       status.content = WAITING_TEXT;
 
@@ -460,26 +314,15 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
       return;
     }
     modalOpen = true;
-    const dialog = makeActionDialog(renderer, {
-      width: 54,
+    showConfirmDialog(renderer, {
+      title: "Clear this conversation?",
+      body: "The saved history is deleted. This can't be undone.",
+      confirmLabel: "Clear",
+      onConfirm: clearConversation,
       onClose: () => {
         modalOpen = false;
         prompt.input.focus();
       },
-    });
-    dialog.content.add(new TextRenderable(renderer, { content: "Clear this conversation?", fg: theme.text }));
-    dialog.content.add(
-      new TextRenderable(renderer, {
-        content: "The saved history is deleted. This can't be undone.",
-        fg: theme.textMuted,
-        marginBottom: 1,
-      }),
-    );
-    // Cancel first, so the safe choice is the one already focused.
-    dialog.addButton("Cancel", "ghost", () => dialog.close());
-    dialog.addButton("Clear", "primary", () => {
-      clearConversation();
-      dialog.close();
     });
   }
 
@@ -566,7 +409,7 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
       if (!disposed) status.content = "";
     } catch (err) {
       if (disposed) return;
-      stopThinkingNow();
+      stopThinking();
       status.fg = theme.danger;
       status.content = `Error: ${err instanceof Error ? err.message : String(err)}`;
     } finally {
@@ -574,7 +417,7 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
       // The user may have left while this turn was in flight. dispose() has
       // already stopped the spinner and saved, and the transcript is gone.
       if (!disposed) {
-        stopThinkingNow();
+        stopThinking();
         render();
         if (options.chatLog) {
           try {
