@@ -100,6 +100,12 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
     flexDirection: "row",
     justifyContent: "space-between",
     width: "100%",
+    // Pinned: without these the flexGrow:1 scroll box below shrinks the row to
+    // zero height and the transcript (added later, so drawn after) paints over
+    // the header text.
+    height: 1,
+    flexShrink: 0,
+    zIndex: 1,
     // No marginBottom on purpose: the first transcript row brings its own
     // marginTop, and the prompt panel below brings one too, so the transcript
     // sits exactly one blank row clear of each — symmetric in every state.
