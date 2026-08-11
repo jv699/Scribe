@@ -5,6 +5,7 @@ import type { ToolSpec } from "./types.ts";
 export const readCampaignSummaryTool: ToolSpec = {
   name: "read_campaign_summary",
   label: "Reading the campaign summary",
+  pastLabel: "Read the campaign summary",
   definition: {
     type: "function",
     function: {

@@ -41,12 +41,21 @@ export type ToolName = keyof typeof registry;
 export const toolNames = Object.keys(registry) as ToolName[];
 
 /**
- * The human-readable phrase for a tool, for status lines and other UI. Takes a
- * plain string (tool names arrive from the model, so they may be anything) and
+ * The human-readable present-tense phrase for a tool, for the transcript's
+ * running activity row. Takes a plain string (tool names arrive from the model,
+ * so they may be anything) and
  * falls back to the raw name for anything unregistered.
  */
 export function toolLabel(name: string): string {
   return (registry as Record<string, ToolSpec | undefined>)[name]?.label ?? name;
+}
+
+/**
+ * The past-tense counterpart of `toolLabel`, for the settled activity row a
+ * finished tool leaves behind in the transcript. Same fallback.
+ */
+export function toolPastLabel(name: string): string {
+  return (registry as Record<string, ToolSpec | undefined>)[name]?.pastLabel ?? name;
 }
 
 /**

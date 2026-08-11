@@ -44,7 +44,7 @@ There is no lint, formatter, or CI configured.
 - `tsconfig.json` targets Bun: `"types": ["bun"]`, `"module": "Preserve"`, `"moduleResolution": "bundler"`, `"noEmit": true`.
 - Strict mode is on, including `noUncheckedIndexedAccess` and `noImplicitOverride`.
 - Imports use `.ts` extensions (e.g. `./ui.ts`, `./consts.ts`) — required by `allowImportingTsExtensions`.
-- Only runtime dependencies: `@opentui/core` (TUI component library) and `opentui-spinner` (spinner animations).
+- Only runtime dependencies: `@opentui/core` (TUI component library) and `unpdf` (PDF text extraction).
 
 ## Architecture overview
 

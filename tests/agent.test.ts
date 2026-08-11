@@ -13,7 +13,7 @@ import {
   type AskChannel,
   type AskQuestion,
 } from "../src/agent/ask.ts";
-import { registry, resolveTools, toolLabel, toolNames } from "../src/agent/tools/index.ts";
+import { registry, resolveTools, toolLabel, toolNames, toolPastLabel } from "../src/agent/tools/index.ts";
 import type { ChatEvent, ChatMessage, ChatProvider } from "../src/provider/types.ts";
 import { createCampaign, loadCampaign, type Campaign } from "../src/store/campaigns.ts";
 import { createSession, listSessions } from "../src/store/sessions.ts";
@@ -624,15 +624,21 @@ describe("tool registry", () => {
 
   test("every spec has a human-readable label, not the wire name", () => {
     for (const [key, spec] of Object.entries(registry)) {
-      expect(spec.label.length).toBeGreaterThan(0);
-      expect(spec.label).not.toBe(key);
-      expect(spec.label).not.toContain("_");
+      for (const label of [spec.label, spec.pastLabel]) {
+        expect(label.length).toBeGreaterThan(0);
+        expect(label).not.toBe(key);
+        expect(label).not.toContain("_");
+      }
+      // The two are a present/past pair, so they must actually differ.
+      expect(spec.pastLabel).not.toBe(spec.label);
     }
   });
 
-  test("toolLabel falls back to the raw name for unknown tools", () => {
+  test("toolLabel and toolPastLabel fall back to the raw name for unknown tools", () => {
     expect(toolLabel("list_sessions")).toBe(registry.list_sessions.label);
     expect(toolLabel("not_a_tool")).toBe("not_a_tool");
+    expect(toolPastLabel("list_sessions")).toBe(registry.list_sessions.pastLabel);
+    expect(toolPastLabel("not_a_tool")).toBe("not_a_tool");
   });
 
   test("toolNames covers the whole registry", () => {

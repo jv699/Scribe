@@ -29,6 +29,14 @@ export interface AgentOptions {
   onText?: (delta: string) => void;
   /** Called just before a tool executes. */
   onTool?: (name: string) => void;
+  /**
+   * Called once a tool has returned, so a UI can settle whatever `onTool`
+   * opened rather than leaving it running until the next thing happens. Fires
+   * for unknown tools too, and `runTool` swallows tool errors into a result
+   * string, so every `onTool` is paired. Takes no name: tools run one at a
+   * time, so the pairing is never ambiguous.
+   */
+  onToolEnd?: () => void;
   /** Called with token usage after each turn, when the provider reports it. */
   onUsage?: (usage: UsageInfo) => void;
   /**
@@ -106,6 +114,7 @@ export async function runAgent(
       const result = tool
         ? await runTool(tool, call)
         : `Unknown tool: ${call.function.name}`;
+      options.onToolEnd?.();
       const toolMessage: ChatMessage = { role: "tool", tool_call_id: call.id, content: result };
       messages.push(toolMessage);
       options.onMessage?.(toolMessage);

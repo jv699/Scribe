@@ -5,6 +5,7 @@ import type { ToolSpec } from "./types.ts";
 export const listSessionsTool: ToolSpec = {
   name: "list_sessions",
   label: "Looking over the sessions",
+  pastLabel: "Looked over the sessions",
   definition: {
     type: "function",
     function: {
