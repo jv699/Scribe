@@ -205,7 +205,6 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
   }
 
   const THINKING_TEXT = "Scribe is thinking…";
-  const WAITING_TEXT = "Scribe is waiting for your answer…";
   let thinking = false;
 
   /** Start the status-line spinner while waiting on the model. */
@@ -270,7 +269,6 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
       // It isn't thinking, it's blocked on the user — stop the die.
       stopThinking();
       status.fg = theme.textMuted;
-      status.content = WAITING_TEXT;
 
       prompt.node.visible = false;
       // Hiding the prompt leaves its textarea focused, which keeps the terminal
