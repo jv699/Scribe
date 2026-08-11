@@ -55,6 +55,78 @@ export interface Transcript {
   reset(): void;
 }
 
+/** ms per pulse frame. Slow enough to read as breathing, not flickering. */
+const PULSE_FRAME_MS = 90;
+
+/** Colour stops the live activity row breathes through, coolest to hottest. */
+const PULSE_STOPS = [theme.textMuted, theme.flameEmber, theme.flameCore] as const;
+
+/** Interpolated colours inserted between each pair of stops. */
+const PULSE_BLEND_STEPS = 6;
+
+function hexToRgb(hex: string): [number, number, number] {
+  const n = parseInt(hex.slice(1), 16);
+  return [(n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff];
+}
+
+function toHex(r: number, g: number, b: number): string {
+  return `#${((1 << 24) | (r << 16) | (g << 8) | b).toString(16).slice(1)}`;
+}
+
+/**
+ * The stops expanded into a smooth ramp. Interpolating in plain RGB is enough
+ * here: the stops are close in hue, so there is no muddy midpoint to dodge.
+ */
+function buildRamp(stops: readonly string[], steps: number): string[] {
+  const ramp: string[] = [];
+  for (let i = 0; i < stops.length - 1; i++) {
+    const [r1, g1, b1] = hexToRgb(stops[i]!);
+    const [r2, g2, b2] = hexToRgb(stops[i + 1]!);
+    for (let s = 0; s < steps; s++) {
+      const t = s / steps;
+      ramp.push(
+        toHex(
+          Math.round(r1 + (r2 - r1) * t),
+          Math.round(g1 + (g2 - g1) * t),
+          Math.round(b1 + (b2 - b1) * t),
+        ),
+      );
+    }
+  }
+  ramp.push(stops[stops.length - 1]!);
+  return ramp;
+}
+
+const PULSE_RAMP = buildRamp(PULSE_STOPS, PULSE_BLEND_STEPS);
+
+/**
+ * Make a live activity row breathe: its label ramps from muted grey up through
+ * the flame palette and back, on a loop, until the row settles.
+ *
+ * Colour only, deliberately — the text is never rewritten, so the row keeps its
+ * width and the quiet block around it never reflows. That also leaves the row's
+ * *content* exactly what it always was, which is what the headless tests read.
+ *
+ * The timer is `unref`'d so a row still pulsing at exit (a turn the user walked
+ * out on) can't hold the process open, and it self-clears if the row is
+ * destroyed underneath it — `reset()` can tear rows down without settling them.
+ */
+function startPulse(line: TextRenderable): { stop(): void } {
+  // Walk the ramp up and back down: 0 … n-1 … 1, so the loop has no seam.
+  const cycle = PULSE_RAMP.length * 2 - 2;
+  let frame = 0;
+  const timer = setInterval(() => {
+    if (line.isDestroyed) {
+      clearInterval(timer);
+      return;
+    }
+    frame = (frame + 1) % cycle;
+    line.fg = PULSE_RAMP[frame < PULSE_RAMP.length ? frame : cycle - frame]!;
+  }, PULSE_FRAME_MS);
+  timer.unref?.();
+  return { stop: () => clearInterval(timer) };
+}
+
 /**
  * A rendered row. Message rows are reconciled against the conversation by
  * `sync`; pinned rows are owned by the caller and left where they were put.
@@ -225,6 +297,7 @@ export function makeTranscript(renderer: CliRenderer, options: TranscriptOptions
     }
     const line = new TextRenderable(renderer, { content: `${present}…`, fg: theme.textMuted });
     openGroup.add(line);
+    const pulse = startPulse(line);
 
     const startedAt = Date.now();
     let settled = false;
@@ -232,12 +305,16 @@ export function makeTranscript(renderer: CliRenderer, options: TranscriptOptions
       finish(): void {
         if (settled) return;
         settled = true;
+        pulse.stop();
         // `finish()` is public and `reset()` may have torn this row down in the
         // meantime, so the component keeps that safe itself rather than making
         // every caller drop its handle first. Writing to a destroyed renderable
         // is the one thing a late finish() could break.
         if (line.isDestroyed) return;
         line.content = `${past} · ${formatDuration(Date.now() - startedAt)}`;
+        // Back to flat muted: a settled row is history, and only the live one
+        // should be drawing the eye.
+        line.fg = theme.textMuted;
       },
     };
   }
