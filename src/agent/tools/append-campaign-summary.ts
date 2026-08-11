@@ -8,6 +8,7 @@ import type { ToolSpec } from "./types.ts";
 
 export const appendCampaignSummaryTool: ToolSpec = {
   name: "append_campaign_summary",
+  label: "Updating the campaign summary",
   definition: {
     type: "function",
     function: {

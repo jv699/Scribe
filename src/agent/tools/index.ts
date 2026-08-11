@@ -41,6 +41,15 @@ export type ToolName = keyof typeof registry;
 export const toolNames = Object.keys(registry) as ToolName[];
 
 /**
+ * The human-readable phrase for a tool, for status lines and other UI. Takes a
+ * plain string (tool names arrive from the model, so they may be anything) and
+ * falls back to the raw name for anything unregistered.
+ */
+export function toolLabel(name: string): string {
+  return (registry as Record<string, ToolSpec | undefined>)[name]?.label ?? name;
+}
+
+/**
  * Bind the named tools to a context, dropping any that can't operate in it
  * (e.g. campaign tools when there is no campaign).
  */

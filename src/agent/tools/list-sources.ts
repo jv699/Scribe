@@ -10,6 +10,7 @@ import type { ToolSpec } from "./types.ts";
 
 export const listSourcesTool: ToolSpec = {
   name: "list_sources",
+  label: "Browsing the source library",
   definition: {
     type: "function",
     function: {

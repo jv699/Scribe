@@ -5,6 +5,7 @@ import type { ToolSpec } from "./types.ts";
 
 export const updateSessionNotesTool: ToolSpec = {
   name: "update_session_notes",
+  label: "Writing the session notes",
   definition: {
     type: "function",
     function: {

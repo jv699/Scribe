@@ -30,6 +30,7 @@ import { makeAskWidget, type AskWidget } from "../components/ask-widget.ts";
 import { makeAutocomplete, type CompletionSource } from "../components/autocomplete.ts";
 import { DiceSpinnerRenderable } from "../components/dice-spinner.ts";
 import { runAgent, type AgentTool } from "../agent/loop.ts";
+import { toolLabel } from "../agent/tools/index.ts";
 import {
   ASK_USER_TOOL_NAME,
   type AskAnswer,
@@ -272,6 +273,10 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
       status.content = WAITING_TEXT;
 
       prompt.node.visible = false;
+      // Hiding the prompt leaves its textarea focused, which keeps the terminal
+      // cursor blinking where the input used to be; blur it so only the widget
+      // is live.
+      prompt.input.blur();
       // Appending is enough: the hidden prompt takes up no space, so the
       // widget lands at the bottom where the prompt was.
       container.add(widget.node);
@@ -404,7 +409,7 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
               // answer"); announcing it as a running tool would flash past and
               // then be wrong for as long as the question is up.
               if (name === ASK_USER_TOOL_NAME) return;
-              status.content = `running tool: ${name}…`;
+              status.content = `${toolLabel(name)}…`;
             },
             onUsage: (usage) => recordUsage(usage),
           },

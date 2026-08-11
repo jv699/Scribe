@@ -54,6 +54,12 @@ export interface ToolSpec {
    * test.
    */
   name: string;
+  /**
+   * Human-readable present-tense phrase for the UI status line ("Reading
+   * session notes"), so users never see the snake_case wire name. Never sent
+   * to the model.
+   */
+  label: string;
   /** The schema sent to the model. */
   definition: ToolDefinition;
   /**

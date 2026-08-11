@@ -10,6 +10,7 @@ import type { ToolSpec } from "./types.ts";
 
 export const searchSourcesTool: ToolSpec = {
   name: "search_sources",
+  label: "Searching the source books",
   definition: {
     type: "function",
     function: {
