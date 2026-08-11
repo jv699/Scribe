@@ -22,8 +22,8 @@ import {
   type SyntaxStyle,
 } from "@opentui/core";
 import { theme } from "../theme.ts";
-import { formatDuration } from "../format.ts";
 import { makeAccentPanel } from "./ui.ts";
+import { makeActivityRow, type ActivityRow } from "./activity-row.ts";
 import { ASK_USER_TOOL_NAME, parseAskResult } from "../agent/ask.ts";
 import type { ChatMessage } from "../provider/types.ts";
 
@@ -70,6 +70,7 @@ export function makeTranscript(renderer: CliRenderer, options: TranscriptOptions
     paddingRight: "1%",
   });
   const entries: Entry[] = [];
+  const liveActivities = new Set<ActivityRow>();
 
   /**
    * The activity block still accepting rows, if any. Cleared whenever anything
@@ -223,21 +224,16 @@ export function makeTranscript(renderer: CliRenderer, options: TranscriptOptions
       openGroup = body;
       pin(blockNode);
     }
-    const line = new TextRenderable(renderer, { content: `${present}…`, fg: theme.textMuted });
-    openGroup.add(line);
-
-    const startedAt = Date.now();
+    const activity = makeActivityRow(renderer, present, past);
+    openGroup.add(activity.node);
+    liveActivities.add(activity);
     let settled = false;
     return {
       finish(): void {
         if (settled) return;
         settled = true;
-        // `finish()` is public and `reset()` may have torn this row down in the
-        // meantime, so the component keeps that safe itself rather than making
-        // every caller drop its handle first. Writing to a destroyed renderable
-        // is the one thing a late finish() could break.
-        if (line.isDestroyed) return;
-        line.content = `${past} · ${formatDuration(Date.now() - startedAt)}`;
+        liveActivities.delete(activity);
+        activity.finish();
       },
     };
   }
@@ -269,6 +265,8 @@ export function makeTranscript(renderer: CliRenderer, options: TranscriptOptions
   function reset(): void {
     openGroup = null;
     lastNotice = null;
+    for (const activity of liveActivities) activity.dispose();
+    liveActivities.clear();
     for (let i = entries.length - 1; i >= 0; i--) removeEntry(i);
   }
 
