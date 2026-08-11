@@ -309,6 +309,60 @@ describe("chat screen", () => {
     });
   });
 
+  // Regression: OpenTUI clips *text* to the scroll viewport but draws a box's
+  // own border and background unclipped, so a transcript row straddling the top
+  // edge used to paint its left rule over the title bar and the blank row above
+  // it. The title bar covers both rows with an opaque band — see chat.ts.
+  test("a transcript row scrolled past the top never paints over the header", async () => {
+    let calls = 0;
+    // Enough tool calls that the activity block is taller than the viewport, so
+    // it is guaranteed to straddle the top edge once the turn settles.
+    const chattyProvider: ChatProvider = {
+      async *streamChat(): AsyncGenerator<ChatEvent> {
+        if (calls++ >= 20) {
+          yield { type: "text", delta: "All set." };
+          return;
+        }
+        yield {
+          type: "tool_call",
+          toolCall: { index: 0, id: `c${calls}`, name: "echo", arguments: "{}" },
+        };
+      },
+    };
+    const tools: AgentTool[] = [
+      {
+        definition: {
+          type: "function",
+          function: { name: "echo", description: "echo", parameters: { type: "object", properties: {} } },
+        },
+        execute: () => "ok",
+      },
+    ];
+
+    current = await makeChatScreen(renderer, {
+      provider: chattyProvider,
+      systemPrompt: "You plan.",
+      tools,
+      model: "test-model",
+      onBack: () => {},
+    });
+    renderer.root.add(current.node);
+    current.focus?.();
+    await renderOnce();
+    await keys.typeText("go", 5);
+    keys.pressEnter();
+    await wait();
+    await renderOnce();
+
+    const rows = captureCharFrame().split("\n");
+    expect(rows[0]!.trim()).toBe("");
+    expect(rows[1]!).toContain("Drafting Table");
+    expect(rows[1]!).toContain("test-model");
+    // The transcript really did overflow, so the assertions above mean
+    // something: the user message has scrolled out of view.
+    expect(rows.join("\n").includes("go")).toBe(false);
+  });
+
   // Regression: MarkdownRenderable only builds a synchronous first paint while
   // `streaming` is on. With it off, blocks wait on an async tree-sitter highlight
   // and paint blank for a frame — a visible flicker mid-conversation and a blank

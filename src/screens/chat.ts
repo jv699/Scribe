@@ -91,7 +91,12 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
   const container = new BoxRenderable(renderer, {
     width: "100%",
     height: "100%",
-    padding: 1,
+    // The top padding row belongs to the title bar below (see its paddingTop),
+    // which has to own every row above the scroll box to keep the transcript
+    // from painting into them.
+    paddingLeft: 1,
+    paddingRight: 1,
+    paddingBottom: 1,
     flexDirection: "column",
   });
 
@@ -103,7 +108,17 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
     // Pinned: without these the flexGrow:1 scroll box below shrinks the row to
     // zero height and the transcript (added later, so drawn after) paints over
     // the header text.
-    height: 1,
+    //
+    // Opaque, and two rows tall so it covers the screen's top padding row too:
+    // OpenTUI clips text and fills to the scroll viewport but draws a box's own
+    // border unclipped, so a transcript row straddling the top edge still
+    // paints its left rule across the rows above the scroll box. Drawing this
+    // band last (zIndex) over an opaque background paints over that bleed — the
+    // header text sits on the second row, so the bar still reads as a single
+    // line with one blank row above it.
+    height: 2,
+    paddingTop: 1,
+    backgroundColor: theme.background,
     flexShrink: 0,
     zIndex: 1,
     // No marginBottom on purpose: the first transcript row brings its own
