@@ -100,7 +100,7 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
     flexDirection: "row",
     justifyContent: "space-between",
     width: "100%",
-    marginBottom: 1,
+    // marginBottom: 1,
   });
   titleRow.add(new TextRenderable(renderer, { content: options.title ?? "Drafting Table", fg: theme.accent }));
   const modelText = new TextRenderable(renderer, { content: options.model ?? "", fg: theme.textMuted });
