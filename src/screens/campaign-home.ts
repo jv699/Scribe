@@ -15,6 +15,7 @@ import {
 import { makeActionDialog, type ActionDialog } from "../components/action-dialog.ts";
 import { showConfirmDialog } from "../components/confirm-dialog.ts";
 import { makeSessionDialog } from "../components/session-dialog.ts";
+import { enableSelectMouse } from "../components/ui.ts";
 import { listSessions, createSession, setSessionStatus, trashSession, type Session } from "../store/sessions.ts";
 import { theme } from "../theme.ts";
 import type { Campaign } from "../store/campaigns.ts";
@@ -92,6 +93,8 @@ export async function makeCampaignHomeScreen(
     selectedBackgroundColor: theme.accent,
     selectedTextColor: theme.text,
   });
+  // Clicks are ignored while a dialog is up, so the menu behind it is inert.
+  enableSelectMouse(menu, () => !modalOpen);
   container.add(menu);
 
   // Failures surface here: console output is invisible behind the alt screen,

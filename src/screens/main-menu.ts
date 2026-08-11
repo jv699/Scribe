@@ -10,6 +10,7 @@ import {
   type CliRenderer,
   type SelectOption,
 } from "@opentui/core";
+import { enableSelectMouse } from "../components/ui.ts";
 import * as consts from "../consts.ts";
 import { chunkyFadeIn, dissolveIn } from "../intro.ts";
 import { theme } from "../theme.ts";
@@ -47,6 +48,8 @@ export function makeMainMenuScreen(renderer: CliRenderer, options: MainMenuOptio
     selectedBackgroundColor: theme.accent,
     selectedTextColor: theme.text,
   });
+
+  enableSelectMouse(mainMenu);
 
   const menuPanel = new BoxRenderable(renderer, {});
   menuPanel.add(mainMenu);

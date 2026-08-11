@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { type createMockKeys, type TestRenderer } from "@opentui/core/testing";
+import { createMockMouse, type createMockKeys, type TestRenderer } from "@opentui/core/testing";
 import { setupRenderer, wait } from "./helpers/renderer.ts";
 import type { KeyEvent } from "@opentui/core";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
@@ -167,6 +167,54 @@ describe("phase-0 ui flow", () => {
     expect(frame.includes("Curse of Strahd")).toBe(true);
     expect(frame.includes("System: D&D 5e")).toBe(true);
   }, 15000);
+});
+
+describe("select mouse support", () => {
+  /** Terminal coordinates of a rendered row, found by its label in the frame. */
+  function locate(label: string): { x: number; y: number } {
+    const lines = captureCharFrame().split("\n");
+    const y = lines.findIndex((line) => line.includes(label));
+    expect(y).toBeGreaterThanOrEqual(0);
+    return { x: lines[y]!.indexOf(label), y };
+  }
+
+  test("clicking a main-menu row runs that row's action", async () => {
+    let settings = 0;
+    let quits = 0;
+    showScreen(
+      makeMainMenuScreen(renderer, {
+        campaigns: [],
+        playIntro: false,
+        onCreateCampaign: () => {},
+        onSelectCampaign: () => {},
+        onSettings: () => settings++,
+        onOneshotPlanner: () => {},
+        onQuit: () => quits++,
+      }),
+    );
+    await renderOnce();
+
+    const mouse = createMockMouse(renderer);
+    const quit = locate("Quit");
+    await mouse.click(quit.x, quit.y);
+    expect(quits).toBe(1);
+    expect(settings).toBe(0);
+
+    const settingsRow = locate("Settings");
+    await mouse.click(settingsRow.x, settingsRow.y);
+    expect(settings).toBe(1);
+    expect(quits).toBe(1);
+  });
+
+  test("hovering a main-menu row moves the selection", async () => {
+    await renderOnce();
+    const mouse = createMockMouse(renderer);
+    const quit = locate("Quit");
+    await mouse.moveTo(quit.x, quit.y);
+    await renderOnce();
+    // The selection indicator sits just left of the hovered row's label.
+    expect(captureCharFrame().split("\n")[quit.y]).toContain("▶ Quit");
+  });
 });
 
 describe("makeButton", () => {

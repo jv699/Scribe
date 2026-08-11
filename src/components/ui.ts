@@ -2,8 +2,9 @@
  * Shared UI primitives: `makeAccentPanel` — the accent-strip surface used by
  * the prompt box and user chat messages — `makeButton` — flat, borderless
  * buttons colored from the app theme, with hover/focus highlight and click +
- * Enter support — and `tabWalk` — Tab / Shift+Tab focus traversal along a
- * chain of renderables.
+ * Enter support — `enableSelectMouse` — hover/click/scroll support for
+ * `SelectRenderable` menus — and `tabWalk` — Tab / Shift+Tab focus traversal
+ * along a chain of renderables.
  */
 import {
   BoxRenderable,
@@ -13,6 +14,7 @@ import {
   type KeyEvent,
   type Renderable,
   type RenderContext,
+  type SelectRenderable,
 } from "@opentui/core";
 import { theme } from "../theme.ts";
 
@@ -104,6 +106,56 @@ export function makeButton(ctx: RenderContext, options: ButtonOptions): BoxRende
   });
 
   return button;
+}
+
+/**
+ * `SelectRenderable` draws its rows into one frame buffer rather than as child
+ * renderables, so there is nothing per-row to attach a click handler to. These
+ * are the layout fields it uses to place rows; we read them back to map a
+ * mouse y-coordinate to an option index.
+ */
+interface SelectRowLayout {
+  /** Index of the first visible option. */
+  scrollOffset: number;
+  /** Terminal rows each option occupies (name + description + itemSpacing). */
+  linesPerItem: number;
+}
+
+/**
+ * Make a `SelectRenderable`'s rows mouse-driven: hover highlights an option,
+ * click selects it (same as Enter), and the wheel moves the selection. Keyboard
+ * behaviour is untouched, so this is purely additive.
+ */
+export function enableSelectMouse(select: SelectRenderable, isEnabled: () => boolean = () => true): void {
+  const layout = select as unknown as SelectRowLayout;
+
+  /** The option under an absolute terminal y, or null if the row is empty. */
+  function optionAt(y: number): number | null {
+    if (!isEnabled()) return null;
+    const row = y - select.y;
+    if (row < 0 || layout.linesPerItem <= 0) return null;
+    const index = layout.scrollOffset + Math.floor(row / layout.linesPerItem);
+    return index < select.options.length ? index : null;
+  }
+
+  select.onMouseMove = (event) => {
+    const index = optionAt(event.y);
+    if (index !== null) select.setSelectedIndex(index);
+  };
+  select.onMouseDown = (event) => {
+    const index = optionAt(event.y);
+    if (index === null) return;
+    // Click implies intent to drive this list — take focus so the arrow keys
+    // keep working afterwards (dialogs and prompts may hold focus otherwise).
+    select.focus();
+    select.setSelectedIndex(index);
+    select.selectCurrent();
+  };
+  select.onMouseScroll = (event) => {
+    if (!isEnabled()) return;
+    if (event.scroll?.direction === "up") select.moveUp();
+    else if (event.scroll?.direction === "down") select.moveDown();
+  };
 }
 
 /**
