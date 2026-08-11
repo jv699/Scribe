@@ -1,7 +1,7 @@
 /**
  * Prompt widget (opencode-style): an accent-bordered panel holding a multi-line
  * textarea (Enter sends, Shift+Enter adds a line) and a hint footer. Self-
- * contained like the dialog/spinner widgets; the caller owns submission and
+ * contained like the dialog widgets; the caller owns submission and
  * textarea state.
  */
 import { BoxRenderable, TextRenderable, TextareaRenderable, type RenderContext } from "@opentui/core";

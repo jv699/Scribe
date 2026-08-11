@@ -12,6 +12,7 @@ import type { ToolSpec } from "./types.ts";
 export const saveSessionTool: ToolSpec = {
   name: "save_session",
   label: "Saving the plan",
+  pastLabel: "Saved the plan",
   definition: {
     type: "function",
     function: {

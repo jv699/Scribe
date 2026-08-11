@@ -89,7 +89,7 @@ describe("chat screen", () => {
     expect((frame.match(/second line/g) ?? []).length).toBe(1);
   });
 
-  test("surfaces provider errors in the status line", async () => {
+  test("surfaces provider errors as an inline notice", async () => {
     await open(errorProvider);
     await keys.typeText("hi", 5);
     keys.pressEnter();
@@ -228,6 +228,87 @@ describe("chat screen", () => {
     expect(frame.includes("Scribe:")).toBe(false);
   });
 
+  describe("activity rows", () => {
+    /**
+     * Calls a *registered* tool name so the real label lookup is exercised,
+     * with a local stub standing in for the tool's body.
+     */
+    function activityProvider(): ChatProvider {
+      return {
+        async *streamChat(messages): AsyncGenerator<ChatEvent> {
+          // Keyed off the *last* message, not "any tool message", so a second
+          // user turn calls the tool again instead of replying straight away.
+          if (messages[messages.length - 1]?.role === "tool") {
+            yield { type: "text", delta: "All set." };
+            return;
+          }
+          yield {
+            type: "tool_call",
+            toolCall: { index: 0, id: "c1", name: "list_sessions", arguments: "{}" },
+          };
+        },
+      };
+    }
+
+    const stubTools: AgentTool[] = [
+      {
+        definition: {
+          type: "function",
+          function: { name: "list_sessions", description: "list", parameters: { type: "object", properties: {} } },
+        },
+        execute: () => "none yet",
+      },
+    ];
+
+    async function runTurn(): Promise<string> {
+      current = await makeChatScreen(renderer, {
+        provider: activityProvider(),
+        tools: stubTools,
+        onBack: () => {},
+      });
+      renderer.root.add(current.node);
+      current.focus?.();
+      await renderOnce();
+      await keys.typeText("what happened last time?", 5);
+      keys.pressEnter();
+      await wait();
+      await renderOnce();
+      return captureCharFrame();
+    }
+
+    test("each activity settles into a past-tense label and its duration", async () => {
+      const frame = await runTurn();
+      // Thinking, the tool, then thinking again before the reply streamed.
+      expect(/Thought · \d+\.\d+s/.test(frame)).toBe(true);
+      expect(/Looked over the sessions · \d+\.\d+s/.test(frame)).toBe(true);
+      // Nothing is left running once the turn is over.
+      expect(frame.includes("Scribe is thinking…")).toBe(false);
+      expect(frame.includes("Looking over the sessions…")).toBe(false);
+    });
+
+    test("consecutive activities stack into one block, above the reply", async () => {
+      const frame = await runTurn();
+      // No blank line between them: they share a single muted-rule block.
+      expect(/Thought ·[^\n]*\n *│ +Looked over the sessions ·/.test(frame)).toBe(true);
+      // And the block sits above the prose it produced.
+      expect(frame.indexOf("Looked over the sessions")).toBeLessThan(frame.indexOf("All set."));
+    });
+
+    test("a new user message starts a fresh block rather than growing the old one", async () => {
+      await runTurn();
+      await keys.typeText("and now?", 5);
+      keys.pressEnter();
+      await wait();
+      await renderOnce();
+
+      // The second turn's activity lands *below* the new user message rather
+      // than joining the block from the first turn. Checked against the last
+      // occurrence, since the earlier rows may have scrolled out of view.
+      const frame = captureCharFrame();
+      expect(frame.lastIndexOf("Looked over the sessions")).toBeGreaterThan(frame.indexOf("and now?"));
+    });
+  });
+
   // Regression: MarkdownRenderable only builds a synchronous first paint while
   // `streaming` is on. With it off, blocks wait on an async tree-sitter highlight
   // and paint blank for a frame — a visible flicker mid-conversation and a blank
@@ -351,7 +432,9 @@ describe("chat screen", () => {
       expect(frame.includes("A caravan gone silent")).toBe(true);
       // The prompt is hidden while the question is up, not merely covered.
       expect(frame.includes(PROMPT_HINT)).toBe(false);
-      expect(frame.includes("waiting for your answer")).toBe(true);
+      // The widget is its own indicator: ask_user gets no activity row, so
+      // nothing announces the wait a second time.
+      expect(frame.includes("Waiting for your answer")).toBe(false);
       // Still mid-turn: the tool result hasn't gone back to the model yet.
       expect(turns).toBe(1);
     });
@@ -369,6 +452,32 @@ describe("chat screen", () => {
       expect(frame.includes("→ A caravan gone silent")).toBe(true);
       // ...and the prompt box comes back.
       expect(frame.includes(PROMPT_HINT)).toBe(true);
+    });
+
+    // Regression: the thinking row used to be opened when the question widget
+    // closed, which is before the answered exchange reaches the transcript.
+    // Pinned rows land at the end, so it appeared *above* the answer it
+    // followed. It is opened when the next model turn is announced instead.
+    test("the thinking that follows an answer is recorded below it", async () => {
+      await ask(ONE_OF_TWO, undefined, 300);
+      keys.pressKey("2");
+      await wait(80); // answered, reply still stalled, so the row is live
+      await renderOnce();
+
+      const midTurn = captureCharFrame();
+      expect(midTurn.includes("Scribe is thinking…")).toBe(true);
+      expect(midTurn.indexOf("Scribe is thinking…")).toBeGreaterThan(
+        midTurn.indexOf("→ A caravan gone silent"),
+      );
+
+      await wait(400);
+      await renderOnce();
+      const settled = captureCharFrame();
+      // And it settles rather than sitting there present-tense forever.
+      expect(settled.includes("Scribe is thinking…")).toBe(false);
+      expect(settled.lastIndexOf("Thought ·")).toBeGreaterThan(
+        settled.indexOf("→ A caravan gone silent"),
+      );
     });
 
     // Regression: the screen used to adopt runAgent's conversation only once the
@@ -837,6 +946,44 @@ describe("chat screen", () => {
         expect(stored).toEqual([]);
         // The command text was taken back out of the prompt.
         expect(promptText()).toBe("");
+      });
+
+      // Regression: the refusal is a transcript notice now, not an overwriting
+      // status line, so repeating it while nothing else has happened used to
+      // stack identical blocks down the screen.
+      test("/clear while busy refuses once, however many times it is asked", async () => {
+        const stalled: ChatProvider = {
+          async *streamChat(): AsyncGenerator<ChatEvent> {
+            await wait(600);
+            yield { type: "text", delta: "done" };
+          },
+        };
+        current = await makeChatScreen(renderer, {
+          provider: stalled,
+          completions: [mentions],
+          onBack: () => {},
+        });
+        renderer.root.add(current.node);
+        current.focus?.();
+        await renderOnce();
+
+        await keys.typeText("hi", 5);
+        keys.pressEnter();
+        await wait(60); // in flight, so /clear is refused
+
+        for (let i = 0; i < 3; i++) {
+          await keys.typeText("/clear", 5);
+          await wait(60);
+          keys.pressEnter();
+          await wait(60);
+        }
+        await renderOnce();
+
+        const frame = captureCharFrame();
+        const refusals = (frame.match(/Can't clear while Scribe is working/g) ?? []).length;
+        expect(refusals).toBe(1);
+        // Refused, not asked: the confirmation never came up.
+        expect(frame.includes("Clear this conversation?")).toBe(false);
       });
 
       test("Escape in the clear dialog cancels without leaving the chat", async () => {

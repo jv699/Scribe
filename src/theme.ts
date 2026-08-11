@@ -28,7 +28,7 @@ export const theme = {
   /** Validation errors and destructive hints. */
   danger: "#FF5555",
 
-  /** Flame spinner palette — tip to base (coolest to hottest). */
+  /** Flame palette — coolest to hottest. Used by the markdown syntax theme. */
   flameEmber: "#A63B00",
   flameCore: "#FFB84D",
 } as const;

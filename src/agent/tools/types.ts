@@ -55,11 +55,16 @@ export interface ToolSpec {
    */
   name: string;
   /**
-   * Human-readable present-tense phrase for the UI status line ("Reading
-   * session notes"), so users never see the snake_case wire name. Never sent
-   * to the model.
+   * Human-readable present-tense phrase shown on the transcript's activity row
+   * while the tool runs ("Reading the session notes…"), so users never see the
+   * snake_case wire name. Never sent to the model.
    */
   label: string;
+  /**
+   * Past-tense counterpart of `label`, shown once the tool returns and the row
+   * settles ("Read the session notes · 3.2s"). Also UI-only.
+   */
+  pastLabel: string;
   /** The schema sent to the model. */
   definition: ToolDefinition;
   /**

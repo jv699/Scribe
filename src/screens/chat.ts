@@ -4,9 +4,10 @@
  * sends, Shift+Enter adds a line) and a hint footer. User messages each render
  * in their own accent-strip panel (the same treatment as the prompt box) while
  * assistant replies flow as markdown beneath them. Streams assistant replies
- * from any ChatProvider; a status line with a rolling-die spinner shows
- * "Scribe is thinking…", running-tool activity, and provider errors.
- * Supports two modes: the agent loop with tools (planning/report, and
+ * from any ChatProvider. There is no status line: what Scribe is doing is
+ * recorded inline as transcript activity rows ("Scribe is thinking…" settling
+ * into "Thought · 4.3s", one row per tool call), and provider errors land there
+ * too as one-off notices. Supports two modes: the agent loop with tools (planning/report, and
  * Drafting Table when it has tools), and plain streaming as the fallback
  * when an agent has no tools (the system prompt, if set, is prepended).
  *
@@ -23,14 +24,13 @@ import {
 } from "@opentui/core";
 import { theme } from "../theme.ts";
 import { createMarkdownSyntaxStyle } from "../markdown-style.ts";
-import { makeTranscript } from "../components/transcript.ts";
+import { makeTranscript, type TranscriptActivity } from "../components/transcript.ts";
 import { makePrompt } from "../components/prompt.ts";
 import { showConfirmDialog } from "../components/confirm-dialog.ts";
 import { makeAskWidget, type AskWidget } from "../components/ask-widget.ts";
 import { makeAutocomplete, type CompletionSource } from "../components/autocomplete.ts";
-import { DiceSpinnerRenderable } from "../components/dice-spinner.ts";
 import { runAgent, type AgentTool } from "../agent/loop.ts";
-import { toolLabel } from "../agent/tools/index.ts";
+import { toolLabel, toolPastLabel } from "../agent/tools/index.ts";
 import {
   ASK_USER_TOOL_NAME,
   type AskAnswer,
@@ -100,7 +100,9 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
     flexDirection: "row",
     justifyContent: "space-between",
     width: "100%",
-    // marginBottom: 1,
+    // No marginBottom on purpose: the first transcript row brings its own
+    // marginTop, and the prompt panel below brings one too, so the transcript
+    // sits exactly one blank row clear of each — symmetric in every state.
   });
   titleRow.add(new TextRenderable(renderer, { content: options.title ?? "Drafting Table", fg: theme.accent }));
   const modelText = new TextRenderable(renderer, { content: options.model ?? "", fg: theme.textMuted });
@@ -153,21 +155,6 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
   scrollBox.content.add(transcript.node);
   container.add(scrollBox);
 
-  // Status line: die + text for thinking / tool activity / errors.
-  const statusRow = new BoxRenderable(renderer, {
-    width: "100%",
-    height: 1,
-    paddingLeft: 2,
-    flexDirection: "row",
-    alignItems: "center",
-  });
-  const thinkingSpinner = new DiceSpinnerRenderable(renderer, { marginRight: 1 });
-  const status = new TextRenderable(renderer, { content: "", fg: theme.textMuted, height: 1 });
-  statusRow.add(thinkingSpinner);
-  statusRow.add(status);
-  container.add(statusRow);
-
-
   // Prompt panel (opencode-style): bordered textarea + hint footer.
   const prompt = makePrompt(renderer, { onSubmit: () => void send() });
   container.add(prompt.node);
@@ -178,7 +165,7 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
    * Set by `dispose`. An agent turn outlives the screen — the user can leave
    * while the model is still streaming, or while a question sits unanswered —
    * and everything the turn would otherwise touch on the way out (the syntax
-   * style, the transcript, the status line) is gone by then.
+   * style, the transcript and its activity rows) is gone by then.
    */
   let disposed = false;
 
@@ -204,23 +191,29 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
     render();
   }
 
-  const THINKING_TEXT = "Scribe is thinking…";
-  let thinking = false;
+  // --- activity: what Scribe is doing, recorded inline in the transcript ---
 
-  /** Start the status-line spinner while waiting on the model. */
-  function startThinking(): void {
-    thinking = true;
-    thinkingSpinner.start();
-    status.fg = theme.textMuted;
-    status.content = THINKING_TEXT;
+  /**
+   * The one activity row currently running, if any. Scribe does exactly one
+   * thing at a time — think, or run a tool — so opening a new activity settles
+   * whatever was open, which makes every call site below safe to repeat.
+   */
+  let live: TranscriptActivity | null = null;
+
+  function beginActivity(present: string, past: string): void {
+    if (disposed) return;
+    live?.finish();
+    live = transcript.beginActivity(present, past);
   }
 
-  /** Stop the spinner, clearing the status line it was driving. */
-  function stopThinking(): void {
-    if (!thinking) return;
-    thinking = false;
-    thinkingSpinner.stop();
-    status.content = "";
+  function endActivity(): void {
+    live?.finish();
+    live = null;
+  }
+
+  /** Waiting on the model — the activity every turn starts and resumes with. */
+  function beginThinking(): void {
+    beginActivity("Scribe is thinking", "Thought");
   }
 
   /**
@@ -230,7 +223,8 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
    * so text after it starts a new one rather than growing the old bubble.
    */
   function appendStreamed(delta: string): void {
-    stopThinking();
+    // Prose is arriving, so the wait is over and its row can settle.
+    endActivity();
     const last = messages[messages.length - 1];
     if (last?.role === "assistant" && !last.tool_calls) last.content += delta;
     else messages.push({ role: "assistant", content: delta });
@@ -266,9 +260,10 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
       });
       askWidget = widget;
 
-      // It isn't thinking, it's blocked on the user — stop the die.
-      stopThinking();
-      status.fg = theme.textMuted;
+      // It isn't thinking, it's blocked on the user — settle the row. The
+      // question itself is the indicator, and the answer becomes its own
+      // transcript row, so ask_user gets no activity row of its own.
+      endActivity();
 
       prompt.node.visible = false;
       // Hiding the prompt leaves its textarea focused, which keeps the terminal
@@ -290,9 +285,11 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
     widget.node.destroyRecursively();
     prompt.node.visible = true;
     if (disposed) return;
-    // The answer still has to go back to the model, so the turn continues.
+    // The answer still has to go back to the model, so the turn continues. The
+    // thinking row is deliberately *not* opened here: the answered question
+    // hasn't reached the transcript yet, and a pinned row would land above it.
+    // `onMessage` opens it when the next model turn is announced.
     prompt.input.focus();
-    startThinking();
   }
 
   const detachAsk = options.ask?.attach(presentQuestion);
@@ -309,6 +306,12 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
 
   function clearConversation(): void {
     messages.length = 0;
+    // Activity rows aren't messages, so `render()` alone would leave them
+    // stranded above an empty conversation. Drop our handle on the running row
+    // first — `reset()` tears its renderable down, so there is nothing left to
+    // settle.
+    live = null;
+    transcript.reset();
     render();
     // Persist the empty log so the conversation is gone on the next visit too,
     // not just in this session.
@@ -319,8 +322,7 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
     // Wiping the history the agent is mid-way through reasoning over would
     // leave the turn talking about messages that no longer exist.
     if (busy) {
-      status.fg = theme.textMuted;
-      status.content = "Can't clear while Scribe is working — wait for the reply.";
+      transcript.addNotice("Can't clear while Scribe is working — wait for the reply.");
       return;
     }
     modalOpen = true;
@@ -378,9 +380,6 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
     // needs a placeholder to stream into.
     if (!agentTools) messages.push({ role: "assistant", content: "" });
     busy = true;
-    status.fg = theme.textMuted;
-    status.content = "";
-    startThinking();
     render();
 
     try {
@@ -401,14 +400,30 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
             onMessage: (message) => {
               messages.push(message);
               render();
+              // Every model turn opens with an empty assistant message, so this
+              // is exactly when thinking starts — and it is the only safe moment
+              // to open the row. Pinned rows land at the end of the transcript,
+              // so opening it any earlier (when the question widget closed, say)
+              // puts "Scribe is thinking…" above the answer that preceded it.
+              // The empty message renders nothing, so the row still lands last.
+              if (message.role === "assistant") beginThinking();
             },
             onTool: (name) => {
-              // ask_user drives the status line itself ("waiting for your
-              // answer"); announcing it as a running tool would flash past and
-              // then be wrong for as long as the question is up.
-              if (name === ASK_USER_TOOL_NAME) return;
-              status.content = `${toolLabel(name)}…`;
+              // ask_user is its own indicator: the question replaces the prompt
+              // box and the answer becomes a transcript row, so a row for it
+              // here would only duplicate what's already on screen. Still settle
+              // the thinking row — the model has stopped and the user is up.
+              if (name === ASK_USER_TOOL_NAME) {
+                endActivity();
+                return;
+              }
+              beginActivity(toolLabel(name), toolPastLabel(name));
             },
+            // Settle the tool's row the moment it returns; the next turn's
+            // thinking row is opened by `onMessage`, not here, so back-to-back
+            // tool calls in one turn don't get a phantom "Thought · 0.1s"
+            // wedged between them.
+            onToolEnd: () => endActivity(),
             onUsage: (usage) => recordUsage(usage),
           },
           // A snapshot taken before the turn starts: there is no placeholder to
@@ -424,23 +439,24 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
           options.systemPrompt && options.systemPrompt.trim() !== ""
             ? [{ role: "system", content: options.systemPrompt }, ...messages]
             : messages;
+        // No agent loop here, so nothing else announces the turn.
+        beginThinking();
         for await (const event of options.provider.streamChat(context)) {
           if (event.type === "text") appendStreamed(event.delta);
           else if (event.type === "usage") recordUsage(event.usage);
         }
       }
-      if (!disposed) status.content = "";
     } catch (err) {
       if (disposed) return;
-      stopThinking();
-      status.fg = theme.danger;
-      status.content = `Error: ${err instanceof Error ? err.message : String(err)}`;
+      endActivity();
+      transcript.addNotice(`Error: ${err instanceof Error ? err.message : String(err)}`, "danger");
     } finally {
       busy = false;
       // The user may have left while this turn was in flight. dispose() has
-      // already stopped the spinner and saved, and the transcript is gone.
+      // already settled the activity row and saved, and the transcript is gone.
+      // Everything below would only repeat that against a dead tree.
       if (!disposed) {
-        stopThinking();
+        endActivity();
         render();
         if (options.chatLog) {
           try {
@@ -490,7 +506,11 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
     // so an in-flight runAgent can finish instead of awaiting forever.
     detachAsk?.();
     autocomplete.dispose();
-    thinkingSpinner.stop();
+    // Settle rather than drop: the transcript is still alive at this point (the
+    // screen manager destroys the node after dispose returns), so a turn that
+    // outlives the screen leaves a finished row behind instead of a dangling
+    // "Scribe is thinking…".
+    endActivity();
     renderer.keyInput.off("keypress", onKeypress);
     syntaxStyle.destroy();
     if (options.chatLog && messages.length > 0) {

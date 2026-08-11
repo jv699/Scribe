@@ -10,6 +10,7 @@ import type { ToolSpec } from "./types.ts";
 export const readSourcePagesTool: ToolSpec = {
   name: "read_source_pages",
   label: "Reading the source pages",
+  pastLabel: "Read the source pages",
   definition: {
     type: "function",
     function: {

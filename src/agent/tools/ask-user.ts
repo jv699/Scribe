@@ -20,6 +20,7 @@ const MAX_OPTIONS = 9;
 export const askUserTool: ToolSpec = {
   name: ASK_USER_TOOL_NAME,
   label: "Waiting for your answer",
+  pastLabel: "Waited for your answer",
   definition: {
     type: "function",
     function: {
