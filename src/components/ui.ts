@@ -9,7 +9,6 @@
 import {
   BoxRenderable,
   RenderableEvents,
-  t,
   TextRenderable,
   type CliRenderer,
   type KeyEvent,
@@ -67,17 +66,24 @@ export interface ButtonOptions {
   variant?: "primary" | "ghost";
 }
 
-//TODO: refactor  
 const BUTTON_COLORS = {
-  primary: { bg: theme.accent, fg: theme.text, hover: theme.flameCore },
-  ghost: { bg: "#bdbbbb", fg: theme.text, hover: theme.flameCore},
+  primary: {
+    idle: theme.accent,
+    active: theme.flameCore,
+    text: theme.text,
+  },
+  ghost: {
+    idle: theme.textMuted,
+    active: theme.flameCore,
+    text: theme.text,
+  },
 } as const;
 
 export function makeButton(ctx: RenderContext, options: ButtonOptions): BoxRenderable {
   const colors = BUTTON_COLORS[options.variant ?? "ghost"];
 
   const button = new BoxRenderable(ctx, {
-    borderColor: colors.bg,
+    borderColor: colors.idle,
     paddingLeft: 2,
     paddingRight: 2,
     border: true,
@@ -86,9 +92,19 @@ export function makeButton(ctx: RenderContext, options: ButtonOptions): BoxRende
 
   const label = new TextRenderable(ctx, {
     content: options.label,
-    fg: colors.fg,
+    fg: colors.text,
   });
   button.add(label);
+
+  function setActive(active: boolean): void {
+    // OpenTUI destroys children before blurring their parent. Do not repaint
+    // the label once either half of the button has begun destruction.
+    if (button.isDestroyed || label.isDestroyed) return;
+
+    const color = active ? colors.active : colors.idle;
+    button.borderColor = color;
+    label.fg = active ? colors.active : colors.text;
+  }
 
   button.onMouseDown = () => {
     options.onClick?.();
@@ -96,22 +112,10 @@ export function makeButton(ctx: RenderContext, options: ButtonOptions): BoxRende
   button.onKeyDown = (key) => {
     if (key.name === "return" || key.name === "kpenter") options.onClick?.();
   };
-  button.onMouseOver = () => {
-    button.borderColor = colors.hover;
-    label.fg = colors.hover;
-  };
-  button.onMouseOut = () => {
-    button.borderColor = colors.bg;
-    label.fg = colors.fg;
-  };
-  button.on(RenderableEvents.FOCUSED, () => {
-    button.borderColor = colors.hover;
-    label.fg = colors.hover;
-  });
-  button.on(RenderableEvents.BLURRED, () => {
-    button.borderColor = colors.bg;
-    label.fg = colors.fg;
-  });
+  button.onMouseOver = () => setActive(true);
+  button.onMouseOut = () => setActive(false);
+  button.on(RenderableEvents.FOCUSED, () => setActive(true));
+  button.on(RenderableEvents.BLURRED, () => setActive(false));
 
   return button;
 }

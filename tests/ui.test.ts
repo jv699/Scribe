@@ -293,6 +293,14 @@ describe("two-stage main menu", () => {
 });
 
 describe("makeButton", () => {
+  test("destroys cleanly while focused", () => {
+    const button = makeButton(renderer, { label: "Back" });
+    renderer.root.add(button);
+    button.focus();
+
+    expect(() => button.destroyRecursively()).not.toThrow();
+  });
+
   // Numpad Enter is a distinct key name from Return; every other Enter-sensitive
   // widget accepts both, and makeButton backs every button in the app.
   test("activates on both Return and numpad Enter", () => {
