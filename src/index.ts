@@ -6,7 +6,7 @@
 import { createCliRenderer } from "@opentui/core";
 import { theme } from "./theme.ts";
 import { makeCampaignDialog } from "./components/campaign-dialog.ts";
-import { makeMainMenuScreen } from "./screens/main-menu.ts";
+import { makeMainMenuScreen, type MainMenuView } from "./screens/main-menu.ts";
 import { makeCampaignHomeScreen } from "./screens/campaign-home.ts";
 import { makeSettingsScreen } from "./screens/settings.ts";
 import { makeChatScreen, type ChatLogStore } from "./screens/chat.ts";
@@ -69,13 +69,14 @@ function navigate(fn: () => Promise<unknown>): void {
   });
 }
 
-async function showMainMenu(): Promise<void> {
+async function showMainMenu(initialView: MainMenuView = "root"): Promise<void> {
   const campaigns = await listCampaigns(settings.campaignsDir);
   const error = pendingError;
   pendingError = undefined;
   showScreen(
     makeMainMenuScreen(renderer, {
       campaigns,
+      initialView,
       error,
       playIntro: !introPlayed,
       onCreateCampaign: () => campaignDialog.open(),
@@ -156,7 +157,7 @@ async function showCampaignHome(campaign: Campaign): Promise<void> {
   showScreen(
     await makeCampaignHomeScreen(renderer, {
       campaign: fresh,
-      onBack: () => navigate(showMainMenu),
+      onBack: () => navigate(() => showMainMenu("campaigns")),
       onChanged: () => navigate(() => showCampaignHome(fresh)),
       onPlan: (session) => navigate(() => showPlanningChat(fresh, session)),
       onReport: (session) => navigate(() => showReportChat(fresh, session)),

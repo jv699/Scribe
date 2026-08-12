@@ -8,7 +8,7 @@ import { join } from "node:path";
 
 import { makeButton } from "../src/components/ui.ts";
 import { makeCampaignDialog } from "../src/components/campaign-dialog.ts";
-import { makeMainMenuScreen } from "../src/screens/main-menu.ts";
+import { makeMainMenuScreen, type MainMenuView } from "../src/screens/main-menu.ts";
 import { makeCampaignHomeScreen } from "../src/screens/campaign-home.ts";
 import type { Screen } from "../src/screens/screen.ts";
 import { createCampaign, listCampaigns, loadCampaign, type Campaign } from "../src/store/campaigns.ts";
@@ -37,11 +37,12 @@ function showScreen(screen: Screen): void {
   screen.focus?.();
 }
 
-async function showMainMenu(): Promise<void> {
+async function showMainMenu(initialView: MainMenuView = "root"): Promise<void> {
   const campaigns = await listCampaigns(campaignsDir);
   showScreen(
     makeMainMenuScreen(renderer, {
       campaigns,
+      initialView,
       playIntro: false,
       onCreateCampaign: () => campaignDialog.open(),
       onSelectCampaign: (c) => void showCampaignHome(c),
@@ -57,7 +58,7 @@ async function showCampaignHome(campaign: Campaign): Promise<void> {
   showScreen(
     await makeCampaignHomeScreen(renderer, {
       campaign: fresh,
-      onBack: () => void showMainMenu(),
+      onBack: () => void showMainMenu("campaigns"),
       onChanged: () => void showCampaignHome(fresh),
       onPlan: () => {},
       onReport: () => {},
@@ -94,9 +95,15 @@ describe("phase-0 ui flow", () => {
     // main menu
     await renderOnce();
     let frame = captureCharFrame();
-    expect(frame.includes("Create New Campaign") && frame.includes("Quit")).toBe(true);
+    expect(frame.includes("Campaigns") && frame.includes("Drafting Table") && frame.includes("Settings") && frame.includes("Quit")).toBe(true);
+    expect(frame.includes("Create Campaign")).toBe(false);
 
-    // create a campaign through the dialog
+    // enter the campaign submenu, then create a campaign through the dialog
+    keys.pressEnter();
+    await renderOnce();
+    frame = captureCharFrame();
+    expect(frame.includes("Back") && frame.includes("Create Campaign")).toBe(true);
+    await keys.pressKeys(["ARROW_DOWN"], 20);
     keys.pressEnter();
     await wait(100);
     await keys.typeText("Curse of Strahd", 5);
@@ -150,16 +157,16 @@ describe("phase-0 ui flow", () => {
     await renderOnce();
     expect(captureCharFrame().includes("Death House")).toBe(false);
 
-    // escape back to the main menu — campaign is listed
+    // escape back to the campaign submenu — campaign is listed
     keys.pressKey("ESCAPE");
     await wait(500);
     await renderOnce();
     frame = captureCharFrame();
-    expect(frame.includes("Create New Campaign")).toBe(true);
+    expect(frame.includes("Create Campaign")).toBe(true);
     expect(frame.includes("Curse of Strahd")).toBe(true);
 
     // navigate back in — loaded from disk
-    await keys.pressKeys(["ARROW_DOWN"], 20);
+    await keys.pressKeys(["ARROW_DOWN", "ARROW_DOWN"], 20);
     keys.pressEnter();
     await wait();
     await renderOnce();
@@ -206,6 +213,31 @@ describe("select mouse support", () => {
     expect(quits).toBe(1);
   });
 
+  test("mouse support follows the menu into the campaign stage", async () => {
+    let creates = 0;
+    showScreen(
+      makeMainMenuScreen(renderer, {
+        campaigns: [],
+        playIntro: false,
+        onCreateCampaign: () => creates++,
+        onSelectCampaign: () => {},
+        onSettings: () => {},
+        onOneshotPlanner: () => {},
+        onQuit: () => {},
+      }),
+    );
+    await renderOnce();
+
+    const mouse = createMockMouse(renderer);
+    const campaigns = locate("Campaigns");
+    await mouse.click(campaigns.x, campaigns.y);
+    await renderOnce();
+
+    const create = locate("Create Campaign");
+    await mouse.click(create.x, create.y);
+    expect(creates).toBe(1);
+  });
+
   test("hovering a main-menu row moves the selection", async () => {
     await renderOnce();
     const mouse = createMockMouse(renderer);
@@ -214,6 +246,49 @@ describe("select mouse support", () => {
     await renderOnce();
     // The selection indicator sits just left of the hovered row's label.
     expect(captureCharFrame().split("\n")[quit.y]).toContain("▶ Quit");
+  });
+});
+
+describe("two-stage main menu", () => {
+  test("Back and Escape both return the campaign stage to the root", async () => {
+    await renderOnce();
+    const rootLines = captureCharFrame().split("\n");
+    const rootOrder = ["Campaigns", "Drafting Table", "Settings", "Quit"].map((label) =>
+      rootLines.findIndex((line) => line.includes(label)),
+    );
+    expect(rootOrder.every((row, index) => index === 0 || row > rootOrder[index - 1]!)).toBe(true);
+
+    keys.pressEnter();
+    await renderOnce();
+    expect(captureCharFrame().includes("Create Campaign")).toBe(true);
+
+    keys.pressEnter();
+    await renderOnce();
+    expect(captureCharFrame().includes("Drafting Table")).toBe(true);
+    expect(captureCharFrame().includes("Create Campaign")).toBe(false);
+
+    keys.pressEnter();
+    await renderOnce();
+    keys.pressKey("ESCAPE");
+    await wait(100);
+    await renderOnce();
+    expect(captureCharFrame().includes("Drafting Table")).toBe(true);
+    expect(captureCharFrame().includes("Create Campaign")).toBe(false);
+  });
+
+  test("cancelling campaign creation stays in the campaign stage", async () => {
+    await renderOnce();
+    keys.pressEnter();
+    await keys.pressKeys(["ARROW_DOWN"], 20);
+    keys.pressEnter();
+    await wait(100);
+
+    keys.pressKey("ESCAPE");
+    await wait(100);
+    await renderOnce();
+    expect(captureCharFrame().includes("New Campaign")).toBe(false);
+    expect(captureCharFrame().includes("Create Campaign")).toBe(true);
+    expect(captureCharFrame().includes("Drafting Table")).toBe(false);
   });
 });
 

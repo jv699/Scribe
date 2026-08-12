@@ -136,7 +136,7 @@ the chat transcript renders streamed markdown directly.
 ## Screens
 
 ```
-Main menu          → list campaigns, create, settings, quit        (exists)
+Main menu          → app destinations; nested campaign list/create (exists)
 Campaign home      → system, story-so-far peek, session list w/ statuses,
                      actions: "Plan next session" / "Report outcome" / open folder
 Chat screen        → shared by planning & report modes (different prompt/tools);
