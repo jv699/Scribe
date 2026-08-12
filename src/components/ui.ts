@@ -9,6 +9,7 @@
 import {
   BoxRenderable,
   RenderableEvents,
+  t,
   TextRenderable,
   type CliRenderer,
   type KeyEvent,
@@ -66,17 +67,20 @@ export interface ButtonOptions {
   variant?: "primary" | "ghost";
 }
 
+//TODO: refactor  
 const BUTTON_COLORS = {
-  primary: { bg: theme.accent, fg: theme.text, hover: theme.accentHover },
-  ghost: { bg: theme.surfaceRaised, fg: theme.text, hover: theme.surfaceActive },
+  primary: { bg: theme.accent, fg: theme.text, hover: theme.flameCore },
+  ghost: { bg: "#bdbbbb", fg: theme.text, hover: theme.flameCore},
 } as const;
 
 export function makeButton(ctx: RenderContext, options: ButtonOptions): BoxRenderable {
   const colors = BUTTON_COLORS[options.variant ?? "ghost"];
 
   const button = new BoxRenderable(ctx, {
-    backgroundColor: colors.bg,
-    padding: 1,
+    borderColor: colors.bg,
+    paddingLeft: 2,
+    paddingRight: 2,
+    border: true,
     focusable: true,
   });
 
@@ -93,16 +97,20 @@ export function makeButton(ctx: RenderContext, options: ButtonOptions): BoxRende
     if (key.name === "return" || key.name === "kpenter") options.onClick?.();
   };
   button.onMouseOver = () => {
-    button.backgroundColor = colors.hover;
+    button.borderColor = colors.hover;
+    label.fg = colors.hover;
   };
   button.onMouseOut = () => {
-    button.backgroundColor = colors.bg;
+    button.borderColor = colors.bg;
+    label.fg = colors.fg;
   };
   button.on(RenderableEvents.FOCUSED, () => {
-    button.backgroundColor = colors.hover;
+    button.borderColor = colors.hover;
+    label.fg = colors.hover;
   });
   button.on(RenderableEvents.BLURRED, () => {
-    button.backgroundColor = colors.bg;
+    button.borderColor = colors.bg;
+    label.fg = colors.fg;
   });
 
   return button;
