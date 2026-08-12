@@ -1,6 +1,6 @@
 /**
- * Main menu screen: create campaign / campaign list (loaded from disk) /
- * quit, with the 90's intro animation on first show.
+ * Two-stage main menu: top-level app destinations, then campaign creation and
+ * the campaign list, with the 90's intro animation on first show.
  */
 import {
   BoxRenderable,
@@ -8,6 +8,7 @@ import {
   SelectRenderableEvents,
   TextRenderable,
   type CliRenderer,
+  type KeyEvent,
   type SelectOption,
 } from "@opentui/core";
 import { enableSelectMouse } from "../components/ui.ts";
@@ -17,8 +18,12 @@ import { theme } from "../theme.ts";
 import type { Campaign } from "../store/campaigns.ts";
 import type { Screen } from "./screen.ts";
 
+export type MainMenuView = "root" | "campaigns";
+
 export interface MainMenuOptions {
   campaigns: Campaign[];
+  /** Menu stage shown initially. Defaults to the top-level menu. */
+  initialView?: MainMenuView;
   /** Play the 90's intro animation (only on first show). */
   playIntro: boolean;
   onCreateCampaign: () => void;
@@ -32,19 +37,25 @@ export interface MainMenuOptions {
 }
 
 export function makeMainMenuScreen(renderer: CliRenderer, options: MainMenuOptions): Screen {
-  const menuOptions: SelectOption[] = [
-    { name: "Create New Campaign", description: "" },
-    ...options.campaigns.map((c) => ({ name: c.name, description: c.system })),
-    { name: "Settings", description: "" },
+  const rootOptions: SelectOption[] = [
+    { name: "Campaigns", description: "" },
     { name: "Drafting Table", description: "one-shot and ideas planner" },
+    { name: "Settings", description: "" },
     { name: "Quit", description: "" },
   ];
+  const campaignOptions: SelectOption[] = [
+    { name: "Back", description: "" },
+    { name: "Create Campaign", description: "" },
+    ...options.campaigns.map((c) => ({ name: c.name, description: c.system })),
+  ];
+  let view: MainMenuView = options.initialView ?? "root";
+  const initialOptions = view === "campaigns" ? campaignOptions : rootOptions;
 
   const mainMenu = new SelectRenderable(renderer, {
     width: 30,
-    height: menuOptions.length,
+    height: initialOptions.length,
     showDescription: false,
-    options: menuOptions,
+    options: initialOptions,
     selectedBackgroundColor: theme.accent,
     selectedTextColor: theme.text,
   });
@@ -54,31 +65,42 @@ export function makeMainMenuScreen(renderer: CliRenderer, options: MainMenuOptio
   const menuPanel = new BoxRenderable(renderer, {});
   menuPanel.add(mainMenu);
 
-  const createIndex = 0;
-  const settingsIndex = 1 + options.campaigns.length;
-  const oneshotIndex = settingsIndex + 1;
-  const quitIndex = oneshotIndex + 1;
+  function showView(nextView: MainMenuView): void {
+    view = nextView;
+    const nextOptions = view === "campaigns" ? campaignOptions : rootOptions;
+    mainMenu.options = nextOptions;
+    mainMenu.height = nextOptions.length;
+    mainMenu.setSelectedIndex(0);
+  }
 
   mainMenu.on(SelectRenderableEvents.ITEM_SELECTED, (index: number) => {
-    if (index === createIndex) {
+    if (view === "root") {
+      if (index === 0) showView("campaigns");
+      else if (index === 1) options.onOneshotPlanner();
+      else if (index === 2) options.onSettings();
+      else if (index === 3) options.onQuit();
+      return;
+    }
+
+    if (index === 0) {
+      showView("root");
+      return;
+    }
+    if (index === 1) {
       options.onCreateCampaign();
       return;
     }
-    if (index === settingsIndex) {
-      options.onSettings();
-      return;
-    }
-    if (index === oneshotIndex) {
-      options.onOneshotPlanner();
-      return;
-    }
-    if (index === quitIndex) {
-      options.onQuit();
-      return;
-    }
-    const campaign = options.campaigns[index - 1];
+    const campaign = options.campaigns[index - 2];
     if (campaign) options.onSelectCampaign(campaign);
   });
+
+  const onScreenKeypress = (key: KeyEvent): void => {
+    if (key.name === "escape" && view === "campaigns" && renderer.currentFocusedRenderable === mainMenu) {
+      key.preventDefault();
+      showView("root");
+    }
+  };
+  renderer.keyInput.on("keypress", onScreenKeypress);
 
   const logo = new TextRenderable(renderer, { content: consts.logoBloody, fg: theme.text });
 
@@ -102,8 +124,9 @@ export function makeMainMenuScreen(renderer: CliRenderer, options: MainMenuOptio
     chunkyFadeIn(menuPanel, { delayMs: 500 });
   }
 
-  // No dispose(): this screen registers no renderer-level listeners of its own
-  // (SelectRenderable handles its own focus). Anything added here that does —
-  // a keypress handler, a timer — must be torn down like the other screens do.
-  return { node: container, focus: () => mainMenu.focus() };
+  return {
+    node: container,
+    focus: () => mainMenu.focus(),
+    dispose: () => renderer.keyInput.off("keypress", onScreenKeypress),
+  };
 }
