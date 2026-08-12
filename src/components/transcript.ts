@@ -24,6 +24,7 @@ import {
 import { theme } from "../theme.ts";
 import { formatDuration } from "../format.ts";
 import { makeAccentPanel } from "./ui.ts";
+import { makeShimmerText, type ShimmerText } from "./shimmer-text.ts";
 import { ASK_USER_TOOL_NAME, parseAskResult } from "../agent/ask.ts";
 import type { ChatMessage } from "../provider/types.ts";
 
@@ -70,6 +71,7 @@ export function makeTranscript(renderer: CliRenderer, options: TranscriptOptions
     paddingRight: "1%",
   });
   const entries: Entry[] = [];
+  const liveShimmers = new Set<ShimmerText>();
 
   /**
    * The activity block still accepting rows, if any. Cleared whenever anything
@@ -223,8 +225,14 @@ export function makeTranscript(renderer: CliRenderer, options: TranscriptOptions
       openGroup = body;
       pin(blockNode);
     }
-    const line = new TextRenderable(renderer, { content: `${present}…`, fg: theme.textMuted });
-    openGroup.add(line);
+    const shimmer = makeShimmerText(renderer, {
+      text: `${present}…`,
+      baseColor: theme.textMuted,
+      edgeColor: theme.textDim,
+      highlightColor: theme.flameCore,
+    });
+    openGroup.add(shimmer.node);
+    liveShimmers.add(shimmer);
 
     const startedAt = Date.now();
     let settled = false;
@@ -232,12 +240,8 @@ export function makeTranscript(renderer: CliRenderer, options: TranscriptOptions
       finish(): void {
         if (settled) return;
         settled = true;
-        // `finish()` is public and `reset()` may have torn this row down in the
-        // meantime, so the component keeps that safe itself rather than making
-        // every caller drop its handle first. Writing to a destroyed renderable
-        // is the one thing a late finish() could break.
-        if (line.isDestroyed) return;
-        line.content = `${past} · ${formatDuration(Date.now() - startedAt)}`;
+        liveShimmers.delete(shimmer);
+        shimmer.stop(`${past} · ${formatDuration(Date.now() - startedAt)}`);
       },
     };
   }
@@ -269,6 +273,8 @@ export function makeTranscript(renderer: CliRenderer, options: TranscriptOptions
   function reset(): void {
     openGroup = null;
     lastNotice = null;
+    for (const shimmer of liveShimmers) shimmer.stop();
+    liveShimmers.clear();
     for (let i = entries.length - 1; i >= 0; i--) removeEntry(i);
   }
 
