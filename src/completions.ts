@@ -7,6 +7,7 @@
  */
 import type { CompletionItem, CompletionSource } from "./components/autocomplete.ts";
 import { loadCampaign, type Campaign } from "./store/campaigns.ts";
+import { listOneshots } from "./store/oneshots.ts";
 import { listSessions } from "./store/sessions.ts";
 import { listSources } from "./store/sources.ts";
 
@@ -41,6 +42,31 @@ export function sourceCompletions(sourcesDir: string): CompletionSource[] {
     {
       trigger: "@",
       items: async (query) => filterCompletions(await sourceItems(sourcesDir), query),
+    },
+  ];
+}
+
+/**
+ * `@` completions for the Drafting Table: saved drafts plus reference PDFs in
+ * one popup. Both libraries are re-read per keystroke so new files appear
+ * without reopening the chat.
+ */
+export function oneshotCompletions(oneshotsDir: string, sourcesDir: string): CompletionSource[] {
+  return [
+    {
+      trigger: "@",
+      items: async (query) => {
+        const drafts = await listOneshots(oneshotsDir);
+        const items: CompletionItem[] = [
+          ...drafts.map((draft) => ({
+            label: `@oneshot-${draft.slug}`,
+            description: `${draft.displayName} · saved one-shot`,
+            insert: `the saved one-shot "${draft.slug}"`,
+          })),
+          ...(await sourceItems(sourcesDir)),
+        ];
+        return filterCompletions(items, query);
+      },
     },
   ];
 }
@@ -89,4 +115,3 @@ export function campaignCompletions(campaign: Campaign, sourcesDir: string): Com
     },
   ];
 }
-

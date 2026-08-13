@@ -16,7 +16,9 @@ import {
 import { registry, resolveTools, toolLabel, toolNames, toolPastLabel } from "../src/agent/tools/index.ts";
 import type { ChatEvent, ChatMessage, ChatProvider } from "../src/provider/types.ts";
 import { createCampaign, loadCampaign, type Campaign } from "../src/store/campaigns.ts";
+import { saveOneshot } from "../src/store/oneshots.ts";
 import { createSession, listSessions } from "../src/store/sessions.ts";
+import type { ActiveOneshot } from "../src/agent/tools/types.ts";
 
 // --- fake provider helpers ---
 
@@ -62,6 +64,7 @@ let campaignDir: string;
 let campaign: Campaign;
 /** No PDFs by default — enough for the decline/grant assertions; sources tests populate it themselves. */
 let sourcesDir: string;
+let oneshotsDir: string;
 
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), "scribe-agent-"));
@@ -69,6 +72,7 @@ beforeEach(async () => {
   campaignDir = campaign.dir;
   await createSession(campaign, "Death House");
   sourcesDir = join(dir, "Sources");
+  oneshotsDir = join(dir, "One-Shots");
 });
 
 afterEach(async () => {
@@ -93,7 +97,14 @@ function stubAskChannel(answers: string[] | null): AskChannel & { asked: AskQues
  * A context with everything available, so `toolsFor` resolves a full grant.
  * Individual tests narrow it to assert the decline paths.
  */
-const fullContext = () => ({ campaign, ask: stubAskChannel(["ok"]), sourcesDir, defaultSystem: campaign.system });
+const fullContext = () => ({
+  campaign,
+  ask: stubAskChannel(["ok"]),
+  oneshotsDir,
+  activeOneshot: { current: null } satisfies ActiveOneshot,
+  sourcesDir,
+  defaultSystem: campaign.system,
+});
 
 /** Resolve an agent's tools against the fixture campaign and pick one by name. */
 function grantedTool(agent: AgentId, name: string): AgentTool {
@@ -383,6 +394,63 @@ describe("save_session tool", () => {
   });
 });
 
+describe("saved one-shot tools", () => {
+  test("list, read, and update share one active document and preserve frontmatter", async () => {
+    await saveOneshot(oneshotsDir, { title: "Lighthouse Siege", system: "5e", content: "old lighthouse" });
+    await saveOneshot(oneshotsDir, { title: "Moon Ritual", content: "old ritual" });
+    let readName = "";
+    const active: ActiveOneshot = { current: null, onRead: (oneshot) => (readName = oneshot.displayName) };
+    const tools = toolsFor("oneshot", { oneshotsDir, activeOneshot: active });
+    const pick = (name: string) => tools.find((tool) => tool.definition.function.name === name)!;
+
+    expect(String(await pick("list_oneshots").execute({}))).toContain("Lighthouse Siege (slug: lighthouse-siege)");
+    expect(await pick("update_oneshot").execute({ content: "too soon" })).toBe(
+      "(read a one-shot before updating it)",
+    );
+    expect(await pick("read_oneshot").execute({ document: "../../etc/passwd" })).toBe(
+      "(one-shot not found or ambiguous)",
+    );
+    expect(active.current).toBeNull();
+
+    const read = String(await pick("read_oneshot").execute({ document: "lighthouse-siege" }));
+    expect(read).toContain("Saved one-shot metadata:\ntitle: Lighthouse Siege");
+    expect(read).toContain("system: 5e");
+    expect(read).toContain("Saved one-shot body:\nold lighthouse");
+    expect(readName).toBe("Lighthouse Siege");
+    expect(await pick("update_oneshot").execute({ content: "## Revised\n\nNew lighthouse." })).toBe(
+      'Updated saved one-shot "Lighthouse Siege".',
+    );
+    const lighthouse = await readFile(join(oneshotsDir, "lighthouse-siege.md"), "utf8");
+    expect(lighthouse).toContain("title: Lighthouse Siege");
+    expect(lighthouse).toContain("system: 5e");
+    expect(lighthouse).toContain("## Revised\n\nNew lighthouse.");
+
+    await pick("read_oneshot").execute({ document: "Moon Ritual" });
+    await pick("update_oneshot").execute({ content: "new ritual" });
+    expect(await readFile(join(oneshotsDir, "moon-ritual.md"), "utf8")).toContain("new ritual");
+    expect(await readFile(join(oneshotsDir, "lighthouse-siege.md"), "utf8")).not.toContain("new ritual");
+  });
+
+  test("rejects empty replacement content without changing the active file", async () => {
+    await saveOneshot(oneshotsDir, { title: "Ritual", content: "original" });
+    const active: ActiveOneshot = { current: null };
+    const tools = toolsFor("oneshot", { oneshotsDir, activeOneshot: active });
+    const read = tools.find((tool) => tool.definition.function.name === "read_oneshot")!;
+    const update = tools.find((tool) => tool.definition.function.name === "update_oneshot")!;
+    await read.execute({ document: "ritual" });
+
+    expect(await update.execute({ content: "   " })).toBe("(content cannot be empty)");
+    expect(await readFile(join(oneshotsDir, "ritual.md"), "utf8")).toContain("original");
+  });
+
+  test("the saved-document tools are granted only to the one-shot agent", () => {
+    const names = ["list_oneshots", "read_oneshot", "update_oneshot"];
+    expect(grantedNames("oneshot")).toEqual(expect.arrayContaining(names));
+    expect(grantedNames("planning")).not.toEqual(expect.arrayContaining(names));
+    expect(grantedNames("report")).not.toEqual(expect.arrayContaining(names));
+  });
+});
+
 describe("source-document tools", () => {
   const FIXTURES = join(import.meta.dir, "fixtures");
   const RULES_PDF = join(FIXTURES, "rules.pdf");
@@ -665,9 +733,16 @@ describe("agent gateway", () => {
     expect(grantedNames("report")).toContain("append_campaign_summary");
   });
 
-  test("oneshot resolves save_session only when a one-shots dir is configured", () => {
-    const oneshotsDir = join(dir, "One-Shots");
-    expect(toolsFor("oneshot", { oneshotsDir }).map((t) => t.definition.function.name)).toEqual(["save_session"]);
+  test("oneshot resolves directory tools and binds read/write when active state is available", () => {
+    expect(toolsFor("oneshot", { oneshotsDir }).map((t) => t.definition.function.name)).toEqual([
+      "save_session",
+      "list_oneshots",
+    ]);
+    expect(
+      toolsFor("oneshot", { oneshotsDir, activeOneshot: { current: null } }).map(
+        (t) => t.definition.function.name,
+      ),
+    ).toEqual(["save_session", "list_oneshots", "read_oneshot", "update_oneshot"]);
     // Declines without a dir — plain streaming remains the fallback.
     expect(toolsFor("oneshot", {})).toEqual([]);
     expect(toolsFor("oneshot", { campaign })).toEqual([]);

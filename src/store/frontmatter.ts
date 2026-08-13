@@ -3,7 +3,8 @@
  * Deliberately NOT YAML — see PLAN.md ("no YAML dependency"). Multi-line
  * content belongs in the markdown body, not in frontmatter.
  */
-import { readFile, writeFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { open } from "node:fs/promises";
 
 export interface FrontmatterDoc {
   data: Record<string, string>;
@@ -60,8 +61,27 @@ export async function updateFrontmatterFile(
   path: string,
   update: (data: Record<string, string>, body: string) => FrontmatterDoc,
 ): Promise<FrontmatterDoc> {
-  const { data, body } = parseFrontmatter(await readFile(path, "utf8"));
-  const next = update(data, body);
-  await writeFile(path, serializeFrontmatter(next.data, next.body), "utf8");
-  return next;
+  // Hold one no-follow descriptor from read through write. A path-level
+  // read/modify/write would follow a symlink swapped in after discovery and
+  // could escape the store directory.
+  const file = await open(path, constants.O_RDWR | constants.O_NOFOLLOW);
+  try {
+    const stats = await file.stat();
+    if (!stats.isFile()) throw new Error("frontmatter target is not a regular file");
+
+    const { data, body } = parseFrontmatter(await file.readFile("utf8"));
+    const next = update(data, body);
+    const content = Buffer.from(serializeFrontmatter(next.data, next.body), "utf8");
+
+    await file.truncate(0);
+    let offset = 0;
+    while (offset < content.length) {
+      const { bytesWritten } = await file.write(content, offset, content.length - offset, offset);
+      if (bytesWritten === 0) throw new Error("could not finish writing frontmatter file");
+      offset += bytesWritten;
+    }
+    return next;
+  } finally {
+    await file.close();
+  }
 }
