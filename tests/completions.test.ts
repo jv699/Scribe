@@ -3,10 +3,11 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { campaignCompletions, filterCompletions } from "../src/completions.ts";
+import { campaignCompletions, filterCompletions, oneshotCompletions } from "../src/completions.ts";
 import type { CompletionItem } from "../src/components/autocomplete.ts";
 import { createCampaign, type Campaign } from "../src/store/campaigns.ts";
 import { createSession, setSessionStatus } from "../src/store/sessions.ts";
+import { saveOneshot } from "../src/store/oneshots.ts";
 
 let dir: string;
 let campaign: Campaign;
@@ -97,5 +98,27 @@ describe("campaignCompletions", () => {
 
     await createSession(campaign, "Death House");
     expect((await source.items("")).map((i) => i.label)).toContain("@session-1");
+  });
+});
+
+describe("oneshotCompletions", () => {
+  test("offers saved drafts with safe plain-language insertions", async () => {
+    const oneshotsDir = join(dir, "One-Shots");
+    await saveOneshot(oneshotsDir, { title: "Lighthouse Siege", content: "plan" });
+    const source = oneshotCompletions(oneshotsDir, sourcesDir)[0]!;
+
+    const [item] = await source.items("lighthouse");
+    expect(item?.label).toBe("@oneshot-lighthouse-siege");
+    expect(item?.description).toBe("Lighthouse Siege · saved one-shot");
+    expect(item?.insert).toBe('the saved one-shot "lighthouse-siege"');
+  });
+
+  test("picks up drafts created after the completion source was built", async () => {
+    const oneshotsDir = join(dir, "One-Shots");
+    const source = oneshotCompletions(oneshotsDir, sourcesDir)[0]!;
+    expect(await source.items("ritual")).toEqual([]);
+
+    await saveOneshot(oneshotsDir, { title: "Moon Ritual", content: "plan" });
+    expect((await source.items("ritual")).map((item) => item.label)).toEqual(["@oneshot-moon-ritual"]);
   });
 });

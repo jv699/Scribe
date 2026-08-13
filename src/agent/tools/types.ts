@@ -15,11 +15,19 @@
 import type { ToolDefinition } from "../../provider/types.ts";
 import type { Campaign } from "../../store/campaigns.ts";
 import type { Session } from "../../store/sessions.ts";
+import type { SavedOneshot } from "../../store/oneshots.ts";
 import type { AskChannel } from "../ask.ts";
 import type { AgentTool } from "../loop.ts";
 
 /** Re-exported so tool files import their whole contract from one module. */
 export type { AgentTool, ToolDefinition };
+
+/** Screen-local state shared by the one-shot read and update tools. */
+export interface ActiveOneshot {
+  current: SavedOneshot | null;
+  /** Lets the owning Drafting Table reflect a successful read in its title. */
+  onRead?: (oneshot: SavedOneshot) => void;
+}
 
 /**
  * Everything a tool factory may need, assembled once by the caller.
@@ -35,6 +43,8 @@ export interface ToolContext {
   session?: Session;
   /** Directory where saved one-shot plans are written, when the app has one configured. */
   oneshotsDir?: string;
+  /** The saved one-shot selected in this Drafting Table, if any. */
+  activeOneshot?: ActiveOneshot;
   /** The source-document library (PDFs of rulebooks, bestiaries, etc.), when the app has one configured. */
   sourcesDir?: string;
   /** The campaign's game system, used to scope source-document searches by default. */

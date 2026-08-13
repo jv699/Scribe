@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtemp, readFile, rm, readdir } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, readdir, symlink, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -9,7 +9,7 @@ import { createCampaign, listCampaigns, loadCampaign, updateCampaignMeta, append
 import { createSession, listSessions, setSessionStatus, trashSession } from "../src/store/sessions.ts";
 import { loadChatLog, saveChatLog, clearChatLog, chatLogPath } from "../src/store/chat-log.ts";
 import { loadInstructions, loadOneshotInstructions, loadPromptOverride } from "../src/store/instructions.ts";
-import { saveOneshot } from "../src/store/oneshots.ts";
+import { findOneshot, listOneshots, saveOneshot, unslugOneshot, writeOneshot } from "../src/store/oneshots.ts";
 import { sanitizeFolderName, today, uniqueName } from "../src/store/naming.ts";
 
 let dir: string;
@@ -426,6 +426,39 @@ describe("saveOneshot", () => {
     expect(await readFile(second, "utf8")).toContain("second plan");
   });
 
+  test("concurrent saves with the same title create distinct files without losing content", async () => {
+    const contents = Array.from({ length: 8 }, (_, index) => `plan ${index + 1}`);
+    const paths = await Promise.all(
+      contents.map((content) => saveOneshot(dir, { title: "Lighthouse Siege", content })),
+    );
+
+    expect(new Set(paths).size).toBe(contents.length);
+    expect(paths.toSorted()).toEqual(
+      Array.from({ length: contents.length }, (_, index) =>
+        join(dir, index === 0 ? "lighthouse-siege.md" : `lighthouse-siege-${index + 1}.md`),
+      ).toSorted(),
+    );
+
+    const saved = await Promise.all(paths.map((path) => readFile(path, "utf8")));
+    for (const content of contents) {
+      expect(saved.filter((document) => document.endsWith(content))).toHaveLength(1);
+    }
+  });
+
+  test("a symlink occupying a save candidate is preserved and the next suffix is used", async () => {
+    const outside = join(dir, "outside.md");
+    const oneshotsDir = join(dir, "One-Shots");
+    await mkdir(oneshotsDir);
+    await writeFile(outside, "must stay untouched", "utf8");
+    await symlink(outside, join(oneshotsDir, "ritual.md"));
+
+    const path = await saveOneshot(oneshotsDir, { title: "Ritual", content: "new plan" });
+
+    expect(path).toBe(join(oneshotsDir, "ritual-2.md"));
+    expect(await readFile(outside, "utf8")).toBe("must stay untouched");
+    expect(await readFile(path, "utf8")).toContain("new plan");
+  });
+
   test("creates a missing target directory", async () => {
     const target = join(dir, "nested", "plans");
     const path = await saveOneshot(target, { title: "Ritual", content: "x" });
@@ -436,5 +469,66 @@ describe("saveOneshot", () => {
   test("punctuation-only title falls back to oneshot.md", async () => {
     const path = await saveOneshot(dir, { title: "!!!", content: "x" });
     expect(path).toBe(join(dir, "oneshot.md"));
+  });
+
+  test("lists regular markdown files in display-name order and unslugs their names", async () => {
+    const oneshotsDir = join(dir, "One-Shots");
+    const outside = join(dir, "outside.md");
+    await saveOneshot(oneshotsDir, { title: "Ziggurat Run", content: "z" });
+    await saveOneshot(oneshotsDir, { title: "Ash Vault", content: "a" });
+    await writeFile(join(oneshotsDir, "notes.txt"), "ignore me", "utf8");
+    await mkdir(join(oneshotsDir, "nested.md"));
+    await writeFile(outside, "outside secret", "utf8");
+    await symlink(outside, join(oneshotsDir, "linked.md"));
+
+    const listed = await listOneshots(oneshotsDir);
+    expect(listed.map(({ slug, displayName }) => ({ slug, displayName }))).toEqual([
+      { slug: "ash-vault", displayName: "Ash Vault" },
+      { slug: "ziggurat-run", displayName: "Ziggurat Run" },
+    ]);
+    expect(listed.every(({ body }) => body !== "outside secret")).toBe(true);
+    expect(unslugOneshot("lighthouse-siege-2.md")).toBe("Lighthouse Siege 2");
+  });
+
+  test("resolves exact slugs or display names without treating input as a path", async () => {
+    await saveOneshot(dir, { title: "Lighthouse Siege", content: "plan" });
+    expect((await findOneshot(dir, "lighthouse-siege"))?.displayName).toBe("Lighthouse Siege");
+    expect((await findOneshot(dir, "Lighthouse Siege"))?.slug).toBe("lighthouse-siege");
+    expect(await findOneshot(dir, "../../etc/passwd")).toBeNull();
+  });
+
+  test("rejects an ambiguous unslugged display name", async () => {
+    await writeFile(join(dir, "foo-bar.md"), "one", "utf8");
+    await writeFile(join(dir, "foo--bar.md"), "two", "utf8");
+    expect(await findOneshot(dir, "Foo Bar")).toBeNull();
+    expect((await findOneshot(dir, "foo--bar"))?.body).toBe("two");
+  });
+
+  test("replaces the body while preserving every frontmatter field", async () => {
+    const path = await saveOneshot(dir, { title: "Ritual", system: "Shadowdark", content: "old" });
+    const saved = await findOneshot(dir, "ritual");
+    expect(saved).not.toBeNull();
+    await writeOneshot(saved!, "## Revised\n\nNew plan.");
+
+    const { data, body } = parseFrontmatter(await readFile(path, "utf8"));
+    expect(data["title"]).toBe("Ritual");
+    expect(data["system"]).toBe("Shadowdark");
+    expect(data["created"]).not.toBe("");
+    expect(body).toBe("## Revised\n\nNew plan.");
+  });
+
+  test("refuses to follow a symlink swapped in after discovery", async () => {
+    const oneshotsDir = join(dir, "One-Shots");
+    const path = await saveOneshot(oneshotsDir, { title: "Ritual", content: "original" });
+    const saved = await findOneshot(oneshotsDir, "ritual");
+    expect(saved).not.toBeNull();
+
+    const outside = join(dir, "outside.md");
+    await writeFile(outside, "must stay untouched", "utf8");
+    await unlink(path);
+    await symlink(outside, path);
+
+    await expect(writeOneshot(saved!, "replacement")).rejects.toThrow();
+    expect(await readFile(outside, "utf8")).toBe("must stay untouched");
   });
 });

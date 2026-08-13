@@ -94,7 +94,8 @@ tools.**
   - `list_sessions()`
 
   Plus, added in later phases: `save_session` (one-shot only, on explicit user
-  request) and the source-document tools `list_sources` / `search_sources` /
+  request), `list_oneshots` / `read_oneshot` / `update_oneshot` (one-shot only;
+  safely continue a saved plan with wholesale body replacement), and the source-document tools `list_sources` / `search_sources` /
   `read_source_pages` (granted to planning and one-shot, not report). See
   `AGENTS.md` for the full current tool list and per-agent grants.
 - **Asking the user** — `ask_user(question, options)` blocks the turn on a
@@ -183,7 +184,7 @@ exist.
   now have a defined landing spot — add a `ToolSpec` file under
   `src/agent/tools/`, register it, and grant it in `src/agent/agents.ts`. The
   context-free ones (dice, names) are candidates for the `oneshot` agent
-  (which has `save_session` and `ask_user` today). Plan export shipped as
+  (which has save/continue tools and `ask_user` today). Plan export shipped as
   `save_session`: the Drafting Table saves a one-shot to the configured
   one-shots directory, only on the user's explicit request.
 - File-watching for external edits to campaign files while the app is open.

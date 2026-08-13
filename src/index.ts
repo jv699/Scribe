@@ -16,12 +16,13 @@ import { createCampaign, listCampaigns, loadCampaign, type Campaign } from "./st
 import { createProviderFromSettings, DEFAULT_BASE_URL, DEFAULT_MODEL, listModelInfos } from "./provider/openai.ts";
 import type { ChatProvider, ModelInfo } from "./provider/types.ts";
 import { toolsFor } from "./agent/agents.ts";
+import type { ActiveOneshot } from "./agent/tools/types.ts";
 import { makeAskChannel } from "./agent/ask.ts";
 import { buildOneshotSystemPrompt, buildPlanningSystemPrompt, buildReportSystemPrompt } from "./agent/context.ts";
 import type { Session } from "./store/sessions.ts";
 import { loadChatLog, saveChatLog, type ChatLogMode } from "./store/chat-log.ts";
 import { indexSources } from "./store/sources.ts";
-import { campaignCompletions, sourceCompletions } from "./completions.ts";
+import { campaignCompletions, oneshotCompletions } from "./completions.ts";
 
 const renderer = await createCliRenderer({
   exitOnCtrlC: true,
@@ -137,18 +138,23 @@ async function showOneshotPlanner(): Promise<void> {
   // One channel per chat screen: the tools ask through it, the screen answers.
   // It has to exist before either, since tools are resolved up front.
   const ask = makeAskChannel();
-  showScreen(
-    await makeChatScreen(renderer, {
-      ...makeChatOptions(),
-      title: "Drafting Table",
-      systemPrompt: await buildOneshotSystemPrompt(settings),
-      // Granted save_session via the gateway; declined when no one-shots dir is configured.
-      tools: toolsFor("oneshot", { oneshotsDir: settings.oneshotsDir, sourcesDir: settings.sourcesDir, ask }),
+  const activeOneshot: ActiveOneshot = { current: null };
+  const screen = await makeChatScreen(renderer, {
+    ...makeChatOptions(),
+    title: "Drafting Table",
+    systemPrompt: await buildOneshotSystemPrompt(settings),
+    tools: toolsFor("oneshot", {
+      oneshotsDir: settings.oneshotsDir,
+      activeOneshot,
+      sourcesDir: settings.sourcesDir,
       ask,
-      completions: sourceCompletions(settings.sourcesDir),
-      onBack: () => navigate(showMainMenu),
     }),
-  );
+    ask,
+    completions: oneshotCompletions(settings.oneshotsDir, settings.sourcesDir),
+    onBack: () => navigate(showMainMenu),
+  });
+  activeOneshot.onRead = (oneshot) => screen.setTitle(`Drafting Table • ${oneshot.displayName}`);
+  showScreen(screen);
 }
 
 async function showCampaignHome(campaign: Campaign): Promise<void> {

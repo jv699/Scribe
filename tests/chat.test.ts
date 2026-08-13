@@ -106,6 +106,19 @@ describe("chat screen", () => {
     expect(wentBack).toBe(true);
   });
 
+  test("updates the Drafting Table title in place", async () => {
+    const screen = await makeChatScreen(renderer, { provider: okProvider, onBack: () => {} });
+    current = screen;
+    renderer.root.add(screen.node);
+    screen.focus?.();
+    await renderOnce();
+    expect(captureCharFrame().includes("Drafting Table • Lighthouse Siege")).toBe(false);
+
+    screen.setTitle("Drafting Table • Lighthouse Siege");
+    await renderOnce();
+    expect(captureCharFrame().includes("Drafting Table • Lighthouse Siege")).toBe(true);
+  });
+
   // Regression: an agent turn outlives the screen. dispose() destroys the
   // SyntaxStyle every transcript row is built from, so a turn that finished
   // after the user left used to throw "NativeSyntaxStyle is destroyed" while

@@ -101,6 +101,9 @@ describe("prompt assembly", () => {
     const prompt = await buildOneshotSystemPrompt(settings);
 
     expect(prompt).toContain(CORE_ONESHOT_PROMPT.trim());
+    expect(prompt).toContain("read_oneshot before revising one");
+    expect(prompt).toContain("complete canonical markdown body");
+    expect(prompt).toContain("NEVER call save_session unless the user explicitly asks");
     expect(prompt).toContain("Prefer four-hour adventures.");
     // The campaign instructions layer must not leak into one-shot mode.
     expect(prompt).not.toContain("CAMPAIGN ONLY.");

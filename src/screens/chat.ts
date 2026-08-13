@@ -87,7 +87,12 @@ export interface ChatScreenOptions {
   onBack: () => void;
 }
 
-export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenOptions): Promise<Screen> {
+export interface ChatScreen extends Screen {
+  /** Update the left side of the title bar without rebuilding the screen. */
+  setTitle(title: string): void;
+}
+
+export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenOptions): Promise<ChatScreen> {
   const container = new BoxRenderable(renderer, {
     width: "100%",
     height: "100%",
@@ -126,7 +131,8 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
     // marginTop, and the prompt panel below brings one too, so the transcript
     // sits exactly one blank row clear of each — symmetric in every state.
   });
-  titleRow.add(new TextRenderable(renderer, { content: options.title ?? "Drafting Table", fg: theme.accent }));
+  const titleText = new TextRenderable(renderer, { content: options.title ?? "Drafting Table", fg: theme.accent });
+  titleRow.add(titleText);
   const modelText = new TextRenderable(renderer, { content: options.model ?? "", fg: theme.textMuted });
   if (options.model) titleRow.add(modelText);
   container.add(titleRow);
@@ -540,5 +546,12 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
     }
   }
 
-  return { node: container, focus: () => prompt.input.focus(), dispose };
+  return {
+    node: container,
+    focus: () => prompt.input.focus(),
+    dispose,
+    setTitle: (title) => {
+      if (!disposed) titleText.content = title;
+    },
+  };
 }
