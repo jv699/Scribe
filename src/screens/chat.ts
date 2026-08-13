@@ -118,6 +118,7 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
     // line with one blank row above it.
     height: 2,
     paddingTop: 1,
+    paddingBottom: 1,
     backgroundColor: theme.background,
     flexShrink: 0,
     zIndex: 1,
