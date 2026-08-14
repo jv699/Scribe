@@ -119,14 +119,16 @@ export function makeMainMenuScreen(renderer: CliRenderer, options: MainMenuOptio
   }
   container.add(new BoxRenderable(renderer, { flexGrow: 2 }));
 
-  if (options.playIntro) {
-    dissolveIn(logo, consts.logoBloody);
-    chunkyFadeIn(menuPanel, { delayMs: 500 });
-  }
+  const stopAnimations = options.playIntro
+    ? [dissolveIn(logo, consts.logoBloody), chunkyFadeIn(menuPanel, { delayMs: 500 })]
+    : [];
 
   return {
     node: container,
     focus: () => mainMenu.focus(),
-    dispose: () => renderer.keyInput.off("keypress", onScreenKeypress),
+    dispose: () => {
+      renderer.keyInput.off("keypress", onScreenKeypress);
+      for (const stop of stopAnimations) stop();
+    },
   };
 }

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -93,6 +93,19 @@ describe("prompt assembly", () => {
     expect(prompt).toContain("The party arrived in Vallaki.");
     expect(prompt).toContain("append_campaign_summary");
     expect(prompt).toContain("Keep summaries to five bullets.");
+  });
+
+  test("report prompt does not advertise source tools it cannot call", async () => {
+    await mkdir(join(settings.sourcesDir, "5e"), { recursive: true });
+    await copyFile(join(import.meta.dir, "fixtures", "rules.pdf"), join(settings.sourcesDir, "5e", "Rules.pdf"));
+
+    const report = await buildReportSystemPrompt(campaign, session, settings);
+    const planning = await buildPlanningSystemPrompt(campaign, session, settings);
+
+    expect(report).not.toContain("# Source Documents");
+    expect(report).not.toContain("search_sources");
+    expect(planning).toContain("# Source Documents");
+    expect(planning).toContain("search_sources");
   });
 
   test("one-shot prompt uses the one-shot core and its own instructions file", async () => {

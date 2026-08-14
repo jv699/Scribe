@@ -262,6 +262,12 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
     render();
   }
 
+  /** Remove only the placeholder for a model turn that failed before producing anything. */
+  function dropUnfinishedAssistant(): void {
+    const last = messages[messages.length - 1];
+    if (last?.role === "assistant" && last.content === "" && !last.tool_calls?.length) messages.pop();
+  }
+
   // --- ask_user: a question takes the prompt box's place ---
 
   let askWidget: AskWidget | null = null;
@@ -511,6 +517,7 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
         }
       }
     } catch (err) {
+      dropUnfinishedAssistant();
       if (disposed) return;
       endActivity();
       transcript.addNotice(`Error: ${err instanceof Error ? err.message : String(err)}`, "danger");
@@ -570,6 +577,7 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
     if (disposeRan) return;
     disposeRan = true;
     disposed = true;
+    dropUnfinishedAssistant();
     disarmInterrupt();
     // Detach first: this settles any question still on screen with "declined",
     // so an in-flight runAgent can finish instead of awaiting forever.

@@ -5,10 +5,11 @@
  * soft-delete to `.scribe/trash/`.
  */
 import { basename, join } from "node:path";
-import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
+import { mkdir, readdir, rename, writeFile } from "node:fs/promises";
 import { parseFrontmatter, serializeFrontmatter, updateFrontmatterFile } from "./frontmatter.ts";
 import { slugify, today, uniqueName } from "./naming.ts";
 import { updateCampaignMeta, type Campaign } from "./campaigns.ts";
+import { readRegularFileNoFollow } from "./safe-files.ts";
 
 export type SessionStatus = "planning" | "ready" | "played";
 
@@ -84,17 +85,21 @@ export async function createSession(campaign: Campaign, title: string): Promise<
 /** List sessions sorted by number. */
 export async function listSessions(campaign: Campaign): Promise<Session[]> {
   const sessionsDir = join(campaign.dir, SESSIONS_DIR);
-  let files: string[];
+  let entries;
   try {
-    files = await readdir(sessionsDir);
+    entries = await readdir(sessionsDir, { withFileTypes: true });
   } catch {
     return [];
   }
   const sessions: Session[] = [];
-  for (const file of files) {
-    if (!file.endsWith(".md")) continue;
-    const path = join(sessionsDir, file);
-    sessions.push(sessionFromMarkdown(path, await readFile(path, "utf8")));
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith(".md")) continue;
+    const path = join(sessionsDir, entry.name);
+    try {
+      sessions.push(sessionFromMarkdown(path, await readRegularFileNoFollow(path)));
+    } catch {
+      // One unreadable or concurrently-replaced entry should not hide the rest.
+    }
   }
   return sessions.sort((a, b) => a.number - b.number);
 }
@@ -112,7 +117,7 @@ export async function setSessionStatus(session: Session, status: SessionStatus):
 
 /** Read the session's markdown body (the Plan/Outcome sections, no frontmatter). */
 export async function readSessionNotes(session: Session): Promise<string> {
-  const { body } = parseFrontmatter(await readFile(session.path, "utf8"));
+  const { body } = parseFrontmatter(await readRegularFileNoFollow(session.path));
   return body;
 }
 

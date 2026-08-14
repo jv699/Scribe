@@ -25,7 +25,17 @@ function sseResponse(chunks: string[]): Response {
   return new Response(body, { headers: { "content-type": "text/event-stream" } });
 }
 
-type MockBehavior = "stream" | "json" | "error" | "tools" | "models" | "models-error" | "usage" | "json-usage";
+type MockBehavior =
+  | "stream"
+  | "crlf"
+  | "json"
+  | "json-tools"
+  | "error"
+  | "tools"
+  | "models"
+  | "models-error"
+  | "usage"
+  | "json-usage";
 
 /** SSE events: some text, then a final usage-only chunk, then [DONE]. */
 function usageSseResponse(): Response {
@@ -127,9 +137,36 @@ async function startServer(behavior: MockBehavior): Promise<string> {
       if (behavior === "error") {
         return new Response(JSON.stringify({ error: { message: "nope" } }), { status: 401 });
       }
+      if (behavior === "crlf") {
+        const payload = JSON.stringify({ choices: [{ delta: { content: "CRLF reply" } }] });
+        return new Response(`data: ${payload}\r\n\r\ndata: [DONE]\r\n\r\n`, {
+          headers: { "content-type": "text/event-stream" },
+        });
+      }
       if (behavior === "json") {
         return new Response(
           JSON.stringify({ choices: [{ message: { content: "plain reply" } }] }),
+          { headers: { "content-type": "application/json" } },
+        );
+      }
+      if (behavior === "json-tools") {
+        return new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: null,
+                  tool_calls: [
+                    {
+                      id: "call_1",
+                      type: "function",
+                      function: { name: "list_sessions", arguments: '{"n":1}' },
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
           { headers: { "content-type": "application/json" } },
         );
       }
@@ -180,10 +217,30 @@ describe("provider client", () => {
     expect(seenAuth).toBe("Bearer test-key");
   });
 
+  test("accepts CRLF-delimited SSE events", async () => {
+    const baseUrl = await startServer("crlf");
+    const provider = createOpenAIProvider({ baseUrl, model: "m", apiKey: "k" });
+    expect(await collect(provider)).toEqual(["CRLF reply"]);
+  });
+
   test("falls back to a plain JSON response", async () => {
     const baseUrl = await startServer("json");
     const provider = createOpenAIProvider({ baseUrl, model: "m", apiKey: "k" });
     expect(await collect(provider)).toEqual(["plain reply"]);
+  });
+
+  test("normalizes tool calls from a non-streaming JSON response", async () => {
+    const baseUrl = await startServer("json-tools");
+    const provider = createOpenAIProvider({ baseUrl, model: "m", apiKey: "k" });
+    const events: ChatEvent[] = [];
+    for await (const event of provider.streamChat([{ role: "user", content: "hi" }])) events.push(event);
+
+    expect(events).toEqual([
+      {
+        type: "tool_call",
+        toolCall: { index: 0, id: "call_1", name: "list_sessions", arguments: '{"n":1}' },
+      },
+    ]);
   });
 
   test("throws a readable error on non-2xx", async () => {

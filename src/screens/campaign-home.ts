@@ -102,7 +102,10 @@ export async function makeCampaignHomeScreen(
   const status = new TextRenderable(renderer, { content: "", fg: theme.danger, marginTop: 1 });
   container.add(status);
 
+  let disposed = false;
+
   function showError(context: string, err: unknown): void {
+    if (disposed) return;
     status.content = `${context}: ${err instanceof Error ? err.message : String(err)}`;
   }
 
@@ -115,10 +118,16 @@ export async function makeCampaignHomeScreen(
   const sessionDialog = makeSessionDialog(renderer, {
     onSubmit: (title) => {
       modalOpen = false;
+      menu.focus();
       void (async () => {
         await createSession(campaign, title);
+        if (disposed) return;
         options.onChanged();
-      })().catch((err: unknown) => showError("Failed to create session", err));
+      })().catch((err: unknown) => {
+        if (disposed) return;
+        showError("Failed to create session", err);
+        menu.focus();
+      });
     },
     onCancel: () => {
       modalOpen = false;
@@ -143,7 +152,7 @@ export async function makeCampaignHomeScreen(
       width: 60,
       onClose: () => {
         modalOpen = false;
-        menu.focus();
+        if (!disposed) menu.focus();
       },
     });
     detailDialog = dialog;
@@ -162,10 +171,12 @@ export async function makeCampaignHomeScreen(
     const act = (action: () => Promise<void>) => {
       void action()
         .then(() => {
+          if (disposed) return;
           dialog.close();
           options.onChanged();
         })
         .catch((err: unknown) => {
+          if (disposed) return;
           dialog.close();
           showError("Action failed", err);
         });
@@ -202,12 +213,16 @@ export async function makeCampaignHomeScreen(
       focusConfirm: true,
       onConfirm: () => {
         void trashSession(campaign, session)
-          .then(() => options.onChanged())
-          .catch((err: unknown) => showError("Failed to trash session", err));
+          .then(() => {
+            if (!disposed) options.onChanged();
+          })
+          .catch((err: unknown) => {
+            if (!disposed) showError("Failed to trash session", err);
+          });
       },
       onClose: () => {
         modalOpen = false;
-        menu.focus();
+        if (!disposed) menu.focus();
       },
     });
   }
@@ -241,6 +256,8 @@ export async function makeCampaignHomeScreen(
     node: container,
     focus: () => menu.focus(),
     dispose: () => {
+      if (disposed) return;
+      disposed = true;
       detailDialog?.close();
       for (const dispose of disposers) dispose();
     },

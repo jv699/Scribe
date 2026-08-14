@@ -68,6 +68,9 @@ async function showCampaignHome(campaign: Campaign): Promise<void> {
 
 
 beforeEach(async () => {
+  // `currentScreen` spans tests, but each test owns a fresh renderer. Never
+  // ask the new renderer to remove a node belonging to the previous one.
+  currentScreen = null;
   campaignsDir = await mkdtemp(join(tmpdir(), "scribe-ui-test-"));
   ({ renderer, keys, captureCharFrame, renderOnce } = await setupRenderer({ width: 100, height: 30 }));
 
@@ -86,6 +89,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   currentScreen?.dispose?.();
+  currentScreen = null;
   renderer.destroy();
   await rm(campaignsDir, { recursive: true, force: true });
 });
@@ -176,6 +180,33 @@ describe("phase-0 ui flow", () => {
   }, 15000);
 });
 
+describe("campaign home failures", () => {
+  test("a failed session creation returns focus to the session menu", async () => {
+    const campaign = await createCampaign(campaignsDir, {
+      name: "Broken Campaign",
+      system: "5e",
+      description: "",
+    });
+    await rm(join(campaign.dir, "sessions"), { recursive: true });
+    await showCampaignHome(campaign);
+
+    keys.pressEnter(); // + New Session
+    await wait(60);
+    await keys.typeText("Lost Session", 3);
+    keys.pressEnter();
+    await wait(100);
+    await renderOnce();
+    expect(captureCharFrame()).toContain("Failed to create session");
+
+    // Enter should operate the menu again, reopening the form. Previously the
+    // hidden title input kept focus and swallowed it.
+    keys.pressEnter();
+    await wait(60);
+    await renderOnce();
+    expect(captureCharFrame()).toContain("New Session 1");
+  });
+});
+
 describe("select mouse support", () => {
   /** Terminal coordinates of a rendered row, found by its label in the frame. */
   function locate(label: string): { x: number; y: number } {
@@ -250,6 +281,26 @@ describe("select mouse support", () => {
 });
 
 describe("two-stage main menu", () => {
+  test("disposing the first menu cancels its intro animations", async () => {
+    const intro = makeMainMenuScreen(renderer, {
+      campaigns: [],
+      playIntro: true,
+      onCreateCampaign: () => {},
+      onSelectCampaign: () => {},
+      onSettings: () => {},
+      onOneshotPlanner: () => {},
+      onQuit: () => {},
+    });
+    renderer.root.add(intro.node);
+
+    intro.dispose?.();
+    renderer.root.remove(intro.node);
+    intro.node.destroyRecursively();
+    await wait(150);
+
+    expect(intro.node.isDestroyed).toBe(true);
+  });
+
   test("Back and Escape both return the campaign stage to the root", async () => {
     await renderOnce();
     const rootLines = captureCharFrame().split("\n");

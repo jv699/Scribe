@@ -304,6 +304,16 @@ describe("campaign tools", () => {
     expect(raw).toContain("title: Death House"); // frontmatter preserved
   });
 
+  test("update_session_notes rejects empty content without erasing the plan", async () => {
+    const update = grantedTool("planning", "update_session_notes");
+    const sessions = await listSessions(campaign);
+    const before = await readFile(sessions[0]!.path, "utf8");
+
+    expect(await update.execute({ number: 1, content: "   " })).toBe("(content cannot be empty)");
+    expect(await update.execute({ number: 1 })).toBe("(content cannot be empty)");
+    expect(await readFile(sessions[0]!.path, "utf8")).toBe(before);
+  });
+
   test("rejects non-numeric session numbers", async () => {
     const update = grantedTool("planning", "update_session_notes");
     expect(await update.execute({ number: 999, content: "x" })).toBe("(session not found)");
@@ -573,6 +583,26 @@ describe("ask channel", () => {
     channel.attach(async () => ({ question: "q", answers: ["second"] }));
     const answer = await channel.ask({ question: "q", options: [{ label: "x" }] });
     expect(answer?.answers).toEqual(["second"]);
+  });
+
+  test("a stale detach does not cancel a replacement handler's question", async () => {
+    const channel = makeAskChannel();
+    const detachFirst = channel.attach(() => new Promise<AskAnswer | null>(() => {}));
+    const detachSecond = channel.attach(() => new Promise<AskAnswer | null>(() => {}));
+    const question = channel.ask({ question: "Which?", options: [{ label: "A" }] });
+
+    detachFirst();
+    const outcome = await Promise.race([
+      question.then(() => "settled" as const),
+      Bun.sleep(10).then(() => "waiting" as const),
+    ]);
+    expect(outcome).toBe("waiting");
+    expect(channel.available).toBe(true);
+    expect(channel.pendingCount).toBe(1);
+
+    detachSecond();
+    expect(await question).toBeNull();
+    expect(channel.available).toBe(false);
   });
 
   test("pending queue does not grow across sequential answered questions", async () => {

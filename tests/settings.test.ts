@@ -6,7 +6,7 @@ import { type createMockKeys, type TestRenderer } from "@opentui/core/testing";
 import { setupRenderer, wait } from "./helpers/renderer.ts";
 import { makeSettingsScreen } from "../src/screens/settings.ts";
 import type { Screen } from "../src/screens/screen.ts";
-import { loadSettings, type Settings } from "../src/store/settings.ts";
+import { expandHome, loadSettings, type Settings } from "../src/store/settings.ts";
 
 let renderer: TestRenderer;
 let captureCharFrame: () => string;
@@ -29,12 +29,15 @@ afterEach(() => {
   renderer.destroy();
 });
 
-async function open(settings: Settings): Promise<void> {
+async function open(
+  settings: Settings,
+  onSaved: (next: Settings) => void | Promise<void> = (next) => {
+    saved = next;
+  },
+): Promise<void> {
   current = await makeSettingsScreen(renderer, {
     settings,
-    onSaved: (s) => {
-      saved = s;
-    },
+    onSaved,
     onBack: () => {
       wentBack = true;
     },
@@ -70,7 +73,13 @@ describe("settings screen", () => {
   });
 
   test("saves edited values", async () => {
-    await open({ campaignsDir: "/tmp/x", oneshotsDir: "/tmp/o", sourcesDir: "/tmp/s" });
+    await open({
+      campaignsDir: "/tmp/x",
+      oneshotsDir: "/tmp/o",
+      sourcesDir: "/tmp/s",
+      systemPromptOverride: "/tmp/campaign-core.md",
+      oneshotPromptOverride: "/tmp/oneshot-core.md",
+    });
 
     await keys.typeText("https://ollama.local/v1", 5); // base URL
     await keys.pressKeys(["TAB"], 20); // -> model
@@ -84,6 +93,29 @@ describe("settings screen", () => {
     expect(saved?.campaignsDir).toBe("/tmp/x"); // untouched field preserved
     expect(saved?.oneshotsDir).toBe("/tmp/o"); // untouched field preserved
     expect(saved?.sourcesDir).toBe("/tmp/s"); // untouched field preserved
+    expect(saved?.systemPromptOverride).toBe("/tmp/campaign-core.md");
+    expect(saved?.oneshotPromptOverride).toBe("/tmp/oneshot-core.md");
+  });
+
+  test("reports asynchronous save failures and allows retry", async () => {
+    let attempts = 0;
+    await open(
+      { campaignsDir: "/tmp/x", oneshotsDir: "/tmp/o", sourcesDir: "/tmp/s" },
+      async () => {
+        attempts++;
+        throw new Error("config is read-only");
+      },
+    );
+
+    await keys.pressKeys(["TAB", "TAB", "TAB", "TAB", "TAB", "TAB", "TAB"], 10);
+    keys.pressEnter();
+    await wait(60);
+    await renderOnce();
+    expect(captureCharFrame()).toContain("config is read-only");
+
+    keys.pressEnter();
+    await wait(60);
+    expect(attempts).toBe(2);
   });
 
   test("browse fetches models and picking one fills the model field", async () => {
@@ -234,6 +266,45 @@ describe("settings screen", () => {
     }
   });
 
+  test("a model request finishing after disposal cannot open a stale picker", async () => {
+    const server = Bun.serve({
+      port: 0,
+      async fetch(req) {
+        if (new URL(req.url).pathname === "/v1/models") {
+          await Bun.sleep(150);
+          return new Response(JSON.stringify({ data: [{ id: "late-model" }] }), {
+            headers: { "content-type": "application/json" },
+          });
+        }
+        return new Response("not found", { status: 404 });
+      },
+    });
+    try {
+      await open({
+        campaignsDir: "/tmp/x",
+        oneshotsDir: "/tmp/o",
+        sourcesDir: "/tmp/s",
+        baseUrl: `http://localhost:${server.port}/v1`,
+      });
+      await keys.pressKeys(["TAB", "TAB"], 20);
+      keys.pressEnter();
+      await wait(30);
+
+      keys.pressKey("ESCAPE");
+      await wait(30);
+      expect(wentBack).toBe(true);
+      renderer.root.remove(current!.node);
+      current!.node.destroyRecursively();
+
+      await wait(250);
+      await renderOnce();
+      expect(captureCharFrame()).not.toContain("Select a model");
+      expect(captureCharFrame()).not.toContain("late-model");
+    } finally {
+      server.stop();
+    }
+  });
+
   test("escape goes back without saving", async () => {
     await open({ campaignsDir: "/tmp/x", oneshotsDir: "/tmp/o", sourcesDir: "/tmp/s" });
     await keys.typeText("zzz", 5);
@@ -261,16 +332,9 @@ describe("settings loadSettings", () => {
   });
 
   test("expands a ~/... custom oneshotsDir value", async () => {
-    const configPath = join(tmp, "config.json");
-    await Bun.write(
-      configPath,
-      JSON.stringify({ campaignsDir: "~/Scribe", oneshotsDir: "~/My One-Shots" }),
-    );
-    const settings = await loadSettings(configPath);
-    expect(settings.oneshotsDir).toBe(join(homedir(), "My One-Shots"));
-    expect(settings.oneshotsDir.startsWith("~")).toBe(false);
-    // loadSettings mkdirs the expanded dir; remove the stray one we created
-    await rm(settings.oneshotsDir, { recursive: true, force: true });
+    const expanded = expandHome("~/My One-Shots");
+    expect(expanded).toBe(join(homedir(), "My One-Shots"));
+    expect(expanded.startsWith("~")).toBe(false);
   });
 
   test("defaults sourcesDir to <home>/Scribe/Sources", async () => {
@@ -279,15 +343,8 @@ describe("settings loadSettings", () => {
   });
 
   test("expands a ~/... custom sourcesDir value", async () => {
-    const configPath = join(tmp, "config.json");
-    await Bun.write(
-      configPath,
-      JSON.stringify({ campaignsDir: "~/Scribe", oneshotsDir: "~/Scribe/One-Shots", sourcesDir: "~/My Sources" }),
-    );
-    const settings = await loadSettings(configPath);
-    expect(settings.sourcesDir).toBe(join(homedir(), "My Sources"));
-    expect(settings.sourcesDir.startsWith("~")).toBe(false);
-    // loadSettings mkdirs the expanded dir; remove the stray one we created
-    await rm(settings.sourcesDir, { recursive: true, force: true });
+    const expanded = expandHome("~/My Sources");
+    expect(expanded).toBe(join(homedir(), "My Sources"));
+    expect(expanded.startsWith("~")).toBe(false);
   });
 });
