@@ -34,6 +34,19 @@ describe("prompt", () => {
     expect(frame.includes("Enter to send")).toBe(true);
   });
 
+  test("temporarily replaces and restores the hint footer", async () => {
+    open(() => {});
+    prompt!.setHint("Press Ctrl+C again to quit");
+    await renderOnce();
+    expect(captureCharFrame().includes("Press Ctrl+C again to quit")).toBe(true);
+
+    prompt!.setHint();
+    await renderOnce();
+    const frame = captureCharFrame();
+    expect(frame.includes("Press Ctrl+C again to quit")).toBe(false);
+    expect(frame.includes("Enter to send")).toBe(true);
+  });
+
   test("Enter submits", async () => {
     const keys = open(() => {});
     let submitted = "";

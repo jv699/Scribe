@@ -3,7 +3,7 @@
  * manager (one `Screen` at a time under the renderer root) plus the
  * campaign-create dialog and app-level navigation wiring.
  */
-import { createCliRenderer } from "@opentui/core";
+import { createCliRenderer, type KeyEvent } from "@opentui/core";
 import { theme } from "./theme.ts";
 import { makeCampaignDialog } from "./components/campaign-dialog.ts";
 import { makeMainMenuScreen, type MainMenuView } from "./screens/main-menu.ts";
@@ -25,7 +25,9 @@ import { indexSources } from "./store/sources.ts";
 import { campaignCompletions, oneshotCompletions } from "./completions.ts";
 
 const renderer = await createCliRenderer({
-  exitOnCtrlC: true,
+  // Scribe owns Ctrl+C so chat can use a first press to clear the prompt and
+  // require a second press to quit. Other screens still quit immediately.
+  exitOnCtrlC: false,
 });
 renderer.setBackgroundColor(theme.background);
 
@@ -42,6 +44,26 @@ void indexSources(settings.sourcesDir).catch(() => {});
 
 // --- Screen management: one screen at a time under the renderer root ---
 let currentScreen: Screen | null = null;
+
+function quitApp(): void {
+  currentScreen?.dispose?.();
+  renderer.destroy();
+  process.exit(0);
+}
+
+const onAppKeypress = (key: KeyEvent): void => {
+  if (key.name !== "c" || !key.ctrl || key.shift || key.meta || key.option) return;
+
+  // Keep Ctrl+C out of the focused textarea/dialog. A held key should not
+  // count as the deliberate second press when the terminal can identify it.
+  key.preventDefault();
+  key.stopPropagation();
+  if (key.eventType === "repeat" || key.repeated) return;
+
+  if (currentScreen?.handleInterrupt?.() === "handled") return;
+  quitApp();
+};
+renderer.keyInput.on("keypress", onAppKeypress);
 
 function showScreen(screen: Screen): void {
   if (currentScreen) {
@@ -84,10 +106,7 @@ async function showMainMenu(initialView: MainMenuView = "root"): Promise<void> {
       onSelectCampaign: (campaign) => navigate(() => showCampaignHome(campaign)),
       onSettings: () => navigate(showSettingsScreen),
       onOneshotPlanner: () => navigate(showOneshotPlanner),
-      onQuit: () => {
-        renderer.destroy();
-        process.exit(0);
-      },
+      onQuit: quitApp,
     }),
   );
   introPlayed = true;
