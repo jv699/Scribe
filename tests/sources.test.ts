@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { copyFile, mkdir, mkdtemp, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
+import { copyFile, lstat, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -139,6 +139,33 @@ describe("cache round-trip", () => {
     expect(body).toContain("<!-- page 3 -->");
     expect(body).toContain("grapple");
   });
+
+  test("replaces a cache symlink without overwriting its target", async () => {
+    await copyFile(RULES_PDF, join(dir, "rules.pdf"));
+    await mkdir(join(dir, "extracted"));
+    const victim = join(dir, "victim.txt");
+    await writeFile(victim, "must stay untouched", "utf8");
+    const cachePath = join(dir, "extracted", "rules.md");
+    await symlink(victim, cachePath);
+
+    const [doc] = await indexSources(dir);
+
+    expect(await readFile(victim, "utf8")).toBe("must stay untouched");
+    expect((await lstat(cachePath)).isSymbolicLink()).toBe(false);
+    expect(await readFile(doc!.cachePath, "utf8")).toContain("<!-- page 1 -->");
+  });
+
+  test("refuses to write through a symlinked extracted directory", async () => {
+    await copyFile(RULES_PDF, join(dir, "rules.pdf"));
+    const outside = join(dir, "outside");
+    await mkdir(outside);
+    await symlink(outside, join(dir, "extracted"));
+
+    const [doc] = await indexSources(dir);
+
+    expect(doc!.pages).toBe(0);
+    expect(await readdir(outside)).toEqual([]);
+  });
 });
 
 describe("idempotent re-index", () => {
@@ -168,6 +195,25 @@ describe("staleness", () => {
 
     const [second] = await indexSources(dir);
     expect(second!.pages).toBe(2);
+  });
+
+  test("a failed refresh preserves but does not serve the stale cache", async () => {
+    const pdfPath = join(dir, "doc.pdf");
+    await copyFile(RULES_PDF, pdfPath);
+    const [first] = await indexSources(dir);
+    const cachedBefore = await readFile(first!.cachePath, "utf8");
+    expect(await searchSources(dir, "grapple")).not.toEqual([]);
+
+    await writeFile(pdfPath, "not a PDF", "utf8");
+    const future = new Date(Date.now() + 5000);
+    await utimes(pdfPath, future, future);
+    const [failed] = await indexSources(dir);
+
+    expect(failed!.pages).toBe(0);
+    expect(await readFile(first!.cachePath, "utf8")).toBe(cachedBefore);
+    expect((await listSources(dir))[0]!.pages).toBe(0);
+    expect(await searchSources(dir, "grapple")).toEqual([]);
+    expect(await readSourcePages(dir, first!.slug, 1, 1)).toBeNull();
   });
 });
 

@@ -34,7 +34,7 @@ function describe(model: ModelInfo): string {
   return parts.join(" · ");
 }
 
-export function showModelPickerDialog(renderer: CliRenderer, options: ModelPickerDialogOptions): void {
+export function showModelPickerDialog(renderer: CliRenderer, options: ModelPickerDialogOptions): () => void {
   const dialog = makeDialog(renderer, { width: 64 });
   renderer.root.add(dialog.layer);
 
@@ -168,4 +168,5 @@ export function showModelPickerDialog(renderer: CliRenderer, options: ModelPicke
   dialog.open();
   applyFilter();
   filterInput.focus();
+  return close;
 }

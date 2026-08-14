@@ -243,7 +243,15 @@ export function makeAutocomplete(ctx: RenderContext, options: AutocompleteOption
     }
 
     const mine = ++generation;
-    const resolved = await match.source.items(match.query);
+    let resolved: CompletionItem[];
+    try {
+      resolved = await match.source.items(match.query);
+    } catch {
+      // Completion is a convenience over filesystem/provider-backed data. A
+      // failed lookup must not become an unhandled rejection or break typing.
+      if (mine === generation) close();
+      return;
+    }
     // A later keystroke (or a close) already superseded this lookup.
     if (mine !== generation) return;
 

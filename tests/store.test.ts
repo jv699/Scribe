@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, rm, readdir, symlink, unlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { parseFrontmatter, serializeFrontmatter, updateFrontmatterFile } from "../src/store/frontmatter.ts";
 import { loadSettings, saveSettings } from "../src/store/settings.ts";
 import { createCampaign, listCampaigns, loadCampaign, updateCampaignMeta, appendStorySoFar } from "../src/store/campaigns.ts";
-import { createSession, listSessions, setSessionStatus, trashSession } from "../src/store/sessions.ts";
+import { createSession, listSessions, readSessionNotes, setSessionStatus, trashSession } from "../src/store/sessions.ts";
 import { loadChatLog, saveChatLog, clearChatLog, chatLogPath } from "../src/store/chat-log.ts";
 import { loadInstructions, loadOneshotInstructions, loadPromptOverride } from "../src/store/instructions.ts";
 import { findOneshot, listOneshots, saveOneshot, unslugOneshot, writeOneshot } from "../src/store/oneshots.ts";
@@ -34,6 +34,18 @@ describe("frontmatter", () => {
   test("parses values containing colons", () => {
     const { data } = parseFrontmatter("---\nurl: http://x:8080/y\n---\nbody");
     expect(data["url"]).toBe("http://x:8080/y");
+  });
+
+  test("serializing collapses multiline values so they cannot escape frontmatter", () => {
+    const raw = serializeFrontmatter(
+      { title: "First line\n---\n## Injected", created: "2026-08-14" },
+      "## Real body\n",
+    );
+    const { data, body } = parseFrontmatter(raw);
+
+    expect(data["title"]).toBe("First line --- ## Injected");
+    expect(data["created"]).toBe("2026-08-14");
+    expect(body).toBe("## Real body\n");
   });
 
   test("no frontmatter returns empty data and full body", () => {
@@ -118,6 +130,37 @@ describe("settings", () => {
     expect(reloaded.systemPromptOverride?.startsWith("~")).toBe(false);
     expect(reloaded.systemPromptOverride?.endsWith("/my-core.md")).toBe(true);
     expect(reloaded.oneshotPromptOverride).toBe("/abs/oneshot.md");
+  });
+
+  test("saveSettings creates every configured data directory", async () => {
+    const settings: Parameters<typeof saveSettings>[0] = {
+      campaignsDir: join(dir, "new", "campaigns"),
+      oneshotsDir: join(dir, "new", "oneshots"),
+      sourcesDir: join(dir, "new", "sources"),
+    };
+    await saveSettings(settings, join(dir, "config", "config.json"));
+
+    for (const path of [settings.campaignsDir, settings.oneshotsDir, settings.sourcesDir]) {
+      expect(await readdir(path)).toEqual([]);
+    }
+  });
+
+  test("well-formed JSON with invalid field types falls back safely", async () => {
+    const configPath = join(dir, "config.json");
+    await Bun.write(
+      configPath,
+      JSON.stringify({
+        campaignsDir: null,
+        oneshotsDir: join(dir, "oneshots"),
+        sourcesDir: join(dir, "sources"),
+        model: 42,
+      }),
+    );
+
+    const settings = await loadSettings(configPath);
+    expect(settings.campaignsDir).toBe(join(homedir(), "Scribe"));
+    expect(settings.oneshotsDir).toBe(join(dir, "oneshots"));
+    expect(settings.model).toBeUndefined();
   });
 });
 
@@ -226,6 +269,39 @@ describe("campaigns", () => {
     // background section untouched
     expect(reloaded.description).toBe("Gothic horror.");
   });
+
+  test("appendStorySoFar inserts before a later H2 section", async () => {
+    const campaign = await createCampaign(dir, input);
+    const path = join(campaign.dir, "campaign.md");
+    const { data } = parseFrontmatter(await readFile(path, "utf8"));
+    await writeFile(
+      path,
+      serializeFrontmatter(
+        data,
+        "## Background\n\nGothic horror.\n\n## The Story So Far\n\nOld event.\n\n## NPCs\n\nIreena.\n",
+      ),
+      "utf8",
+    );
+
+    await appendStorySoFar(campaign, "New event.");
+
+    const raw = await readFile(path, "utf8");
+    expect(raw.indexOf("New event.")).toBeLessThan(raw.indexOf("## NPCs"));
+    expect((await loadCampaign(campaign.dir))?.storySoFar).toBe("Old event.\n\nNew event.");
+    expect(campaign.storySoFar).toBe("Old event.\n\nNew event.");
+  });
+
+  test("appendStorySoFar synchronizes memory when it creates a missing section", async () => {
+    const campaign = await createCampaign(dir, input);
+    const path = join(campaign.dir, "campaign.md");
+    const { data } = parseFrontmatter(await readFile(path, "utf8"));
+    await writeFile(path, serializeFrontmatter(data, "## Background\n\nGothic horror.\n"), "utf8");
+
+    await appendStorySoFar(campaign, "The story begins.");
+
+    expect(campaign.storySoFar).toBe("The story begins.");
+    expect((await loadCampaign(campaign.dir))?.storySoFar).toBe("The story begins.");
+  });
 });
 
 describe("naming", () => {
@@ -312,6 +388,20 @@ describe("sessions", () => {
     const sessions = await listSessions(campaign);
     expect(sessions.map((s) => s.title)).toEqual(["One", "Two"]);
     expect(sessions.map((s) => s.number)).toEqual([1, 2]);
+  });
+
+  test("session discovery and reads refuse symlinks", async () => {
+    const campaign = await createCampaign(dir, { name: "CoS", system: "5e", description: "" });
+    const outside = join(dir, "outside.md");
+    await writeFile(outside, "private notes", "utf8");
+    const linkedPath = join(campaign.dir, "sessions", "001-linked.md");
+    await symlink(outside, linkedPath);
+
+    expect(await listSessions(campaign)).toEqual([]);
+    await expect(
+      readSessionNotes({ number: 1, title: "Linked", status: "planning", created: "", path: linkedPath }),
+    ).rejects.toThrow();
+    expect(await readFile(outside, "utf8")).toBe("private notes");
   });
 
   test("setSessionStatus updates frontmatter and stamps dates", async () => {

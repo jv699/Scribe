@@ -4,9 +4,10 @@
  *
  * 1. **Core** — code-owned (`prompts.ts`), so behavioral contracts always ship
  *    current. Replaceable wholesale via the `*PromptOverride` config fields.
- * 2. **Context** — campaign background + running story + sources, then the
- *    mode's framing: the session's draft notes (planning), "you just played
- *    session N" (report), or nothing (one-shot).
+ * 2. **Context** — campaign background + running story, source documents for
+ *    modes that can search them, then the mode's framing: the session's draft
+ *    notes (planning), "you just played session N" (report), or nothing
+ *    (one-shot).
  * 3. **User instructions** — the user's optional file, appended last so it wins
  *    on tone and house rules without being able to delete the tool rules.
  */
@@ -89,16 +90,16 @@ ${campaign.storySoFar.trim() || "(nothing yet)"}
 }
 
 /**
- * The three shared layers common to both campaign-mode prompts (planning and
- * report): the code-owned core, the source-library summary, and the user's
- * instructions. Factored out because both builders computed these
- * identically before diverging into their mode-specific tail.
+ * The shared layers common to both campaign-mode prompts: the code-owned core
+ * and user instructions. Source-library context is optional because report
+ * mode intentionally has no source tools.
  */
 async function campaignLayers(
   settings: Settings,
+  includeSources: boolean,
 ): Promise<{ base: string; sources: string; instructions: string }> {
   const base = await core(CORE_CAMPAIGN_PROMPT, settings.systemPromptOverride);
-  const sources = await sourcesSection(settings.sourcesDir);
+  const sources = includeSources ? await sourcesSection(settings.sourcesDir) : "";
   const instructions = instructionsSection(await loadInstructions());
   return { base, sources, instructions };
 }
@@ -108,7 +109,7 @@ export async function buildPlanningSystemPrompt(
   session: Session,
   settings: Settings,
 ): Promise<string> {
-  const { base, sources, instructions } = await campaignLayers(settings);
+  const { base, sources, instructions } = await campaignLayers(settings, true);
   const notes = await readSessionNotes(session);
 
   return `${base}${campaignSection(campaign)}${sources}
@@ -128,9 +129,9 @@ export async function buildReportSystemPrompt(
   session: Session,
   settings: Settings,
 ): Promise<string> {
-  const { base, sources, instructions } = await campaignLayers(settings);
+  const { base, instructions } = await campaignLayers(settings, false);
 
-  return `${base}${campaignSection(campaign)}${sources}
+  return `${base}${campaignSection(campaign)}
 
 # Session Report
 

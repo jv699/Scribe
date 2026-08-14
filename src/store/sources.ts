@@ -30,11 +30,13 @@
  * `readSourcePages(dir, "../../etc/passwd", 1, 1)` simply fails to match
  * anything and returns `null`.
  */
+import type { Stats } from "node:fs";
 import { basename, dirname, extname, join } from "node:path";
-import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import { extractText } from "unpdf";
 import { parseFrontmatter, serializeFrontmatter } from "./frontmatter.ts";
 import { slugify, uniqueName } from "./naming.ts";
+import { atomicReplaceRegularFile, isDirectoryNoFollow, readRegularFileNoFollow } from "./safe-files.ts";
 
 export interface SourceDoc {
   slug: string;
@@ -56,6 +58,43 @@ const EXTRACTED_DIR = "extracted";
 const UNSORTED = "Unsorted";
 const MAX_PAGE_SPAN = 10;
 const EXTRACT_CONCURRENCY = 3;
+
+/** Read a cache without following either the cache file or its `extracted/` directory through a symlink. */
+async function readCache(path: string): Promise<string> {
+  const cacheDir = dirname(path);
+  if (!(await isDirectoryNoFollow(cacheDir))) {
+    throw new Error("source cache directory is not a regular directory");
+  }
+  return readRegularFileNoFollow(path);
+}
+
+/** Atomically replace a cache file without ever writing through a cache-file symlink. */
+async function writeCache(path: string, content: string): Promise<boolean> {
+  // A sibling temporary keeps a failed refresh from truncating a good cache.
+  return atomicReplaceRegularFile(path, content);
+}
+
+function cacheMatchesPdf(data: Record<string, string>, pdf: Stats): boolean {
+  const cachedSize = Number(data["size"]);
+  const cachedMtime = Number(data["mtime"]);
+  return (
+    Number.isFinite(cachedSize) &&
+    Number.isFinite(cachedMtime) &&
+    cachedSize === pdf.size &&
+    cachedMtime === pdf.mtimeMs
+  );
+}
+
+/** Read a cache only while its recorded source fingerprint matches the PDF. */
+async function readFreshCache(doc: SourceDoc): Promise<ReturnType<typeof parseFrontmatter> | null> {
+  try {
+    const pdf = await stat(doc.pdfPath);
+    const parsed = parseFrontmatter(await readCache(doc.cachePath));
+    return cacheMatchesPdf(parsed.data, pdf) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
 
 function isPdf(name: string): boolean {
   return extname(name).toLowerCase() === ".pdf";
@@ -158,13 +197,11 @@ export async function listSystems(sourcesDir: string): Promise<string[]> {
 export async function listSources(sourcesDir: string, system?: string): Promise<SourceDoc[]> {
   const docs = await buildIndex(sourcesDir, system);
   for (const doc of docs) {
-    try {
-      const raw = await readFile(doc.cachePath, "utf8");
-      const { data } = parseFrontmatter(raw);
+    const fresh = await readFreshCache(doc);
+    if (fresh) {
+      const { data } = fresh;
       const pages = Number(data["pages"]);
       doc.pages = Number.isFinite(pages) ? pages : 0;
-    } catch {
-      // No cache yet — leave pages at 0, do not extract.
     }
   }
   return docs.sort((a, b) => a.title.localeCompare(b.title));
@@ -194,15 +231,13 @@ async function indexOne(doc: SourceDoc): Promise<void> {
 
   let cached: Record<string, string> | null = null;
   try {
-    cached = parseFrontmatter(await readFile(doc.cachePath, "utf8")).data;
+    cached = parseFrontmatter(await readCache(doc.cachePath)).data;
   } catch {
     cached = null;
   }
 
   if (cached) {
-    const cachedSize = Number(cached["size"]);
-    const cachedMtime = Number(cached["mtime"]);
-    if (Number.isFinite(cachedSize) && Number.isFinite(cachedMtime) && cachedSize === st.size && cachedMtime === st.mtimeMs) {
+    if (cacheMatchesPdf(cached, st)) {
       const pages = Number(cached["pages"]);
       doc.pages = Number.isFinite(pages) ? pages : 0;
       return; // up to date
@@ -217,11 +252,9 @@ async function indexOne(doc: SourceDoc): Promise<void> {
     totalPages = extracted.totalPages;
     pages = extracted.text;
   } catch {
-    // Extraction failed — leave any stale cache alone and skip this doc.
-    if (cached) {
-      const cachedPages = Number(cached["pages"]);
-      doc.pages = Number.isFinite(cachedPages) ? cachedPages : 0;
-    }
+    // Keep the old cache as recoverable derived data, but mark this document
+    // unavailable until a later extraction refreshes its source fingerprint.
+    doc.pages = 0;
     return;
   }
 
@@ -236,8 +269,8 @@ async function indexOne(doc: SourceDoc): Promise<void> {
     mtime: String(st.mtimeMs),
   };
 
-  await mkdir(dirname(doc.cachePath), { recursive: true });
-  await writeFile(doc.cachePath, serializeFrontmatter(frontmatter, body), "utf8");
+  const written = await writeCache(doc.cachePath, serializeFrontmatter(frontmatter, body));
+  if (!written) return;
   doc.pages = totalPages;
 }
 
@@ -314,13 +347,9 @@ export async function searchSources(
   }
   const allPages: PageEntry[] = [];
   for (const doc of docs) {
-    let raw: string;
-    try {
-      raw = await readFile(doc.cachePath, "utf8");
-    } catch {
-      continue;
-    }
-    const { data, body } = parseFrontmatter(raw);
+    const fresh = await readFreshCache(doc);
+    if (!fresh) continue;
+    const { data, body } = fresh;
     const pages = Number(data["pages"]);
     doc.pages = Number.isFinite(pages) ? pages : 0;
     for (const p of splitCachePages(body)) {
@@ -397,14 +426,9 @@ export async function readSourcePages(
   const doc = docs.find((d) => d.slug === slug) ?? docs.find((d) => d.title.toLowerCase() === slug.toLowerCase());
   if (!doc || doc.pages < 1) return null;
 
-  let raw: string;
-  try {
-    raw = await readFile(doc.cachePath, "utf8");
-  } catch {
-    return null;
-  }
-
-  const { body } = parseFrontmatter(raw);
+  const fresh = await readFreshCache(doc);
+  if (!fresh) return null;
+  const { body } = fresh;
   const pages = splitCachePages(body);
 
   const clampedFrom = Math.max(1, Math.min(from, doc.pages));

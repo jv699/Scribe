@@ -23,7 +23,7 @@ export interface DissolveOptions {
  * 90's DOS-style dissolve-in: each character pops in at a random frame and
  * cycles through the shade ramp (░ → ▒ → ▓) before settling on its final glyph.
  */
-export function dissolveIn(target: TextRenderable, finalText: string, options: DissolveOptions = {}): void {
+export function dissolveIn(target: TextRenderable, finalText: string, options: DissolveOptions = {}): () => void {
   const frameMs = options.frameMs ?? 55;
   const spreadFrames = options.spreadFrames ?? 12;
   const rampLength = DISSOLVE_RAMP.length;
@@ -57,17 +57,30 @@ export function dissolveIn(target: TextRenderable, finalText: string, options: D
 
   let frame = 0;
   const totalFrames = spreadFrames + rampLength + 1;
+  let stopped = false;
 
   const timer = setInterval(() => {
+    if (target.isDestroyed) {
+      stop();
+      return;
+    }
     frame += 1;
     if (frame >= totalFrames) {
-      clearInterval(timer);
+      stop();
       target.content = finalText;
       options.onDone?.();
       return;
     }
     target.content = renderFrame(frame);
   }, frameMs);
+
+  function stop(): void {
+    if (stopped) return;
+    stopped = true;
+    clearInterval(timer);
+  }
+
+  return stop;
 }
 
 export interface ChunkyFadeOptions {
@@ -82,19 +95,27 @@ export interface ChunkyFadeOptions {
  * SNES-style stepped fade: opacity jumps through a few discrete levels
  * instead of interpolating smoothly.
  */
-export function chunkyFadeIn(target: Renderable, options: ChunkyFadeOptions = {}): void {
+export function chunkyFadeIn(target: Renderable, options: ChunkyFadeOptions = {}): () => void {
   const stepMs = options.stepMs ?? 90;
   const delayMs = options.delayMs ?? 0;
 
   target.opacity = 0;
+  let interval: ReturnType<typeof setInterval> | undefined;
+  let delay: ReturnType<typeof setTimeout> | undefined;
+  let stopped = false;
 
   const start = () => {
+    if (stopped || target.isDestroyed) return;
     let step = 0;
-    const timer = setInterval(() => {
+    interval = setInterval(() => {
+      if (target.isDestroyed) {
+        stop();
+        return;
+      }
       target.opacity = FADE_STEPS[step] ?? 1;
       step += 1;
       if (step >= FADE_STEPS.length) {
-        clearInterval(timer);
+        stop();
         target.opacity = 1;
         options.onDone?.();
       }
@@ -102,8 +123,17 @@ export function chunkyFadeIn(target: Renderable, options: ChunkyFadeOptions = {}
   };
 
   if (delayMs > 0) {
-    setTimeout(start, delayMs);
+    delay = setTimeout(start, delayMs);
   } else {
     start();
   }
+
+  function stop(): void {
+    if (stopped) return;
+    stopped = true;
+    if (delay) clearTimeout(delay);
+    if (interval) clearInterval(interval);
+  }
+
+  return stop;
 }

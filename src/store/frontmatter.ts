@@ -4,7 +4,7 @@
  * content belongs in the markdown body, not in frontmatter.
  */
 import { constants } from "node:fs";
-import { open } from "node:fs/promises";
+import { openRegularFileNoFollow } from "./safe-files.ts";
 
 export interface FrontmatterDoc {
   data: Record<string, string>;
@@ -46,7 +46,10 @@ export function parseFrontmatter(content: string): FrontmatterDoc {
 export function serializeFrontmatter(data: Record<string, string>, body: string): string {
   const lines = [FENCE];
   for (const [key, value] of Object.entries(data)) {
-    lines.push(`${key}: ${value}`);
+    // Flat frontmatter has no multiline syntax. Collapse line breaks so a
+    // model/user value cannot inject fields or an early closing fence.
+    const flatValue = value.replace(/\r\n?|\n/g, " ").trim();
+    lines.push(`${key}: ${flatValue}`);
   }
   lines.push(FENCE, "");
   return lines.join("\n") + body.replace(/^\n+/, "");
@@ -64,11 +67,8 @@ export async function updateFrontmatterFile(
   // Hold one no-follow descriptor from read through write. A path-level
   // read/modify/write would follow a symlink swapped in after discovery and
   // could escape the store directory.
-  const file = await open(path, constants.O_RDWR | constants.O_NOFOLLOW);
+  const file = await openRegularFileNoFollow(path, constants.O_RDWR);
   try {
-    const stats = await file.stat();
-    if (!stats.isFile()) throw new Error("frontmatter target is not a regular file");
-
     const { data, body } = parseFrontmatter(await file.readFile("utf8"));
     const next = update(data, body);
     const content = Buffer.from(serializeFrontmatter(next.data, next.body), "utf8");

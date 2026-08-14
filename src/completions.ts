@@ -36,16 +36,6 @@ export async function sourceItems(sourcesDir: string): Promise<CompletionItem[]>
   }));
 }
 
-/** `@` completions for the Drafting Table, which has no campaign — sources only. */
-export function sourceCompletions(sourcesDir: string): CompletionSource[] {
-  return [
-    {
-      trigger: "@",
-      items: async (query) => filterCompletions(await sourceItems(sourcesDir), query),
-    },
-  ];
-}
-
 /**
  * `@` completions for the Drafting Table: saved drafts plus reference PDFs in
  * one popup. Both libraries are re-read per keystroke so new files appear

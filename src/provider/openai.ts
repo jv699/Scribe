@@ -38,6 +38,11 @@ interface StreamChoice {
   };
 }
 
+interface RawToolCall {
+  id?: string;
+  function?: { name?: string; arguments?: string };
+}
+
 interface RawUsage {
   prompt_tokens?: number;
   completion_tokens?: number;
@@ -65,11 +70,11 @@ async function* streamSSE(response: Response): AsyncGenerator<ChatEvent> {
     buffer += decoder.decode(value, { stream: true });
 
     // SSE events are separated by blank lines.
-    const events = buffer.split("\n\n");
+    const events = buffer.split(/\r?\n\r?\n/);
     buffer = events.pop() ?? "";
 
     for (const event of events) {
-      for (const line of event.split("\n")) {
+      for (const line of event.split(/\r?\n/)) {
         const trimmed = line.trim();
         if (!trimmed.startsWith("data:")) continue;
         const payload = trimmed.slice(5).trim();
@@ -132,13 +137,19 @@ export function createOpenAIProvider(options: OpenAIProviderOptions): ChatProvid
       } else {
         // Non-streaming fallback (older endpoints / proxies).
         const json = (await response.json()) as {
-          choices?: { message?: { content?: string; tool_calls?: ToolCallDelta[] } }[];
+          choices?: { message?: { content?: string; tool_calls?: RawToolCall[] } }[];
           usage?: RawUsage;
         };
         const message = json.choices?.[0]?.message;
         if (message?.content) yield { type: "text", delta: message.content };
-        for (const tc of message?.tool_calls ?? []) {
-          yield { type: "tool_call", toolCall: tc };
+        for (const [index, tc] of (message?.tool_calls ?? []).entries()) {
+          const toolCall: ToolCallDelta = {
+            index,
+            ...(tc.id !== undefined ? { id: tc.id } : {}),
+            ...(tc.function?.name !== undefined ? { name: tc.function.name } : {}),
+            ...(tc.function?.arguments !== undefined ? { arguments: tc.function.arguments } : {}),
+          };
+          yield { type: "tool_call", toolCall };
         }
         if (json.usage) yield { type: "usage", usage: toUsageInfo(json.usage) };
       }

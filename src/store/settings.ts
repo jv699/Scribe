@@ -39,6 +39,31 @@ const DEFAULT_SETTINGS: Settings = {
   sourcesDir: join(homedir(), "Scribe", "Sources"),
 };
 
+const OPTIONAL_STRING_SETTINGS = [
+  "baseUrl",
+  "model",
+  "apiKeyEnv",
+  "systemPromptOverride",
+  "oneshotPromptOverride",
+] as const satisfies readonly (keyof Settings)[];
+
+/** Merge only well-typed config values, so hand-edited JSON cannot crash startup. */
+function settingsFromJson(value: unknown): Settings {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return { ...DEFAULT_SETTINGS };
+  const raw = value as Record<string, unknown>;
+  const settings: Settings = { ...DEFAULT_SETTINGS };
+
+  for (const key of ["campaignsDir", "oneshotsDir", "sourcesDir"] as const) {
+    const candidate = raw[key];
+    if (typeof candidate === "string" && candidate.trim() !== "") settings[key] = candidate;
+  }
+  for (const key of OPTIONAL_STRING_SETTINGS) {
+    const candidate = raw[key];
+    if (typeof candidate === "string" && candidate.trim() !== "") settings[key] = candidate;
+  }
+  return settings;
+}
+
 /** Directory holding the app config files (config.json + prompts). */
 export function defaultConfigDir(): string {
   // SCRIBE_CONFIG_DIR relocates the whole config dir (config.json + the user's
@@ -81,7 +106,7 @@ export async function loadSettings(configPath: string = defaultConfigPath()): Pr
   let settings: Settings = { ...DEFAULT_SETTINGS };
   if (raw !== null) {
     try {
-      settings = { ...DEFAULT_SETTINGS, ...(JSON.parse(raw) as Partial<Settings>) };
+      settings = settingsFromJson(JSON.parse(raw) as unknown);
     } catch {
       // Corrupt config — keep defaults rather than crash at startup.
     }
@@ -106,6 +131,9 @@ export async function loadSettings(configPath: string = defaultConfigPath()): Pr
 
 /** Persist settings back to the config file. */
 export async function saveSettings(settings: Settings, configPath: string = defaultConfigPath()): Promise<void> {
+  await mkdir(settings.campaignsDir, { recursive: true });
+  await mkdir(settings.oneshotsDir, { recursive: true });
+  await mkdir(settings.sourcesDir, { recursive: true });
   await mkdir(dirname(configPath), { recursive: true });
   await writeFile(configPath, JSON.stringify(settings, null, 2) + "\n", "utf8");
 }

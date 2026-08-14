@@ -77,8 +77,12 @@ export interface AskChannel {
 
 export function makeAskChannel(): AskChannel {
   let handler: AskHandler | null = null;
-  /** Resolvers for questions currently awaiting an answer. */
-  let pending: ((answer: AskAnswer | null) => void)[] = [];
+  /** Questions currently awaiting an answer, grouped by the UI that owns them. */
+  interface PendingAsk {
+    owner: AskHandler;
+    settle(answer: AskAnswer | null): void;
+  }
+  let pending: PendingAsk[] = [];
 
   return {
     get available() {
@@ -102,17 +106,20 @@ export function makeAskChannel(): AskChannel {
         // entry from `pending` instead of riding along until the next
         // detach — otherwise a long session's answered questions pile up
         // in the array forever.
-        const settle = (answer: AskAnswer | null) => {
-          const index = pending.indexOf(settle);
-          if (index !== -1) pending.splice(index, 1);
-          resolve(answer);
+        const entry: PendingAsk = {
+          owner: active,
+          settle: (answer) => {
+            const index = pending.indexOf(entry);
+            if (index !== -1) pending.splice(index, 1);
+            resolve(answer);
+          },
         };
-        pending.push(settle);
+        pending.push(entry);
         void active(question).then(
-          (answer) => settle(answer),
+          (answer) => entry.settle(answer),
           // A crashing widget must not take the agent turn down with it —
           // it reads as a decline, same as Escape.
-          () => settle(null),
+          () => entry.settle(null),
         );
       });
     },
@@ -123,9 +130,9 @@ export function makeAskChannel(): AskChannel {
         // Only stand down if we're still the installed handler; a later
         // attach means someone else owns the channel now.
         if (handler === next) handler = null;
-        const settling = pending;
-        pending = [];
-        for (const resolve of settling) resolve(null);
+        const settling = pending.filter((entry) => entry.owner === next);
+        pending = pending.filter((entry) => entry.owner !== next);
+        for (const entry of settling) entry.settle(null);
       };
     },
   };

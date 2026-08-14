@@ -21,7 +21,7 @@ import type { Screen } from "./screen.ts";
 
 export interface SettingsScreenOptions {
   settings: Settings;
-  onSaved: (next: Settings) => void;
+  onSaved: (next: Settings) => void | Promise<void>;
   onBack: () => void;
 }
 
@@ -31,6 +31,11 @@ export async function makeSettingsScreen(
 ): Promise<Screen> {
   // True while the model picker owns the keyboard (see onKeypress).
   let modalOpen = false;
+  let modelLoading = false;
+  let modelRequest = 0;
+  let closeModelPicker: (() => void) | undefined;
+  let saving = false;
+  let disposed = false;
   const container = new BoxRenderable(renderer, {
     width: "100%",
     height: "100%",
@@ -98,11 +103,15 @@ export async function makeSettingsScreen(
   container.add(status);
 
   function setStatus(message: string, tone: "error" | "info" = "error"): void {
+    if (disposed) return;
     status.content = message;
     status.fg = tone === "error" ? theme.danger : theme.textMuted;
   }
 
   async function browseModels(): Promise<void> {
+    if (disposed || modalOpen || modelLoading) return;
+    modelLoading = true;
+    const mine = ++modelRequest;
     setStatus("Loading models...", "info");
     try {
       const apiKeyEnv = keyInput.value.trim();
@@ -110,29 +119,36 @@ export async function makeSettingsScreen(
         baseUrl: baseUrlInput.value.trim() || DEFAULT_BASE_URL,
         apiKey: apiKeyEnv ? (process.env[apiKeyEnv] ?? "") : "",
       });
+      if (disposed || mine !== modelRequest) return;
       if (models.length === 0) {
         setStatus("No models returned by the provider");
         return;
       }
       setStatus("", "info");
       modalOpen = true;
-      showModelPickerDialog(renderer, {
+      closeModelPicker = showModelPickerDialog(renderer, {
         models,
         onPick: (model) => {
+          if (disposed) return;
           modelInput.value = model;
           modelInput.focus();
         },
         onClose: () => {
+          closeModelPicker = undefined;
           modalOpen = false;
+          if (disposed) return;
           modelInput.focus();
         },
       });
     } catch (error) {
+      if (disposed || mine !== modelRequest) return;
       setStatus(error instanceof Error ? error.message : "Failed to load models");
+    } finally {
+      if (mine === modelRequest) modelLoading = false;
     }
   }
 
-  const saveButton = makeButton(renderer, { label: "Save", variant: "primary", onClick: save });
+  const saveButton = makeButton(renderer, { label: "Save", variant: "primary", onClick: () => void save() });
   const backButton = makeButton(renderer, { label: "Back", onClick: leave });
   const buttonRow = new BoxRenderable(renderer, { flexDirection: "row" });
   buttonRow.add(saveButton);
@@ -152,7 +168,8 @@ export async function makeSettingsScreen(
     backButton,
   ];
 
-  function save(): void {
+  async function save(): Promise<void> {
+    if (disposed || saving) return;
     const campaignsDir = dirInput.value.trim();
     if (campaignsDir === "") {
       status.content = "Campaigns directory is required";
@@ -172,17 +189,30 @@ export async function makeSettingsScreen(
       return;
     }
     const next: Settings = {
+      ...options.settings,
       campaignsDir: expandHome(campaignsDir),
       oneshotsDir: expandHome(oneshotsDir),
       sourcesDir: expandHome(sourcesDir),
     };
     const baseUrl = baseUrlInput.value.trim();
     if (baseUrl !== "") next.baseUrl = baseUrl;
+    else delete next.baseUrl;
     const model = modelInput.value.trim();
     if (model !== "") next.model = model;
+    else delete next.model;
     const apiKeyEnv = keyInput.value.trim();
     if (apiKeyEnv !== "") next.apiKeyEnv = apiKeyEnv;
-    options.onSaved(next);
+    else delete next.apiKeyEnv;
+
+    saving = true;
+    setStatus("Saving...", "info");
+    try {
+      await options.onSaved(next);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Failed to save settings");
+    } finally {
+      saving = false;
+    }
   }
 
   const onKeypress = (key: KeyEvent): void => {
@@ -200,6 +230,10 @@ export async function makeSettingsScreen(
   // dispose() only cleans up listeners (called by the screen manager on
   // navigation); leave() is the explicit user action that also navigates back.
   function dispose(): void {
+    if (disposed) return;
+    disposed = true;
+    modelRequest++;
+    closeModelPicker?.();
     renderer.keyInput.off("keypress", onKeypress);
   }
   function leave(): void {

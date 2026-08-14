@@ -28,9 +28,11 @@ export const updateSessionNotesTool: ToolSpec = {
     return {
       definition: updateSessionNotesTool.definition,
       execute: async (args) => {
+        const content = stringArg(args, "content");
+        if (content.trim() === "") return "(content cannot be empty)";
         const session = await findSession(campaign.dir, numberArg(args, "number"));
         if (!session) return "(session not found)";
-        await writeSessionNotes(session, stringArg(args, "content"));
+        await writeSessionNotes(session, content);
         return `Updated notes for session ${session.number} ("${session.title}").`;
       },
     };

@@ -99,6 +99,34 @@ describe("chat screen", () => {
     expect(captureCharFrame().includes("Error: connection refused")).toBe(true);
   });
 
+  test("failed agent turns do not persist an empty assistant message", async () => {
+    let stored: ChatMessage[] = [];
+    const chatLog: ChatLogStore = {
+      load: async () => stored,
+      save: async (messages) => {
+        stored = [...messages];
+      },
+    };
+    const tools: AgentTool[] = [
+      {
+        definition: {
+          type: "function",
+          function: { name: "noop", description: "noop", parameters: { type: "object", properties: {} } },
+        },
+        execute: () => "ok",
+      },
+    ];
+    current = await makeChatScreen(renderer, { provider: errorProvider, tools, chatLog, onBack: () => {} });
+    renderer.root.add(current.node);
+    current.focus?.();
+
+    await keys.typeText("hi", 5);
+    keys.pressEnter();
+    await wait();
+
+    expect(stored).toEqual([{ role: "user", content: "hi" }]);
+  });
+
   test("escape goes back", async () => {
     await open(okProvider);
     keys.pressKey("ESCAPE");
@@ -1005,6 +1033,29 @@ describe("chat screen", () => {
       await wait(60);
       await renderOnce();
       expect(captureCharFrame().includes("@session")).toBe(false);
+    });
+
+    test("a rejected completion lookup closes quietly", async () => {
+      const failing: CompletionSource = {
+        trigger: "@",
+        items: async () => {
+          throw new Error("source directory unreadable");
+        },
+      };
+      current = await makeChatScreen(renderer, {
+        provider: okProvider,
+        completions: [failing],
+        onBack: () => {},
+      });
+      renderer.root.add(current.node);
+      current.focus?.();
+
+      await keys.typeText("@", 5);
+      await wait(60);
+      await renderOnce();
+
+      expect(promptText()).toBe("@");
+      expect(captureCharFrame().includes("source directory unreadable")).toBe(false);
     });
 
     describe("slash commands", () => {

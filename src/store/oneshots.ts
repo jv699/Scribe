@@ -6,9 +6,10 @@
  */
 import { constants } from "node:fs";
 import { join } from "node:path";
-import { mkdir, open, readdir } from "node:fs/promises";
+import { mkdir, readdir, type FileHandle } from "node:fs/promises";
 import { parseFrontmatter, serializeFrontmatter, updateFrontmatterFile } from "./frontmatter.ts";
 import { slugify, today } from "./naming.ts";
+import { openRegularFileNoFollow, readRegularFileNoFollow } from "./safe-files.ts";
 
 export interface OneshotInput {
   title: string;
@@ -54,16 +55,10 @@ export async function listOneshots(dir: string): Promise<SavedOneshot[]> {
     if (!entry.name.endsWith(".md")) continue;
     const path = join(dir, entry.name);
 
-    // Dirent metadata can be stale by the time the entry is opened. Refuse to
-    // follow a replacement symlink, then verify and read the opened descriptor.
-    // O_NONBLOCK keeps a swapped-in FIFO from hanging discovery before stat().
-    let file;
     try {
-      file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
-      const stats = await file.stat();
-      if (!stats.isFile()) continue;
-
-      const { data, body } = parseFrontmatter(await file.readFile("utf8"));
+      // Dirent metadata can be stale by the time the entry is opened. The
+      // shared reader refuses a replacement symlink or non-regular target.
+      const { data, body } = parseFrontmatter(await readRegularFileNoFollow(path));
       oneshots.push({
         slug: entry.name.slice(0, -3),
         displayName: unslugOneshot(entry.name),
@@ -73,8 +68,6 @@ export async function listOneshots(dir: string): Promise<SavedOneshot[]> {
       });
     } catch {
       // One unreadable document should not hide the rest of the drafting table.
-    } finally {
-      await file?.close();
     }
   }
   return oneshots.sort((a, b) => a.displayName.localeCompare(b.displayName) || a.slug.localeCompare(b.slug));
@@ -117,11 +110,11 @@ export async function saveOneshot(dir: string, input: OneshotInput): Promise<str
   for (let suffix = 1; ; suffix++) {
     const fileName = suffix === 1 ? `${slug}.md` : `${slug}-${suffix}.md`;
     const path = join(dir, fileName);
-    let file;
+    let file: FileHandle | undefined;
     try {
-      file = await open(
+      file = await openRegularFileNoFollow(
         path,
-        constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+        constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL,
         0o666,
       );
       await file.writeFile(content, "utf8");

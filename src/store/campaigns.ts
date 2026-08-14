@@ -137,10 +137,6 @@ export async function updateCampaignMeta(
  */
 export async function appendStorySoFar(campaign: Campaign, entry: string): Promise<void> {
   const filePath = join(campaign.dir, CAMPAIGN_FILE);
-  // Preserve the original quirk: when the heading is missing (freshly-added
-  // section), the in-memory campaign's storySoFar is intentionally left
-  // untouched — only the file gains the section.
-  let hadHeading = false;
   let newBody = "";
   await updateFrontmatterFile(filePath, (data, body) => {
     const headingIndex = body.indexOf(STORY_HEADING);
@@ -149,10 +145,15 @@ export async function appendStorySoFar(campaign: Campaign, entry: string): Promi
       return { data, body: newBody };
     }
 
-    hadHeading = true;
-    const rest = body.slice(headingIndex + STORY_HEADING.length).trim();
-    newBody = `${body.slice(0, headingIndex + STORY_HEADING.length)}\n\n${rest ? `${rest}\n\n` : ""}${entry.trim()}\n`;
+    const contentStart = headingIndex + STORY_HEADING.length;
+    const afterHeading = body.slice(contentStart);
+    const nextHeadingOffset = afterHeading.search(/^## /m);
+    const contentEnd = nextHeadingOffset === -1 ? body.length : contentStart + nextHeadingOffset;
+    const currentStory = body.slice(contentStart, contentEnd).trim();
+    const followingSections = body.slice(contentEnd).replace(/^\n+/, "");
+    newBody = `${body.slice(0, contentStart)}\n\n${currentStory ? `${currentStory}\n\n` : ""}${entry.trim()}\n`;
+    if (followingSections !== "") newBody += `\n${followingSections}`;
     return { data, body: newBody };
   });
-  if (hadHeading) campaign.storySoFar = extractSection(newBody, STORY_HEADING);
+  campaign.storySoFar = extractSection(newBody, STORY_HEADING);
 }
