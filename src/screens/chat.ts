@@ -41,6 +41,9 @@ import type { ChatMessage, ChatProvider, ModelInfo, UsageInfo } from "../provide
 import { formatDollars, formatTokenCount } from "../format.ts";
 import type { Screen } from "./screen.ts";
 
+const DOUBLE_CTRL_C_MS = 750;
+const QUIT_HINT = "Press Ctrl+C again to quit";
+
 /** Persistence seam for resuming a conversation across app sessions. */
 export interface ChatLogStore {
   load(): Promise<ChatMessage[]>;
@@ -327,6 +330,39 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
   /** True while the clear-confirmation dialog owns the keyboard. */
   let modalOpen = false;
 
+  let interruptDeadline = 0;
+  let interruptTimer: ReturnType<typeof setTimeout> | undefined;
+
+  function disarmInterrupt(): void {
+    interruptDeadline = 0;
+    if (interruptTimer !== undefined) {
+      clearTimeout(interruptTimer);
+      interruptTimer = undefined;
+    }
+    prompt.setHint();
+  }
+
+  function handleInterrupt(): "handled" | "quit" {
+    const now = Date.now();
+    if (interruptDeadline > now) {
+      disarmInterrupt();
+      return "quit";
+    }
+
+    disarmInterrupt();
+    // A question or confirmation owns its input while visible. Arm the exit,
+    // but do not mutate either it or the prompt hidden beneath it.
+    if (!askWidget && !modalOpen) prompt.input.clear();
+    prompt.setHint(QUIT_HINT);
+    interruptDeadline = now + DOUBLE_CTRL_C_MS;
+    interruptTimer = setTimeout(() => {
+      interruptTimer = undefined;
+      interruptDeadline = 0;
+      if (!disposed) prompt.setHint();
+    }, DOUBLE_CTRL_C_MS);
+    return "handled";
+  }
+
   function leave(): void {
     dispose();
     options.onBack();
@@ -498,6 +534,10 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
   }
 
   const onKeypress = (key: KeyEvent): void => {
+    // The app-level handler stops Ctrl+C before it reaches the screen. Any key
+    // that does arrive here cancels a pending double-press exit.
+    if (interruptDeadline !== 0) disarmInterrupt();
+
     // The confirm dialog registered its own listener after ours, so bow out
     // without consuming anything and let it handle Escape and Tab.
     if (modalOpen) return;
@@ -530,6 +570,7 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
     if (disposeRan) return;
     disposeRan = true;
     disposed = true;
+    disarmInterrupt();
     // Detach first: this settles any question still on screen with "declined",
     // so an in-flight runAgent can finish instead of awaiting forever.
     detachAsk?.();
@@ -549,6 +590,7 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
   return {
     node: container,
     focus: () => prompt.input.focus(),
+    handleInterrupt,
     dispose,
     setTitle: (title) => {
       if (!disposed) titleText.content = title;

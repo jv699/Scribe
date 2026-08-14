@@ -738,6 +738,17 @@ describe("chat screen", () => {
       // The loop got its result and finished rather than awaiting forever.
       expect(turns).toBe(2);
     });
+
+    test("Ctrl+C arms quit without dismissing an active question", async () => {
+      await ask(ONE_OF_TWO);
+      expect(current?.handleInterrupt?.()).toBe("handled");
+      await renderOnce();
+      expect(captureCharFrame().includes("Which hook drives session 2?")).toBe(true);
+
+      expect(current?.handleInterrupt?.()).toBe("quit");
+      await renderOnce();
+      expect(captureCharFrame().includes("Which hook drives session 2?")).toBe(true);
+    });
   });
 
   // The prompt-anchored completion popup: a list that opens off the top edge of
@@ -786,6 +797,64 @@ describe("chat screen", () => {
       };
       return find(renderer.root)?.plainText ?? "";
     }
+
+    describe("Ctrl+C", () => {
+      test("first press clears the prompt, closes completions, and restores the hint after the window", async () => {
+        await openWithCompletions();
+        await keys.typeText("sent message", 5);
+        keys.pressEnter();
+        await wait();
+        await renderOnce();
+        expect(captureCharFrame().includes("Hello world")).toBe(true);
+
+        await keys.typeText("draft @", 5);
+        await wait(60);
+        await renderOnce();
+        expect(captureCharFrame().includes("@session-1")).toBe(true);
+
+        expect(current?.handleInterrupt?.()).toBe("handled");
+        await wait(60);
+        await renderOnce();
+        let frame = captureCharFrame();
+        expect(promptText()).toBe("");
+        expect(frame.includes("@session-1")).toBe(false);
+        expect(frame.includes("Press Ctrl+C again to quit")).toBe(true);
+        expect(frame.includes("Hello world")).toBe(true);
+
+        await wait(750);
+        await renderOnce();
+        frame = captureCharFrame();
+        expect(frame.includes("Press Ctrl+C again to quit")).toBe(false);
+        expect(frame.includes(PROMPT_HINT)).toBe(true);
+      });
+
+      test("second press inside the window requests quit", async () => {
+        await openWithCompletions();
+        expect(current?.handleInterrupt?.()).toBe("handled");
+        expect(current?.handleInterrupt?.()).toBe("quit");
+        await renderOnce();
+        expect(captureCharFrame().includes(PROMPT_HINT)).toBe(true);
+      });
+
+      test("another key cancels the pending exit", async () => {
+        await openWithCompletions();
+        expect(current?.handleInterrupt?.()).toBe("handled");
+        keys.pressKey("x");
+        await wait(30);
+
+        // This is a new first press: it clears the intervening input rather
+        // than returning the app-level quit request.
+        expect(current?.handleInterrupt?.()).toBe("handled");
+        expect(promptText()).toBe("");
+      });
+
+      test("a press after the window starts a fresh sequence", async () => {
+        await openWithCompletions();
+        expect(current?.handleInterrupt?.()).toBe("handled");
+        await wait(780);
+        expect(current?.handleInterrupt?.()).toBe("handled");
+      });
+    });
 
     test("typing @ opens the popup above the chat box", async () => {
       await openWithCompletions();
@@ -1067,6 +1136,20 @@ describe("chat screen", () => {
         await renderOnce();
         expect(captureCharFrame().includes("Clear this conversation?")).toBe(false);
         expect(wentBack).toBe(false);
+      });
+
+      test("Ctrl+C arms quit without dismissing the clear dialog", async () => {
+        await openWithCompletions();
+        await keys.typeText("/clear", 5);
+        await wait(60);
+        keys.pressEnter();
+        await wait(100);
+        await renderOnce();
+
+        expect(current?.handleInterrupt?.()).toBe("handled");
+        await renderOnce();
+        expect(captureCharFrame().includes("Clear this conversation?")).toBe(true);
+        expect(current?.handleInterrupt?.()).toBe("quit");
       });
     });
   });

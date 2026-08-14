@@ -22,6 +22,8 @@ export interface Prompt {
   node: BoxRenderable;
   /** The textarea, so the caller can read, clear, and focus it. */
   input: TextareaRenderable;
+  /** Replace the footer hint; omit the value to restore the initial hint. */
+  setHint(hint?: string): void;
 }
 
 /**
@@ -31,6 +33,7 @@ export interface Prompt {
  */
 export function makePrompt(ctx: RenderContext, options: PromptOptions): Prompt {
   const { node: promptBox, panel } = makeAccentPanel(ctx);
+  const initialHint = options.hint ?? "Enter to send · Shift+Enter for a new line · Esc to exit";
 
   const input = new TextareaRenderable(ctx, {
     placeholder: options.placeholder ?? "Type a message…",
@@ -58,13 +61,18 @@ export function makePrompt(ctx: RenderContext, options: PromptOptions): Prompt {
     justifyContent: "space-between",
     paddingTop: 1,
   });
-  footer.add(
-    new TextRenderable(ctx, {
-      content: options.hint ?? "Enter to send · Shift+Enter for a new line · Esc to exit",
-      fg: theme.textMuted,
-    }),
-  );
+  const hintText = new TextRenderable(ctx, {
+    content: initialHint,
+    fg: theme.textMuted,
+  });
+  footer.add(hintText);
   panel.add(footer);
 
-  return { node: promptBox, input };
+  return {
+    node: promptBox,
+    input,
+    setHint: (hint) => {
+      hintText.content = hint ?? initialHint;
+    },
+  };
 }
