@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+import { InputRenderable, type Renderable } from "@opentui/core";
 import { type createMockKeys, type TestRenderer } from "@opentui/core/testing";
 import { setupRenderer, wait } from "./helpers/renderer.ts";
 import { makeSettingsScreen } from "../src/screens/settings.ts";
@@ -47,6 +48,16 @@ async function open(
   await renderOnce();
 }
 
+function settingsInputs(): InputRenderable[] {
+  const found: InputRenderable[] = [];
+  const visit = (node: Renderable): void => {
+    if (node instanceof InputRenderable) found.push(node);
+    for (const child of node.getChildren()) visit(child as Renderable);
+  };
+  if (current) visit(current.node);
+  return found;
+}
+
 describe("settings screen", () => {
   test("renders fields prefilled from settings and accepts typing", async () => {
     await open({
@@ -77,14 +88,14 @@ describe("settings screen", () => {
       campaignsDir: "/tmp/x",
       oneshotsDir: "/tmp/o",
       sourcesDir: "/tmp/s",
+      model: "llama3.1",
       systemPromptOverride: "/tmp/campaign-core.md",
       oneshotPromptOverride: "/tmp/oneshot-core.md",
     });
 
     await keys.typeText("https://ollama.local/v1", 5); // base URL
     await keys.pressKeys(["TAB"], 20); // -> model
-    await keys.typeText("llama3.1", 5);
-    await keys.pressKeys(["TAB", "TAB", "TAB", "TAB", "TAB", "TAB"], 20); // -> browse, key, dir, one-shots, sources, Save
+    await keys.pressKeys(["TAB", "TAB", "TAB", "TAB", "TAB"], 20); // -> key, dir, one-shots, sources, Save
     keys.pressEnter();
     await wait();
 
@@ -107,7 +118,7 @@ describe("settings screen", () => {
       },
     );
 
-    await keys.pressKeys(["TAB", "TAB", "TAB", "TAB", "TAB", "TAB", "TAB"], 10);
+    await keys.pressKeys(["TAB", "TAB", "TAB", "TAB", "TAB", "TAB"], 10);
     keys.pressEnter();
     await wait(60);
     await renderOnce();
@@ -118,15 +129,18 @@ describe("settings screen", () => {
     expect(attempts).toBe(2);
   });
 
-  test("browse fetches models and picking one fills the model field", async () => {
+  test("typing in the model field loads suggestions and Enter picks then advances", async () => {
     const server = Bun.serve({
       port: 0,
       fetch(req) {
         const url = new URL(req.url);
         if (url.pathname === "/v1/models") {
-          return new Response(JSON.stringify({ data: [{ id: "gpt-4o" }, { id: "gpt-4o-mini" }] }), {
-            headers: { "content-type": "application/json" },
-          });
+          return new Response(
+            JSON.stringify({
+              data: [{ id: "gpt-4o" }, { id: "gpt-4o-mini", name: "GPT-4o Mini", context_length: 128000 }],
+            }),
+            { headers: { "content-type": "application/json" } },
+          );
         }
         return new Response("not found", { status: 404 });
       },
@@ -140,32 +154,35 @@ describe("settings screen", () => {
       });
 
       await keys.pressKeys(["TAB"], 20); // -> model
-      await keys.pressKeys(["TAB"], 20); // -> Browse...
-      keys.pressEnter();
+      await keys.typeText("gpt-4o", 5);
       await wait();
       await renderOnce();
 
       let frame = captureCharFrame();
-      expect(frame.includes("Select a model")).toBe(true);
       expect(frame.includes("gpt-4o-mini")).toBe(true);
+      expect(frame.includes("GPT-4o Mini · 128k ctx")).toBe(true);
+      expect(frame.includes("Browse...")).toBe(false);
 
       keys.pressEnter(); // pick the first (alphabetically: gpt-4o)
       await wait();
       await renderOnce();
 
       frame = captureCharFrame();
-      expect(frame.includes("Select a model")).toBe(false);
       expect(frame.includes("gpt-4o")).toBe(true);
+      expect(frame.includes("gpt-4o-mini")).toBe(false);
+      expect(renderer.currentFocusedRenderable).toBe(settingsInputs()[2]!);
     } finally {
       server.stop();
     }
   });
 
-  test("the model picker filters as you type and wraps arrow selection", async () => {
+  test("model suggestions filter locally, wrap selection, and Tab accepts", async () => {
+    let requests = 0;
     const server = Bun.serve({
       port: 0,
       fetch(req) {
         if (new URL(req.url).pathname === "/v1/models") {
+          requests++;
           // Ids deliberately unlike the Model field's "gpt-4o-mini" placeholder,
           // which sits behind the dialog and would otherwise match.
           return new Response(
@@ -184,13 +201,7 @@ describe("settings screen", () => {
         baseUrl: `http://localhost:${server.port}/v1`,
       });
 
-      await keys.pressKeys(["TAB", "TAB"], 20); // -> Browse...
-      keys.pressEnter();
-      await wait();
-      await renderOnce();
-      expect(captureCharFrame().includes("gamma-three")).toBe(true);
-
-      // Typing narrows the list to matching ids.
+      await keys.pressKeys(["TAB"], 20); // -> model
       await keys.typeText("beta", 5);
       await wait();
       await renderOnce();
@@ -198,36 +209,48 @@ describe("settings screen", () => {
       expect(frame.includes("beta-two")).toBe(true);
       expect(frame.includes("alpha-one")).toBe(false);
       expect(frame.includes("gamma-three")).toBe(false);
+      expect(requests).toBe(1);
 
       // A query matching nothing empties the list rather than leaving it stale.
       await keys.typeText("zzz", 5);
       await wait();
       await renderOnce();
-      expect(captureCharFrame().includes("beta-two")).toBe(false);
+      frame = captureCharFrame();
+      expect(frame.includes("beta-two")).toBe(false);
+      expect(frame).toContain("betazzz");
+      expect(frame).toContain("No matching models");
 
       // Clear the filter, then arrow up from the first row: selection wraps to
-      // the last model, so Enter picks it.
+      // the last model, so Tab picks it.
       await keys.pressKeys(Array(7).fill("BACKSPACE"), 10);
       await wait();
       await renderOnce();
       frame = captureCharFrame();
       expect(frame.includes("alpha-one") && frame.includes("gamma-three")).toBe(true);
+      expect(requests).toBe(1);
 
       await keys.pressKeys(["ARROW_UP"], 20);
-      keys.pressEnter();
+      keys.pressKey("TAB");
       await wait();
       await renderOnce();
 
       frame = captureCharFrame();
-      expect(frame.includes("Select a model")).toBe(false);
-      // The model field now holds the last item, reached by wrapping upward.
       expect(frame.includes("gamma-three")).toBe(true);
+      expect(frame.includes("alpha-one")).toBe(false);
+      expect(renderer.currentFocusedRenderable).toBe(settingsInputs()[1]!);
+
+      // The accepting Tab leaves focus in the field; the next Tab advances.
+      keys.pressKey("TAB");
+      await wait();
+      await keys.typeText("MY_API_KEY", 5);
+      await renderOnce();
+      expect(captureCharFrame()).toContain("MY_API_KEY");
     } finally {
       server.stop();
     }
   });
 
-  test("escape in the model picker closes only the picker, not the screen", async () => {
+  test("Shift+Tab traverses backward without accepting a model suggestion", async () => {
     const server = Bun.serve({
       port: 0,
       fetch(req) {
@@ -247,26 +270,69 @@ describe("settings screen", () => {
         baseUrl: `http://localhost:${server.port}/v1`,
       });
 
-      await keys.pressKeys(["TAB", "TAB"], 20); // -> Browse...
-      keys.pressEnter();
+      keys.pressTab();
+      await keys.typeText("gpt", 5);
       await wait();
       await renderOnce();
-      expect(captureCharFrame().includes("Select a model")).toBe(true);
+      expect(captureCharFrame()).toContain("gpt-4o");
+
+      keys.pressTab({ shift: true });
+      await wait();
+      await renderOnce();
+
+      const [baseInput, modelInput] = settingsInputs();
+      expect(renderer.currentFocusedRenderable).toBe(baseInput!);
+      expect(modelInput?.value).toBe("gpt");
+      expect(captureCharFrame()).not.toContain("gpt-4o");
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("escape closes inline suggestions before leaving the settings screen", async () => {
+    const server = Bun.serve({
+      port: 0,
+      fetch(req) {
+        if (new URL(req.url).pathname === "/v1/models") {
+          return new Response(JSON.stringify({ data: [{ id: "gpt-4o" }, { id: "second-model" }] }), {
+            headers: { "content-type": "application/json" },
+          });
+        }
+        return new Response("not found", { status: 404 });
+      },
+    });
+    try {
+      await open({
+        campaignsDir: "/tmp/x",
+        oneshotsDir: "/tmp/o",
+        sourcesDir: "/tmp/s",
+        baseUrl: `http://localhost:${server.port}/v1`,
+      });
+
+      await keys.pressKeys(["TAB"], 20); // -> model
+      await keys.typeText("m", 5);
+      await wait();
+      await renderOnce();
+      expect(captureCharFrame()).toContain("second-model");
 
       keys.pressKey("ESCAPE");
       await wait();
       await renderOnce();
 
       const frame = captureCharFrame();
-      expect(frame.includes("Select a model")).toBe(false);
+      expect(frame.includes("second-model")).toBe(false);
       expect(frame.includes("Base URL")).toBe(true); // settings screen still up
       expect(wentBack).toBe(false);
+
+      keys.pressKey("ESCAPE");
+      await wait();
+      expect(wentBack).toBe(true);
     } finally {
       server.stop();
     }
   });
 
-  test("a model request finishing after disposal cannot open a stale picker", async () => {
+  test("a model request finishing after disposal cannot open stale suggestions", async () => {
     const server = Bun.serve({
       port: 0,
       async fetch(req) {
@@ -286,10 +352,12 @@ describe("settings screen", () => {
         sourcesDir: "/tmp/s",
         baseUrl: `http://localhost:${server.port}/v1`,
       });
-      await keys.pressKeys(["TAB", "TAB"], 20);
-      keys.pressEnter();
+      await keys.pressKeys(["TAB"], 20);
+      await keys.typeText("late", 5);
       await wait(30);
 
+      keys.pressKey("ESCAPE"); // dismiss the loading dropdown
+      await wait(30);
       keys.pressKey("ESCAPE");
       await wait(30);
       expect(wentBack).toBe(true);
@@ -298,8 +366,100 @@ describe("settings screen", () => {
 
       await wait(250);
       await renderOnce();
-      expect(captureCharFrame()).not.toContain("Select a model");
       expect(captureCharFrame()).not.toContain("late-model");
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("changing provider settings invalidates the cached model listing", async () => {
+    let requests = 0;
+    const server = Bun.serve({
+      port: 0,
+      fetch(req) {
+        requests++;
+        const path = new URL(req.url).pathname;
+        if (path === "/a/models") {
+          return new Response(JSON.stringify({ data: [{ id: "alpha-model" }] }), {
+            headers: { "content-type": "application/json" },
+          });
+        }
+        if (path === "/b/models") {
+          return new Response(JSON.stringify({ data: [{ id: "beta-model" }] }), {
+            headers: { "content-type": "application/json" },
+          });
+        }
+        return new Response("not found", { status: 404 });
+      },
+    });
+    try {
+      await open({
+        campaignsDir: "/tmp/x",
+        oneshotsDir: "/tmp/o",
+        sourcesDir: "/tmp/s",
+        baseUrl: `http://localhost:${server.port}/a`,
+      });
+
+      keys.pressTab();
+      await keys.typeText("alpha", 5);
+      await wait();
+      await renderOnce();
+      expect(captureCharFrame()).toContain("alpha-model");
+      keys.pressEnter();
+      await wait();
+
+      const [baseInput, modelInput] = settingsInputs();
+      baseInput!.value = `http://localhost:${server.port}/b`;
+      modelInput!.focus();
+      modelInput!.value = "beta";
+      await wait();
+      await renderOnce();
+
+      const frame = captureCharFrame();
+      expect(frame).toContain("beta-model");
+      expect(frame).not.toContain("alpha-model");
+      expect(requests).toBe(2);
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("provider failures leave manual model ids editable and retry on the next edit", async () => {
+    let requests = 0;
+    const server = Bun.serve({
+      port: 0,
+      fetch(req) {
+        if (new URL(req.url).pathname === "/v1/models") {
+          requests++;
+          return new Response("listing unavailable", { status: 503 });
+        }
+        return new Response("not found", { status: 404 });
+      },
+    });
+    try {
+      await open({
+        campaignsDir: "/tmp/x",
+        oneshotsDir: "/tmp/o",
+        sourcesDir: "/tmp/s",
+        baseUrl: `http://localhost:${server.port}/v1`,
+      });
+
+      keys.pressTab();
+      await keys.typeText("custom-model", 5);
+      await wait();
+      await renderOnce();
+      let frame = captureCharFrame();
+      expect(frame).toContain("custom-model");
+      expect(frame).toContain("Failed to list models (503)");
+      expect(requests).toBe(1);
+
+      await wait(550);
+      await keys.typeText("-2", 5);
+      await wait();
+      await renderOnce();
+      frame = captureCharFrame();
+      expect(frame).toContain("custom-model-2");
+      expect(requests).toBe(2);
     } finally {
       server.stop();
     }
