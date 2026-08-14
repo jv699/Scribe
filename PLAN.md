@@ -47,8 +47,8 @@ A **Session** has three statuses:
   report, derived summary.
 - **Conversation** — planning/report chat transcripts, kept so planning can
   span multiple sittings.
-- **Settings** — provider (base URL), model (with a "Browse..." picker that
-  lists models from the configured provider), API key env var name, campaigns
+- **Settings** — provider (base URL), model (a free-form field with inline
+  suggestions from the configured provider), API key env var name, campaigns
   directory, one-shots directory, sources directory.
 
 ## On-disk layout
@@ -143,7 +143,7 @@ Campaign home      → system, story-so-far peek, session list w/ statuses,
 Chat screen        → shared by planning & report modes (different prompt/tools);
                      agent questions replace the prompt box until answered;
                      `/` commands and `@` mentions complete in a popup above it
-Settings           → provider, model (with Browse... picker), key env var,
+Settings           → provider, model (inline provider-backed suggestions), key env var,
                      campaigns/one-shots/sources dirs
 ```
 
