@@ -20,10 +20,10 @@ plan → export → play (offline, at the table) → report → summary grows �
 bun install
 
 # Run the app (interactive terminal UI)
-bun run src/index.ts
+bun start
 
 # Watch mode during dev
-bun --watch src/index.ts
+bun run dev
 ```
 
 Requires Bun v1.3+. Scribe is an interactive TUI — run it in a real terminal,
