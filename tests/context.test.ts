@@ -121,6 +121,12 @@ describe("prompt assembly", () => {
     expect(prompt).toContain("what the adventure should feel like");
     expect(prompt).toContain("Make the user's chosen ideas and language");
     expect(prompt).toContain("Do not turn discovery into an intake form");
+    expect(prompt).toContain("do not assume a fantasy-combat structure");
+    expect(prompt).toContain("Design situations, pressures, and consequences");
+    expect(prompt).toContain("failure-forward outcomes");
+    expect(prompt).toContain("Consult available source documents");
+    expect(prompt).toContain("preserve the user's established choices");
+    expect(prompt).toContain("potentially sensitive material");
     expect(prompt).toContain("Prefer four-hour adventures.");
     // The campaign instructions layer must not leak into one-shot mode.
     expect(prompt).not.toContain("CAMPAIGN ONLY.");
