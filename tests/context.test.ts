@@ -117,6 +117,10 @@ describe("prompt assembly", () => {
     expect(prompt).toContain("read_oneshot before revising one");
     expect(prompt).toContain("complete canonical markdown body");
     expect(prompt).toContain("NEVER call save_session unless the user explicitly asks");
+    expect(prompt).toContain("Ask about the most important unresolved decision before drafting");
+    expect(prompt).toContain("what the adventure should feel like");
+    expect(prompt).toContain("Make the user's chosen ideas and language");
+    expect(prompt).toContain("Do not turn discovery into an intake form");
     expect(prompt).toContain("Prefer four-hour adventures.");
     // The campaign instructions layer must not leak into one-shot mode.
     expect(prompt).not.toContain("CAMPAIGN ONLY.");
