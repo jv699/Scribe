@@ -690,6 +690,36 @@ describe("ask_user tool", () => {
     expect(new Set(labels).size).toBe(9);
   });
 
+  test("drops model-supplied placeholders for the widget's custom row", async () => {
+    const channel = stubAskChannel(["A"]);
+    await askTool(channel).execute({
+      question: "Which?",
+      options: [
+        "A",
+        "Otherworldly patron",
+        { label: "Custom", description: "Describe what you want" },
+        "Other",
+        "Something else…",
+        "Type your own answer...",
+      ],
+    });
+
+    expect(channel.asked[0]?.options).toEqual([{ label: "A" }, { label: "Otherworldly patron" }]);
+    expect(channel.asked[0]?.custom).toBe(true);
+  });
+
+  test("preserves fallback options when the widget's custom row is disabled", async () => {
+    const channel = stubAskChannel(["Other"]);
+    await askTool(channel).execute({
+      question: "Which?",
+      options: ["A", "Other"],
+      custom: false,
+    });
+
+    expect(channel.asked[0]?.options).toEqual([{ label: "A" }, { label: "Other" }]);
+    expect(channel.asked[0]?.custom).toBe(false);
+  });
+
   test("coerces string booleans, which models emit for flags", async () => {
     const channel = stubAskChannel(["A"]);
     await askTool(channel).execute({

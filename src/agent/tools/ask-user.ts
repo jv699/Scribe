@@ -17,6 +17,21 @@ import type { ToolSpec } from "./types.ts";
 /** How many options a single question may offer (rows are pickable by digit). */
 const MAX_OPTIONS = 9;
 
+/** Generic meta-options that duplicate the widget's built-in free-text row. */
+const CUSTOM_PLACEHOLDERS = new Set([
+  "custom",
+  "custom answer",
+  "other",
+  "other answer",
+  "something else",
+  "type your own",
+  "type your own answer",
+  "write your own",
+  "write your own answer",
+  "enter your own",
+  "enter your own answer",
+]);
+
 export const askUserTool: ToolSpec = {
   name: ASK_USER_TOOL_NAME,
   label: "Waiting for your answer",
@@ -31,7 +46,9 @@ export const askUserTool: ToolSpec = {
         "should betray the party, which of several tones to take — instead of guessing " +
         "or writing a wall of prose asking them to reply. Ask one question at a time; " +
         "call this again if you need a follow-up. Offer 2-9 concrete, meaningfully " +
-        "different options, each a short label the user can scan. Do not use it for " +
+        "different options, each a short label the user can scan. Never include a " +
+        '"Custom", "Other", or "Type your own answer" option: the custom flag makes ' +
+        "the UI add that row automatically. Do not use it for " +
         "open-ended questions with no natural options (just ask those in your reply), " +
         "and do not use it to ask permission for work you can simply do.",
       parameters: {
@@ -47,7 +64,9 @@ export const askUserTool: ToolSpec = {
           },
           options: {
             type: "array",
-            description: `The choices to offer (2-${MAX_OPTIONS}).`,
+            description:
+              `The concrete choices to offer (2-${MAX_OPTIONS}). Do not add a Custom, Other, ` +
+              "or Type your own answer choice; use the custom flag for free text.",
             items: {
               type: "object",
               properties: {
@@ -67,7 +86,7 @@ export const askUserTool: ToolSpec = {
           custom: {
             type: "boolean",
             description:
-              "Offer a 'type your own answer' row. Defaults to true; set false only when the options are genuinely exhaustive.",
+              "Make the UI append a 'type your own answer' row. Defaults to true; set false only when the options are genuinely exhaustive.",
           },
         },
         required: ["question", "options"],
@@ -86,7 +105,8 @@ export const askUserTool: ToolSpec = {
         const question = stringArg(args, "question").trim();
         if (question === "") return "(question cannot be empty)";
 
-        const options = coerceOptions(args["options"]);
+        const custom = boolArg(args, "custom", true);
+        const options = coerceOptions(args["options"], custom);
         if (options.length === 0) return "(provide at least one option)";
 
         const header = stringArg(args, "header").trim();
@@ -94,7 +114,7 @@ export const askUserTool: ToolSpec = {
           question,
           options,
           multiple: boolArg(args, "multiple", false),
-          custom: boolArg(args, "custom", true),
+          custom,
           ...(header !== "" ? { header } : {}),
         });
 
@@ -111,13 +131,17 @@ export const askUserTool: ToolSpec = {
  * and a single option sometimes arrives unwrapped. All three are accepted;
  * anything else is dropped rather than throwing.
  */
-function coerceOptions(raw: unknown): AskOption[] {
+function coerceOptions(raw: unknown, custom: boolean): AskOption[] {
   const list = Array.isArray(raw) ? raw : [raw];
   const options: AskOption[] = [];
   const seen = new Set<string>();
 
   for (const entry of list) {
     const option = coerceOption(entry);
+    // When enabled, the widget owns its free-text row. Some models still emit
+    // a placeholder choice as well, which would otherwise produce the
+    // duplicate shown as "Custom" followed by "Type your own answer…".
+    if (custom && option && isCustomPlaceholder(option.label)) continue;
     // Duplicate labels would make the answer ambiguous, and digit-picking
     // confusing. First one wins.
     if (!option || seen.has(option.label)) continue;
@@ -126,6 +150,14 @@ function coerceOptions(raw: unknown): AskOption[] {
     if (options.length === MAX_OPTIONS) break;
   }
   return options;
+}
+
+function isCustomPlaceholder(label: string): boolean {
+  const normalized = label
+    .toLowerCase()
+    .replace(/[.…]+$/u, "")
+    .trim();
+  return CUSTOM_PLACEHOLDERS.has(normalized);
 }
 
 function coerceOption(entry: unknown): AskOption | null {
