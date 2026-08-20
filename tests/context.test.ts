@@ -121,8 +121,12 @@ describe("prompt assembly", () => {
     expect(prompt).toContain("what the adventure should feel like");
     expect(prompt).toContain("Make the user's chosen ideas and language");
     expect(prompt).toContain("Do not turn discovery into an intake form");
+    expect(prompt).toContain("the UI adds the free-text row");
     expect(prompt).toContain("do not assume a fantasy-combat structure");
     expect(prompt).toContain("Design situations, pressures, and consequences");
+    expect(prompt).toContain("key each significant room or area");
+    expect(prompt).toContain("fenced-text map with labeled areas");
+    expect(prompt).toContain("connections agree with the keyed descriptions");
     expect(prompt).toContain("failure-forward outcomes");
     expect(prompt).toContain("Consult available source documents");
     expect(prompt).toContain("preserve the user's established choices");
