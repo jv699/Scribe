@@ -20,6 +20,10 @@ import type { Screen } from "./screen.ts";
 
 export type MainMenuView = "root" | "campaigns";
 
+// Campaign building remains available behind the root menu so it can keep
+// evolving without being exposed in the initial release.
+const CAMPAIGNS_ENABLED: boolean = false;
+
 export interface MainMenuOptions {
   campaigns: Campaign[];
   /** Menu stage shown initially. Defaults to the top-level menu. */
@@ -38,7 +42,7 @@ export interface MainMenuOptions {
 
 export function makeMainMenuScreen(renderer: CliRenderer, options: MainMenuOptions): Screen {
   const rootOptions: SelectOption[] = [
-    { name: "Campaigns", description: "" },
+    { name: CAMPAIGNS_ENABLED ? "Campaigns" : "Campaigns (Coming Soon)", description: "" },
     { name: "Drafting Table", description: "one-shot and ideas planner" },
     { name: "Settings", description: "" },
     { name: "Quit", description: "" },
@@ -50,12 +54,14 @@ export function makeMainMenuScreen(renderer: CliRenderer, options: MainMenuOptio
   ];
   let view: MainMenuView = options.initialView ?? "root";
   const initialOptions = view === "campaigns" ? campaignOptions : rootOptions;
+  const rootSelectedIndex = CAMPAIGNS_ENABLED ? 0 : 1;
 
   const mainMenu = new SelectRenderable(renderer, {
     width: 30,
     height: initialOptions.length,
     showDescription: false,
     options: initialOptions,
+    selectedIndex: view === "root" ? rootSelectedIndex : 0,
     selectedBackgroundColor: theme.accent,
     selectedTextColor: theme.text,
   });
@@ -70,12 +76,12 @@ export function makeMainMenuScreen(renderer: CliRenderer, options: MainMenuOptio
     const nextOptions = view === "campaigns" ? campaignOptions : rootOptions;
     mainMenu.options = nextOptions;
     mainMenu.height = nextOptions.length;
-    mainMenu.setSelectedIndex(0);
+    mainMenu.setSelectedIndex(view === "root" ? rootSelectedIndex : 0);
   }
 
   mainMenu.on(SelectRenderableEvents.ITEM_SELECTED, (index: number) => {
     if (view === "root") {
-      if (index === 0) showView("campaigns");
+      if (index === 0 && CAMPAIGNS_ENABLED) showView("campaigns");
       else if (index === 1) options.onOneshotPlanner();
       else if (index === 2) options.onSettings();
       else if (index === 3) options.onQuit();
