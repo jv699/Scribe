@@ -96,17 +96,13 @@ afterEach(async () => {
 
 describe("phase-0 ui flow", () => {
   test("create campaign -> plan session -> status transitions -> trash -> persistence", async () => {
-    // main menu
+    // Campaign UI remains exercised directly while its release-menu entry is disabled.
+    await showMainMenu("campaigns");
     await renderOnce();
     let frame = captureCharFrame();
-    expect(frame.includes("Campaigns") && frame.includes("Drafting Table") && frame.includes("Settings") && frame.includes("Quit")).toBe(true);
-    expect(frame.includes("Create Campaign")).toBe(false);
-
-    // enter the campaign submenu, then create a campaign through the dialog
-    keys.pressEnter();
-    await renderOnce();
-    frame = captureCharFrame();
     expect(frame.includes("Back") && frame.includes("Create Campaign")).toBe(true);
+
+    // Create a campaign through the dialog.
     await keys.pressKeys(["ARROW_DOWN"], 20);
     keys.pressEnter();
     await wait(100);
@@ -244,7 +240,7 @@ describe("select mouse support", () => {
     expect(quits).toBe(1);
   });
 
-  test("mouse support follows the menu into the campaign stage", async () => {
+  test("the coming-soon campaign entry is inert for keyboard and mouse", async () => {
     let creates = 0;
     showScreen(
       makeMainMenuScreen(renderer, {
@@ -263,10 +259,12 @@ describe("select mouse support", () => {
     const campaigns = locate("Campaigns");
     await mouse.click(campaigns.x, campaigns.y);
     await renderOnce();
+    expect(captureCharFrame().includes("Create Campaign")).toBe(false);
 
-    const create = locate("Create Campaign");
-    await mouse.click(create.x, create.y);
-    expect(creates).toBe(1);
+    keys.pressEnter();
+    await renderOnce();
+    expect(captureCharFrame().includes("Create Campaign")).toBe(false);
+    expect(creates).toBe(0);
   });
 
   test("hovering a main-menu row moves the selection", async () => {
@@ -304,12 +302,13 @@ describe("two-stage main menu", () => {
   test("Back and Escape both return the campaign stage to the root", async () => {
     await renderOnce();
     const rootLines = captureCharFrame().split("\n");
-    const rootOrder = ["Campaigns", "Drafting Table", "Settings", "Quit"].map((label) =>
+    const rootOrder = ["Campaigns (Coming Soon)", "Drafting Table", "Settings", "Quit"].map((label) =>
       rootLines.findIndex((line) => line.includes(label)),
     );
     expect(rootOrder.every((row, index) => index === 0 || row > rootOrder[index - 1]!)).toBe(true);
+    expect(rootLines.find((line) => line.includes("Drafting Table"))).toContain("▶ Drafting Table");
 
-    keys.pressEnter();
+    await showMainMenu("campaigns");
     await renderOnce();
     expect(captureCharFrame().includes("Create Campaign")).toBe(true);
 
@@ -318,7 +317,7 @@ describe("two-stage main menu", () => {
     expect(captureCharFrame().includes("Drafting Table")).toBe(true);
     expect(captureCharFrame().includes("Create Campaign")).toBe(false);
 
-    keys.pressEnter();
+    await showMainMenu("campaigns");
     await renderOnce();
     keys.pressKey("ESCAPE");
     await wait(100);
@@ -328,8 +327,8 @@ describe("two-stage main menu", () => {
   });
 
   test("cancelling campaign creation stays in the campaign stage", async () => {
+    await showMainMenu("campaigns");
     await renderOnce();
-    keys.pressEnter();
     await keys.pressKeys(["ARROW_DOWN"], 20);
     keys.pressEnter();
     await wait(100);
