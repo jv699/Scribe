@@ -118,7 +118,10 @@ describe("prompt assembly", () => {
     expect(prompt).toContain("complete canonical markdown body");
     expect(prompt).toContain("NEVER call save_session unless the user explicitly asks");
     expect(prompt).toContain("Ask about the most important unresolved decision before drafting");
-    expect(prompt).toContain("what the adventure should feel like");
+    expect(prompt).toMatch(/Once you have enough direction for a substantial full plan,[\s\S]*creative brief before drafting/);
+    expect(prompt).toMatch(/"Draft from this\s+brief" or "Adjust it first"/);
+    expect(prompt).toMatch(/Do not produce the\s+full plan until the user confirms/);
+    expect(prompt).toMatch(/Skip this checkpoint when the user requests an immediate draft/);
     expect(prompt).toContain("Make the user's chosen ideas and language");
     expect(prompt).toContain("Do not turn discovery into an intake form");
     expect(prompt).toContain("the UI adds the free-text row");
