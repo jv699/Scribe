@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, rm, readdir, symlink, unlink, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 
 import { parseFrontmatter, serializeFrontmatter, updateFrontmatterFile } from "../src/store/frontmatter.ts";
 import { loadSettings, saveSettings } from "../src/store/settings.ts";
@@ -10,7 +10,7 @@ import { createSession, listSessions, readSessionNotes, setSessionStatus, trashS
 import { loadChatLog, saveChatLog, clearChatLog, chatLogPath } from "../src/store/chat-log.ts";
 import { loadInstructions, loadOneshotInstructions, loadPromptOverride } from "../src/store/instructions.ts";
 import { findOneshot, listOneshots, saveOneshot, unslugOneshot, writeOneshot } from "../src/store/oneshots.ts";
-import { sanitizeFolderName, today, uniqueName } from "../src/store/naming.ts";
+import { sanitizeFolderName, uniqueName } from "../src/store/naming.ts";
 
 let dir: string;
 
@@ -84,18 +84,31 @@ describe("settings", () => {
   test("creates config with defaults when missing", async () => {
     const configPath = join(dir, "cfg", "config.json");
     const settings = await loadSettings(configPath);
-    expect(settings.campaignsDir.endsWith("Scribe")).toBe(true);
+    expect(settings).toEqual({
+      campaignsDir: join(homedir(), "Scribe"),
+      oneshotsDir: join(homedir(), "Scribe", "One-Shots"),
+      sourcesDir: join(homedir(), "Scribe", "Sources"),
+    });
 
     const written = JSON.parse(await readFile(configPath, "utf8"));
-    expect(written.campaignsDir).toBeDefined();
+    expect(written).toEqual(settings);
   });
 
   test("reads existing config and expands ~", async () => {
     const configPath = join(dir, "config.json");
-    const settings = await loadSettings(configPath); // creates defaults
-    const again = await loadSettings(configPath);
-    expect(again.campaignsDir).toBe(settings.campaignsDir);
-    expect(again.campaignsDir.startsWith("~")).toBe(false);
+    // Exercise expansion through config loading, keeping all created folders in the fixture.
+    const homeRelativeDir = `~/${relative(homedir(), dir)}`;
+    await Bun.write(configPath, JSON.stringify({
+      campaignsDir: `${homeRelativeDir}/campaigns`,
+      oneshotsDir: `${homeRelativeDir}/one-shots`,
+      sourcesDir: `${homeRelativeDir}/sources`,
+    }));
+    const settings = await loadSettings(configPath);
+    expect(settings).toEqual({
+      campaignsDir: join(dir, "campaigns"),
+      oneshotsDir: join(dir, "one-shots"),
+      sourcesDir: join(dir, "sources"),
+    });
   });
 
   test("corrupt config falls back to defaults", async () => {
@@ -203,6 +216,7 @@ describe("campaigns", () => {
 
   test("createCampaign writes campaign.md with frontmatter and body", async () => {
     const campaign = await createCampaign(dir, input);
+    expect(campaign.dir).toBe(join(dir, "Curse of Strahd"));
     const raw = await readFile(join(campaign.dir, "campaign.md"), "utf8");
 
     expect(raw).toContain("name: Curse of Strahd");
@@ -212,11 +226,6 @@ describe("campaigns", () => {
     expect(raw).toContain("Gothic horror.");
     expect(raw).toContain("## The Story So Far");
     expect(campaign.nextSession).toBe(1);
-  });
-
-  test("campaign folder keeps the human name", async () => {
-    const campaign = await createCampaign(dir, input);
-    expect(campaign.dir).toBe(join(dir, "Curse of Strahd"));
   });
 
   test("duplicate names get a unique folder", async () => {
@@ -268,6 +277,7 @@ describe("campaigns", () => {
     expect(idx2).toBeGreaterThan(idx1);
     // background section untouched
     expect(reloaded.description).toBe("Gothic horror.");
+    expect(campaign.storySoFar).toBe(reloaded.storySoFar);
   });
 
   test("appendStorySoFar inserts before a later H2 section", async () => {
@@ -329,17 +339,6 @@ describe("naming", () => {
     expect(
       uniqueName("rules", ["rules", "rules-2", "rules-3"], { separator: "-" }),
     ).toBe("rules-4");
-  });
-
-  test("uniqueName with a bare separator (no ext) matches the sources.ts slug behavior", () => {
-    // Two docs that would slugify identically get "-2", "-3", ... suffixes,
-    // same as the old private uniqueSlug() in sources.ts.
-    expect(uniqueName("rules", ["rules"], { separator: "-" })).toBe("rules-2");
-    expect(uniqueName("rules", ["rules", "rules-2"], { separator: "-" })).toBe("rules-3");
-  });
-
-  test("today returns an ISO date string", () => {
-    expect(today()).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 
   test("a campaign named '..' stays inside the campaigns folder", async () => {
@@ -411,12 +410,12 @@ describe("sessions", () => {
     await setSessionStatus(session, "ready");
     let raw = await readFile(session.path, "utf8");
     expect(raw).toContain("status: ready");
-    expect(raw).toContain("ready: ");
+    expect(parseFrontmatter(raw).data["ready"]).toMatch(/^\d{4}-\d{2}-\d{2}$/);
 
     await setSessionStatus(session, "played");
     raw = await readFile(session.path, "utf8");
     expect(raw).toContain("status: played");
-    expect(raw).toContain("played: ");
+    expect(parseFrontmatter(raw).data["played"]).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(session.status).toBe("played");
   });
 
@@ -437,7 +436,7 @@ describe("chat log", () => {
     return createCampaign(dir, { name: "CoS", system: "5e", description: "" });
   }
 
-  test("append/load round-trips messages", async () => {
+  test("save/load round-trips messages; subsequent saves replace the log and clear deletes it", async () => {
     const campaign = await setup();
     await saveChatLog(campaign.dir, 1, "plan", [
       { role: "user", content: "hi" },
@@ -449,6 +448,11 @@ describe("chat log", () => {
       { role: "user", content: "hi" },
       { role: "assistant", content: "hello" },
     ]);
+
+    await saveChatLog(campaign.dir, 1, "plan", [{ role: "user", content: "replacement" }]);
+    expect(await loadChatLog(campaign.dir, 1, "plan")).toEqual([{ role: "user", content: "replacement" }]);
+    await clearChatLog(campaign.dir, 1, "plan");
+    expect(await loadChatLog(campaign.dir, 1, "plan")).toEqual([]);
   });
 
   test("loads empty when no log exists", async () => {
@@ -464,21 +468,14 @@ describe("chat log", () => {
     expect(loaded).toEqual([{ role: "user", content: "ok" }]);
   });
 
-  test("save replaces the whole log; clear deletes it", async () => {
-    const campaign = await setup();
-    await saveChatLog(campaign.dir, 2, "report", [{ role: "user", content: "a" }, { role: "assistant", content: "b" }]);
-    expect(await loadChatLog(campaign.dir, 2, "report")).toHaveLength(2);
-
-    await clearChatLog(campaign.dir, 2, "report");
-    expect(await loadChatLog(campaign.dir, 2, "report")).toEqual([]);
-  });
-
   test("logs are separate per session and mode", async () => {
     const campaign = await setup();
     await saveChatLog(campaign.dir, 1, "plan", [{ role: "user", content: "plan msg" }]);
+    await saveChatLog(campaign.dir, 1, "report", [{ role: "user", content: "same session report" }]);
     await saveChatLog(campaign.dir, 2, "report", [{ role: "user", content: "report msg" }]);
 
-    expect(await loadChatLog(campaign.dir, 1, "plan")).toHaveLength(1);
+    expect(await loadChatLog(campaign.dir, 1, "plan")).toEqual([{ role: "user", content: "plan msg" }]);
+    expect(await loadChatLog(campaign.dir, 1, "report")).toEqual([{ role: "user", content: "same session report" }]);
     expect(await loadChatLog(campaign.dir, 2, "plan")).toEqual([]);
     expect(await loadChatLog(campaign.dir, 2, "report")).toHaveLength(1);
   });

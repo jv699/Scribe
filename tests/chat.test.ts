@@ -9,6 +9,7 @@ import type { AgentTool } from "../src/agent/loop.ts";
 import { makeAskChannel } from "../src/agent/ask.ts";
 import { resolveTools } from "../src/agent/tools/index.ts";
 import type { CompletionItem, CompletionSource } from "../src/components/autocomplete.ts";
+import { filterCompletions } from "../src/completions.ts";
 
 let renderer: TestRenderer;
 let captureCharFrame: () => string;
@@ -72,15 +73,23 @@ describe("chat screen", () => {
   test("multi-line input: Shift+Enter adds a line, Enter sends it", async () => {
     // Modifiers need the kitty-keyboard mock to round-trip.
     const kitty = createMockKeys(renderer, { kittyKeyboard: true });
-    await open(okProvider);
+    const submitted: string[] = [];
+    await open({
+      async *streamChat(messages) {
+        submitted.push(messages.findLast((message) => message.role === "user")!.content);
+        yield { type: "text", delta: "Got both lines." };
+      },
+    });
     await kitty.typeText("first line", 5);
     kitty.pressEnter({ shift: true });
     await kitty.typeText("second line", 5);
+    expect(submitted).toEqual([]);
     kitty.pressEnter();
     await wait();
     await renderOnce();
 
     const frame = captureCharFrame();
+    expect(submitted).toEqual(["first line\nsecond line"]);
     expect(frame.includes("first line")).toBe(true);
     expect(frame.includes("second line")).toBe(true);
     // both lines landed in a single message (adjacent rows inside one box, no blank line between)
@@ -224,7 +233,8 @@ describe("chat screen", () => {
     expect(captureCharFrame().includes("one-shot planner")).toBe(false);
   });
 
-  test("planning mode runs tools and streams the final answer", async () => {    const toolProvider: ChatProvider = {
+  test("planning mode runs tools and streams the final answer", async () => {
+    const toolProvider: ChatProvider = {
       async *streamChat(messages): AsyncGenerator<ChatEvent> {
         if (messages.some((m) => m.role === "tool")) {
           yield { type: "text", delta: "All set." };
@@ -317,7 +327,7 @@ describe("chat screen", () => {
       return captureCharFrame();
     }
 
-    test("each activity settles into a past-tense label and its duration", async () => {
+    test("activities settle with durations in one block above the reply", async () => {
       const frame = await runTurn();
       // Thinking, the tool, then thinking again before the reply streamed.
       expect(/Thought · \d+\.\d+s/.test(frame)).toBe(true);
@@ -325,10 +335,6 @@ describe("chat screen", () => {
       // Nothing is left running once the turn is over.
       expect(frame.includes("Scribe is thinking…")).toBe(false);
       expect(frame.includes("Looking over the sessions…")).toBe(false);
-    });
-
-    test("consecutive activities stack into one block, above the reply", async () => {
-      const frame = await runTurn();
       // No blank line between them: they share a single muted-rule block.
       expect(/Thought ·[^\n]*\n *│ +Looked over the sessions ·/.test(frame)).toBe(true);
       // And the block sits above the prose it produced.
@@ -553,13 +559,15 @@ describe("chat screen", () => {
     // closed, which is before the answered exchange reaches the transcript.
     // Pinned rows land at the end, so it appeared *above* the answer it
     // followed. It is opened when the next model turn is announced instead.
-    test("the thinking that follows an answer is recorded below it", async () => {
+    test("the answer appears before the model replies, with subsequent thinking below it", async () => {
       await ask(ONE_OF_TWO, undefined, 300);
       keys.pressKey("2");
       await wait(80); // answered, reply still stalled, so the row is live
       await renderOnce();
 
       const midTurn = captureCharFrame();
+      expect(midTurn).toContain("→ A caravan gone silent");
+      expect(midTurn).not.toContain("Locked in.");
       expect(midTurn.includes("Scribe is thinking…")).toBe(true);
       expect(midTurn.indexOf("Scribe is thinking…")).toBeGreaterThan(
         midTurn.indexOf("→ A caravan gone silent"),
@@ -568,34 +576,13 @@ describe("chat screen", () => {
       await wait(400);
       await renderOnce();
       const settled = captureCharFrame();
+      expect(settled).toContain("Locked in.");
+      expect((settled.match(/→ A caravan gone silent/g) ?? []).length).toBe(1);
       // And it settles rather than sitting there present-tense forever.
       expect(settled.includes("Scribe is thinking…")).toBe(false);
       expect(settled.lastIndexOf("Thought ·")).toBeGreaterThan(
         settled.indexOf("→ A caravan gone silent"),
       );
-    });
-
-    // Regression: the screen used to adopt runAgent's conversation only once the
-    // whole turn resolved, so the Q&A row appeared *after* the model's follow-up
-    // had finished streaming — a long pause with nothing to show for the answer.
-    test("the answer lands in the transcript before the model replies", async () => {
-      await ask(ONE_OF_TWO, undefined, 400);
-      keys.pressKey("2");
-      await wait(80); // answered, but the reply is still stalled
-      await renderOnce();
-
-      const midTurn = captureCharFrame();
-      expect(midTurn.includes("→ A caravan gone silent")).toBe(true);
-      expect(midTurn.includes("Locked in.")).toBe(false);
-      // Back to waiting on the model, not on the user.
-      expect(midTurn.includes("Scribe is thinking")).toBe(true);
-
-      await wait(500);
-      await renderOnce();
-      const settled = captureCharFrame();
-      expect(settled.includes("Locked in.")).toBe(true);
-      // The row wasn't duplicated when the turn adopted the final conversation.
-      expect((settled.match(/→ A caravan gone silent/g) ?? []).length).toBe(1);
     });
 
     test("arrows move the selection and Enter chooses it", async () => {
@@ -651,7 +638,7 @@ describe("chat screen", () => {
       await wait();
       await renderOnce();
 
-      // Emitted in the order presented, not the order clicked.
+      // Only selected options are emitted.
       expect(captureCharFrame().includes("→ Blood rain, Dead crows")).toBe(true);
     });
 
@@ -794,9 +781,7 @@ describe("chat screen", () => {
           { label: "@session-2", description: "The Bell Tower · ready", insert: 'session 2 ("The Bell Tower")' },
           { label: "@background", description: "The campaign premise", insert: "the campaign background" },
         ];
-        const needle = query.toLowerCase();
-        if (needle === "") return all;
-        return all.filter((i) => `${i.label} ${i.description}`.toLowerCase().includes(needle));
+        return filterCompletions(all, query);
       },
     };
 
@@ -930,7 +915,7 @@ describe("chat screen", () => {
       // Enter completed rather than submitting, so nothing was sent.
       expect(captureCharFrame().includes("world")).toBe(false);
       // And the popup closed behind it.
-      expect(captureCharFrame().includes("The campaign premise")).toBe(false);
+      expect(captureCharFrame()).not.toContain("@session-1");
     });
 
     test("Tab completes too", async () => {

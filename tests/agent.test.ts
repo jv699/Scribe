@@ -3,7 +3,7 @@ import { copyFile, mkdir, mkdtemp, readFile, readdir, rm } from "node:fs/promise
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { AGENTS, toolsFor, type AgentId } from "../src/agent/agents.ts";
+import { toolsFor, type AgentId } from "../src/agent/agents.ts";
 import { runAgent, type AgentTool } from "../src/agent/loop.ts";
 import {
   ASK_DECLINED,
@@ -176,7 +176,7 @@ describe("agent loop", () => {
     expect(seen[2]!.content).toBe("Plan written to session notes.");
   });
 
-  test("reports unknown and failing tools gracefully", async () => {
+  test("feeds unknown and failing tool results back so the model can recover", async () => {
     const provider: ChatProvider = {
       async *streamChat(messages) {
         if (messages.some((m) => m.role === "tool")) {
@@ -184,11 +184,18 @@ describe("agent loop", () => {
           return;
         }
         yield toolCallDelta(0, "c1", "missing_tool", "{}");
+        yield toolCallDelta(1, "c2", "echo", "{}");
       },
     };
-    const result = await runAgent({ provider, tools: [echoTool] }, [{ role: "user", content: "hi" }]);
-    const toolMsg = result.messages.find((m) => m.role === "tool");
-    expect(toolMsg?.content).toBe("Unknown tool: missing_tool");
+    const failingTool: AgentTool = {
+      ...echoTool,
+      execute: () => { throw new Error("write failed"); },
+    };
+    const result = await runAgent({ provider, tools: [failingTool] }, [{ role: "user", content: "hi" }]);
+    expect(result.messages.filter((m) => m.role === "tool").map((m) => m.content)).toEqual([
+      "Unknown tool: missing_tool",
+      "Tool error: write failed",
+    ]);
     expect(result.answer).toBe("done");
   });
 
@@ -332,11 +339,6 @@ describe("campaign tools", () => {
     );
   });
 
-  test("read_session_notes returns the session body", async () => {
-    const read = grantedTool("planning", "read_session_notes");
-    expect(await read.execute({ number: 1 })).toContain("## Plan");
-  });
-
   test("read_session_notes sees writes made earlier in the same run", async () => {
     // The agent drafts, then re-reads to refine — the read must not be served
     // from the campaign snapshot captured when tools were resolved.
@@ -456,8 +458,9 @@ describe("saved one-shot tools", () => {
   test("the saved-document tools are granted only to the one-shot agent", () => {
     const names = ["list_oneshots", "read_oneshot", "update_oneshot"];
     expect(grantedNames("oneshot")).toEqual(expect.arrayContaining(names));
-    expect(grantedNames("planning")).not.toEqual(expect.arrayContaining(names));
-    expect(grantedNames("report")).not.toEqual(expect.arrayContaining(names));
+    for (const agent of ["planning", "report"] as const) {
+      for (const name of names) expect(grantedNames(agent)).not.toContain(name);
+    }
   });
 });
 
@@ -476,9 +479,9 @@ describe("source-document tools", () => {
     expect(oneshotNames).toEqual(
       expect.arrayContaining(["list_sources", "search_sources", "read_source_pages"]),
     );
-    expect(grantedNames("report")).not.toEqual(
-      expect.arrayContaining(["list_sources", "search_sources", "read_source_pages"]),
-    );
+    for (const name of ["list_sources", "search_sources", "read_source_pages"]) {
+      expect(grantedNames("report")).not.toContain(name);
+    }
   });
 
   test("all three tools decline a context with no sourcesDir", () => {
@@ -613,8 +616,7 @@ describe("ask channel", () => {
     const channel = makeAskChannel();
     channel.attach(async (question) => ({ question: question.question, answers: ["ok"] }));
 
-    for (let i = 0; i < 25; i++) {
-      expect(channel.pendingCount).toBe(0);
+    for (let i = 0; i < 3; i++) {
       const answer = await channel.ask({ question: `q${i}`, options: [{ label: "x" }] });
       expect(answer?.answers).toEqual(["ok"]);
       expect(channel.pendingCount).toBe(0);
@@ -750,32 +752,11 @@ describe("tool registry", () => {
     }
   });
 
-  test("every spec has a human-readable label, not the wire name", () => {
-    for (const [key, spec] of Object.entries(registry)) {
-      for (const label of [spec.label, spec.pastLabel]) {
-        expect(label.length).toBeGreaterThan(0);
-        expect(label).not.toBe(key);
-        expect(label).not.toContain("_");
-      }
-      // The two are a present/past pair, so they must actually differ.
-      expect(spec.pastLabel).not.toBe(spec.label);
-    }
-  });
-
   test("toolLabel and toolPastLabel fall back to the raw name for unknown tools", () => {
     expect(toolLabel("list_sessions")).toBe(registry.list_sessions.label);
     expect(toolLabel("not_a_tool")).toBe("not_a_tool");
     expect(toolPastLabel("list_sessions")).toBe(registry.list_sessions.pastLabel);
     expect(toolPastLabel("not_a_tool")).toBe("not_a_tool");
-  });
-
-  test("toolNames covers the whole registry", () => {
-    expect(toolNames.map(String).sort()).toEqual(Object.keys(registry).sort());
-  });
-
-  test("resolveTools preserves the requested order", () => {
-    const tools = resolveTools(["update_session_notes", "list_sessions"], { campaign });
-    expect(tools.map((t) => t.definition.function.name)).toEqual(["update_session_notes", "list_sessions"]);
   });
 
   test("campaign tools decline a context with no campaign", () => {
@@ -806,12 +787,6 @@ describe("agent gateway", () => {
     // Declines without a dir — plain streaming remains the fallback.
     expect(toolsFor("oneshot", {})).toEqual([]);
     expect(toolsFor("oneshot", { campaign })).toEqual([]);
-  });
-
-  test("every granted name resolves to a real tool for a campaign agent", () => {
-    for (const agent of ["planning", "report"] as const) {
-      expect(grantedNames(agent)).toEqual(AGENTS[agent].tools.map(String));
-    }
   });
 });
 

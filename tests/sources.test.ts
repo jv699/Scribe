@@ -226,22 +226,15 @@ describe("search", () => {
     await indexSources(dir);
   }
 
-  test("a known phrase ranks the right page first", async () => {
+  test("a phrase ranks its matching page ahead of single-term repetition", async () => {
     await setup();
     const hits = await searchSources(dir, "grapple check");
     expect(hits.length).toBeGreaterThan(0);
     expect(hits[0]!.doc.title).toBe("rules");
     expect(hits[0]!.page).toBe(2);
-  });
-
-  test("multi-term co-occurrence beats single-term repetition", async () => {
-    await setup();
-    const hits = await searchSources(dir, "grapple check");
-    const page2 = hits.find((h) => h.page === 2 && h.doc.title === "rules");
     const page1 = hits.find((h) => h.page === 1 && h.doc.title === "rules");
-    expect(page2).toBeDefined();
     expect(page1).toBeDefined();
-    expect(page2!.score).toBeGreaterThan(page1!.score);
+    expect(hits[0]!.score).toBeGreaterThan(page1!.score);
   });
 
   test("caps at 3 hits per document", async () => {

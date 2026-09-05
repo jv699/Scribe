@@ -39,13 +39,7 @@ describe("filterCompletions", () => {
     expect(filterCompletions(items, "session").map((i) => i.label)).toEqual(["@session-3"]);
   });
 
-  // The whole reason description is searched: "@bell" should find the session
-  // titled "The Bell Tower", whose label is just "@session-3".
-  test("matches the description, not only the label", () => {
-    expect(filterCompletions(items, "bell").map((i) => i.label)).toEqual(["@session-3"]);
-  });
-
-  test("is case-insensitive", () => {
+  test("matches descriptions case-insensitively", () => {
     expect(filterCompletions(items, "BELL").map((i) => i.label)).toEqual(["@session-3"]);
   });
 
@@ -61,30 +55,17 @@ describe("filterCompletions", () => {
 });
 
 describe("campaignCompletions", () => {
-  test("offers the two summary documents plus one item per session", async () => {
-    await createSession(campaign, "Death House");
+  test("offers summaries and sessions with status and plain-language insertions", async () => {
+    const session = await createSession(campaign, "Death House");
+    await setSessionStatus(session, "ready");
     const source = campaignCompletions(campaign, sourcesDir)[0]!;
 
     const all = await source.items("");
     expect(source.trigger).toBe("@");
     expect(all.map((i) => i.label)).toEqual(["@background", "@story-so-far", "@session-1"]);
-  });
-
-  test("inserts plain-language references the agent's tools can act on", async () => {
-    await createSession(campaign, "Death House");
-    const source = campaignCompletions(campaign, sourcesDir)[0]!;
-
-    const all = await source.items("");
     expect(all.find((i) => i.label === "@session-1")?.insert).toBe('session 1 ("Death House")');
     expect(all.find((i) => i.label === "@background")?.insert).toBe("the campaign background");
     expect(all.find((i) => i.label === "@story-so-far")?.insert).toBe("the campaign's story so far");
-  });
-
-  test("describes each session with its title and status", async () => {
-    const session = await createSession(campaign, "Death House");
-    await setSessionStatus(session, "ready");
-    const source = campaignCompletions(campaign, sourcesDir)[0]!;
-
     const [match] = await source.items("death");
     expect(match?.label).toBe("@session-1");
     expect(match?.description).toBe("Death House · ready");
