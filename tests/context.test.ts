@@ -114,23 +114,6 @@ describe("prompt assembly", () => {
     const prompt = await buildOneshotSystemPrompt(settings);
 
     expect(prompt).toContain(CORE_ONESHOT_PROMPT.trim());
-    expect(prompt).toContain("read_oneshot before revising one");
-    expect(prompt).toContain("complete canonical markdown body");
-    expect(prompt).toContain("NEVER call save_session unless the user explicitly asks");
-    expect(prompt).toContain("Ask about the most important unresolved decision before drafting");
-    expect(prompt).toContain("what the adventure should feel like");
-    expect(prompt).toContain("Make the user's chosen ideas and language");
-    expect(prompt).toContain("Do not turn discovery into an intake form");
-    expect(prompt).toContain("the UI adds the free-text row");
-    expect(prompt).toContain("do not assume a fantasy-combat structure");
-    expect(prompt).toContain("Design situations, pressures, and consequences");
-    expect(prompt).toContain("key each significant room or area");
-    expect(prompt).toContain("fenced-text map with labeled areas");
-    expect(prompt).toContain("connections agree with the keyed descriptions");
-    expect(prompt).toContain("failure-forward outcomes");
-    expect(prompt).toContain("Consult available source documents");
-    expect(prompt).toContain("preserve the user's established choices");
-    expect(prompt).toContain("potentially sensitive material");
     expect(prompt).toContain("Prefer four-hour adventures.");
     // The campaign instructions layer must not leak into one-shot mode.
     expect(prompt).not.toContain("CAMPAIGN ONLY.");

@@ -214,6 +214,7 @@ describe("provider client", () => {
     expect(await collect(provider)).toEqual(["Hel", "lo ", "world"]);
     expect(lastRequest?.model).toBe("gpt-test");
     expect(lastRequest?.messages).toEqual([{ role: "user", content: "hi" }]);
+    expect(lastRequest?.stream_options).toEqual({ include_usage: true });
     expect(seenAuth).toBe("Bearer test-key");
   });
 
@@ -329,13 +330,6 @@ describe("provider client", () => {
         pricing: { promptPerToken: 0.00000015, completionPerToken: 0.0000006 },
       },
     ]);
-  });
-
-  test("requests stream_options.include_usage on every streaming request", async () => {
-    const baseUrl = await startServer("stream");
-    const provider = createOpenAIProvider({ baseUrl, model: "m", apiKey: "k" });
-    await collect(provider);
-    expect(lastRequest?.stream_options).toEqual({ include_usage: true });
   });
 
   test("yields a usage event parsed from the final SSE chunk", async () => {

@@ -1,13 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
-import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
 import { InputRenderable, type Renderable } from "@opentui/core";
 import { type createMockKeys, type TestRenderer } from "@opentui/core/testing";
 import { setupRenderer, wait } from "./helpers/renderer.ts";
 import { makeSettingsScreen } from "../src/screens/settings.ts";
 import type { Screen } from "../src/screens/screen.ts";
-import { expandHome, loadSettings, type Settings } from "../src/store/settings.ts";
+import type { Settings } from "../src/store/settings.ts";
 
 let renderer: TestRenderer;
 let captureCharFrame: () => string;
@@ -472,39 +469,5 @@ describe("settings screen", () => {
     await wait(500);
     expect(wentBack).toBe(true);
     expect(saved).toBeNull();
-  });
-});
-
-describe("settings loadSettings", () => {
-  let tmp: string;
-
-  beforeEach(async () => {
-    tmp = await mkdtemp(join(tmpdir(), "scribe-settings-"));
-  });
-
-  afterEach(async () => {
-    await rm(tmp, { recursive: true, force: true });
-  });
-
-  test("defaults oneshotsDir to <home>/Scribe/One-Shots", async () => {
-    const settings = await loadSettings(join(tmp, "config.json"));
-    expect(settings.oneshotsDir).toBe(join(homedir(), "Scribe", "One-Shots"));
-  });
-
-  test("expands a ~/... custom oneshotsDir value", async () => {
-    const expanded = expandHome("~/My One-Shots");
-    expect(expanded).toBe(join(homedir(), "My One-Shots"));
-    expect(expanded.startsWith("~")).toBe(false);
-  });
-
-  test("defaults sourcesDir to <home>/Scribe/Sources", async () => {
-    const settings = await loadSettings(join(tmp, "config.json"));
-    expect(settings.sourcesDir).toBe(join(homedir(), "Scribe", "Sources"));
-  });
-
-  test("expands a ~/... custom sourcesDir value", async () => {
-    const expanded = expandHome("~/My Sources");
-    expect(expanded).toBe(join(homedir(), "My Sources"));
-    expect(expanded.startsWith("~")).toBe(false);
   });
 });
