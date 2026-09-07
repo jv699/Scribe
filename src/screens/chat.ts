@@ -17,6 +17,7 @@
  */
 import {
   BoxRenderable,
+  RenderableEvents,
   ScrollBoxRenderable,
   TextRenderable,
   type CliRenderer,
@@ -87,6 +88,15 @@ export interface ChatScreenOptions {
    * built in because they act on the chat itself.
    */
   completions?: CompletionSource[];
+  /**
+   * Whether this chat currently owns app-level keyboard input. Embedded chats
+   * use this while their surrounding navigation pane has focus. Defaults to
+   * true for the standalone Drafting Table screen.
+   */
+  isInputActive?: () => boolean;
+  /** Notify an embedding owner when the prompt takes focus (including by mouse). */
+  onInputFocus?: () => void;
+  /** Request navigation away from the chat. The owner remains responsible for disposal. */
   onBack: () => void;
 }
 
@@ -188,6 +198,9 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
 
   // Prompt panel (opencode-style): bordered textarea + hint footer.
   const prompt = makePrompt(renderer, { onSubmit: () => void send() });
+  if (options.onInputFocus) {
+    prompt.input.on(RenderableEvents.FOCUSED, options.onInputFocus);
+  }
   container.add(prompt.node);
 
   const messages: ChatMessage[] = [];
@@ -370,7 +383,6 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
   }
 
   function leave(): void {
-    dispose();
     options.onBack();
   }
 
@@ -541,6 +553,10 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
   }
 
   const onKeypress = (key: KeyEvent): void => {
+    // A mounted campaign chat remains alive while its sibling sidebar has
+    // focus. In that state the workspace, not this chat, owns global keys.
+    if (options.isInputActive && !options.isInputActive()) return;
+
     // The app-level handler stops Ctrl+C before it reaches the screen. Any key
     // that does arrive here cancels a pending double-press exit.
     if (interruptDeadline !== 0) disarmInterrupt();
@@ -572,8 +588,8 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
 
   let disposeRan = false;
   function dispose(): void {
-    // `/back` and Escape both route here, and index.ts disposes screens on
-    // navigation, so this can be reached twice for one departure.
+    // Owners may dispose on navigation and again while tearing down their
+    // render tree, so disposal remains idempotent.
     if (disposeRan) return;
     disposeRan = true;
     disposed = true;
@@ -597,7 +613,10 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
 
   return {
     node: container,
-    focus: () => prompt.input.focus(),
+    // Embedded campaign workspaces can refocus an already-active session.
+    // If ask_user owns the input area, restore that widget instead of focusing
+    // the normal prompt hidden underneath it.
+    focus: () => (askWidget ? askWidget.focus() : prompt.input.focus()),
     handleInterrupt,
     dispose,
     setTitle: (title) => {

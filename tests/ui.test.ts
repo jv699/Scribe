@@ -9,9 +9,12 @@ import { join } from "node:path";
 import { makeButton } from "../src/components/ui.ts";
 import { makeCampaignDialog } from "../src/components/campaign-dialog.ts";
 import { makeMainMenuScreen, type MainMenuView } from "../src/screens/main-menu.ts";
-import { makeCampaignHomeScreen } from "../src/screens/campaign-home.ts";
+import { makeCampaignWorkspaceScreen } from "../src/screens/campaign-workspace.ts";
+import { makeChatScreen } from "../src/screens/chat.ts";
 import type { Screen } from "../src/screens/screen.ts";
+import type { ChatProvider } from "../src/provider/types.ts";
 import { createCampaign, listCampaigns, loadCampaign, type Campaign } from "../src/store/campaigns.ts";
+import { createSession, setSessionStatus } from "../src/store/sessions.ts";
 
 /**
  * End-to-end UI flow test — must live inside the project so @opentui/core
@@ -45,7 +48,7 @@ async function showMainMenu(initialView: MainMenuView = "root"): Promise<void> {
       initialView,
       playIntro: false,
       onCreateCampaign: () => campaignDialog.open(),
-      onSelectCampaign: (c) => void showCampaignHome(c),
+      onSelectCampaign: (c) => void showCampaignWorkspace(c),
       onSettings: () => {},
       onOneshotPlanner: () => {},
       onQuit: () => {},
@@ -53,15 +56,26 @@ async function showMainMenu(initialView: MainMenuView = "root"): Promise<void> {
   );
 }
 
-async function showCampaignHome(campaign: Campaign): Promise<void> {
+const provider: ChatProvider = {
+  async *streamChat() {
+    yield { type: "text", delta: "Ready to plan." };
+  },
+};
+
+async function showCampaignWorkspace(campaign: Campaign): Promise<void> {
   const fresh = (await loadCampaign(campaign.dir)) ?? campaign;
   showScreen(
-    await makeCampaignHomeScreen(renderer, {
+    await makeCampaignWorkspaceScreen(renderer, {
       campaign: fresh,
       onBack: () => void showMainMenu("campaigns"),
-      onChanged: () => void showCampaignHome(fresh),
-      onPlan: () => {},
-      onReport: () => {},
+      makeSessionChat: (session, host) =>
+        makeChatScreen(renderer, {
+          provider,
+          title: `Session ${String(session.number).padStart(3, "0")} — ${session.title}`,
+          isInputActive: host.isInputActive,
+          onInputFocus: host.onInputFocus,
+          onBack: host.onBack,
+        }),
     }),
   );
 }
@@ -78,7 +92,7 @@ beforeEach(async () => {
     onSubmit: (input) => {
       void (async () => {
         const campaign = await createCampaign(campaignsDir, input);
-        await showCampaignHome(campaign);
+        await showCampaignWorkspace(campaign);
       })();
     },
     onCancel: () => currentScreen?.focus?.(),
@@ -94,10 +108,10 @@ afterEach(async () => {
   await rm(campaignsDir, { recursive: true, force: true });
 });
 
-describe("phase-0 ui flow", () => {
-  test("create campaign -> plan session -> status transitions -> trash -> persistence", async () => {
-    // Campaign UI remains exercised directly while its release-menu entry is disabled.
-    await showMainMenu("campaigns");
+describe("campaign workspace flow", () => {
+  test("create campaign -> create session -> chat -> sidebar -> persistence", async () => {
+    // Campaigns is the initially selected, live main-menu destination.
+    keys.pressEnter();
     await renderOnce();
     let frame = captureCharFrame();
     expect(frame.includes("Back") && frame.includes("Create Campaign")).toBe(true);
@@ -118,9 +132,9 @@ describe("phase-0 ui flow", () => {
 
     frame = captureCharFrame();
     expect(frame.includes("Curse of Strahd")).toBe(true);
-    expect(frame.includes("System: D&D 5e")).toBe(true);
-    expect(frame.includes("Gothic horror.")).toBe(true);
-    expect(frame.includes("(nothing yet)")).toBe(true);
+    expect(frame.includes("D&D 5e")).toBe(true);
+    expect(frame.includes("No sessions yet")).toBe(true);
+    expect(frame.includes("Settings (coming soon)")).toBe(true);
 
     const onDisk = await listCampaigns(campaignsDir);
     expect(onDisk.length).toBe(1);
@@ -134,32 +148,22 @@ describe("phase-0 ui flow", () => {
     keys.pressEnter();
     await wait();
     await renderOnce();
-    expect(captureCharFrame().includes("001 — Death House [planning]")).toBe(true);
+    frame = captureCharFrame();
+    expect(frame.includes("001 Death House [planning]")).toBe(true);
+    expect(frame.includes("Session 001 — Death House")).toBe(true);
+    expect(frame.includes("Mark Ready")).toBe(false);
+    expect(frame.includes("Report outcome")).toBe(false);
+    expect(frame.includes("Move to Trash")).toBe(false);
 
-    // mark ready via the detail dialog (first button is now "Plan with Agent")
-    keys.pressEnter();
-    await wait(100);
-    await keys.pressKeys(["TAB"], 20); // Plan with Agent -> Mark Ready
-    keys.pressEnter();
-    await wait();
-    await renderOnce();
-    expect(captureCharFrame().includes("001 — Death House [ready]")).toBe(true);
-
-    // trash it (ready: buttons = [Report outcome, Mark Played, Move to Trash, Close]),
-    // then confirm the trash dialog
-    keys.pressEnter();
-    await wait(100);
-    await keys.pressKeys(["TAB", "TAB"], 20);
-    keys.pressEnter(); // -> confirm dialog, "Trash" focused
-    await wait(100);
-    keys.pressEnter(); // confirm
-    await wait();
-    await renderOnce();
-    expect(captureCharFrame().includes("Death House")).toBe(false);
-
-    // escape back to the campaign submenu — campaign is listed
+    // First Escape moves from chat to the sidebar; the workspace remains.
     keys.pressKey("ESCAPE");
-    await wait(500);
+    await wait(100);
+    await renderOnce();
+    expect(captureCharFrame().includes("Session 001 — Death House")).toBe(true);
+
+    // A second Escape returns to the campaign submenu.
+    keys.pressKey("ESCAPE");
+    await wait(300);
     await renderOnce();
     frame = captureCharFrame();
     expect(frame.includes("Create Campaign")).toBe(true);
@@ -172,11 +176,120 @@ describe("phase-0 ui flow", () => {
     await renderOnce();
     frame = captureCharFrame();
     expect(frame.includes("Curse of Strahd")).toBe(true);
-    expect(frame.includes("System: D&D 5e")).toBe(true);
+    expect(frame.includes("D&D 5e")).toBe(true);
+    expect(frame.includes("Session 001 — Death House")).toBe(true);
   }, 15000);
+
+  test("opens the newest session and keeps legacy statuses display-only", async () => {
+    const campaign = await createCampaign(campaignsDir, {
+      name: "Long Road",
+      system: "Shadowdark",
+      description: "",
+    });
+    const first = await createSession(campaign, "The Gate");
+    const second = await createSession(campaign, "The Keep");
+    await setSessionStatus(first, "ready");
+    await setSessionStatus(second, "played");
+
+    const opened: number[] = [];
+    const fresh = (await loadCampaign(campaign.dir)) ?? campaign;
+    showScreen(
+      await makeCampaignWorkspaceScreen(renderer, {
+        campaign: fresh,
+        onBack: () => {},
+        makeSessionChat: async (session, host) => {
+          opened.push(session.number);
+          return makeChatScreen(renderer, {
+            provider,
+            title: `Session ${String(session.number).padStart(3, "0")} — ${session.title}`,
+            chatLog: {
+              load: async () => [{ role: "assistant", content: `History for ${session.title}` }],
+              save: async () => {},
+            },
+            isInputActive: host.isInputActive,
+            onInputFocus: host.onInputFocus,
+            onBack: host.onBack,
+          });
+        },
+      }),
+    );
+    await renderOnce();
+
+    let frame = captureCharFrame();
+    expect(opened).toEqual([2]);
+    expect(frame).toContain("001 The Gate [ready]");
+    expect(frame).toContain("002 The Keep [played]");
+    expect(frame).toContain("Session 002 — The Keep");
+    expect(frame).toContain("History for The Keep");
+    expect(frame).not.toContain("Report outcome");
+
+    // Escape hands control to the selected sidebar row; choose the prior one.
+    keys.pressKey("ESCAPE");
+    await wait(30);
+    await keys.pressKeys(["ARROW_UP"], 20);
+    keys.pressEnter();
+    await wait(100);
+    await renderOnce();
+    frame = captureCharFrame();
+    expect(opened).toEqual([2, 1]);
+    expect(frame).toContain("Session 001 — The Gate");
+    expect(frame).toContain("History for The Gate");
+  });
+
+  test("a slower session load cannot replace a newer selection", async () => {
+    const campaign = await createCampaign(campaignsDir, {
+      name: "Crossroads",
+      system: "5e",
+      description: "",
+    });
+    await createSession(campaign, "Slow Road");
+    await createSession(campaign, "Fast Road");
+    const disposedSessions: number[] = [];
+    let fastLoads = 0;
+
+    showScreen(
+      await makeCampaignWorkspaceScreen(renderer, {
+        campaign,
+        onBack: () => {},
+        makeSessionChat: async (session, host) => {
+          if (session.number === 1) await wait(120);
+          if (session.number === 2 && fastLoads++ > 0) await wait(10);
+          const chat = await makeChatScreen(renderer, {
+            provider,
+            title: `Session ${String(session.number).padStart(3, "0")} — ${session.title}`,
+            isInputActive: host.isInputActive,
+            onInputFocus: host.onInputFocus,
+            onBack: host.onBack,
+          });
+          const dispose = chat.dispose;
+          chat.dispose = () => {
+            disposedSessions.push(session.number);
+            dispose?.();
+          };
+          return chat;
+        },
+      }),
+    );
+
+    // Start loading session 1, then select session 2 before the first load
+    // resolves. Session 1's eventual chat must be discarded as stale.
+    keys.pressKey("ESCAPE");
+    await wait(30);
+    await keys.pressKeys(["ARROW_UP"], 10);
+    keys.pressEnter();
+    await keys.pressKeys(["ARROW_DOWN"], 10);
+    keys.pressEnter();
+    await wait(180);
+    await renderOnce();
+
+    const frame = captureCharFrame();
+    expect(frame).toContain("Session 002 — Fast Road");
+    expect(frame).not.toContain("Session 001 — Slow Road");
+    expect(disposedSessions).toContain(1);
+  });
 });
 
-describe("campaign home failures", () => {
+describe("campaign workspace failures", () => {
   test("a failed session creation returns focus to the session menu", async () => {
     const campaign = await createCampaign(campaignsDir, {
       name: "Broken Campaign",
@@ -184,7 +297,7 @@ describe("campaign home failures", () => {
       description: "",
     });
     await rm(join(campaign.dir, "sessions"), { recursive: true });
-    await showCampaignHome(campaign);
+    await showCampaignWorkspace(campaign);
 
     keys.pressEnter(); // + New Session
     await wait(60);
@@ -192,7 +305,7 @@ describe("campaign home failures", () => {
     keys.pressEnter();
     await wait(100);
     await renderOnce();
-    expect(captureCharFrame()).toContain("Failed to create session");
+    expect(captureCharFrame()).toContain("Failed to create:");
 
     // Enter should operate the menu again, reopening the form. Previously the
     // hidden title input kept focus and swallowed it.
@@ -240,7 +353,7 @@ describe("select mouse support", () => {
     expect(quits).toBe(1);
   });
 
-  test("the coming-soon campaign entry is inert for keyboard and mouse", async () => {
+  test("the Campaigns entry opens the campaign list with keyboard and mouse", async () => {
     let creates = 0;
     showScreen(
       makeMainMenuScreen(renderer, {
@@ -259,11 +372,15 @@ describe("select mouse support", () => {
     const campaigns = locate("Campaigns");
     await mouse.click(campaigns.x, campaigns.y);
     await renderOnce();
-    expect(captureCharFrame().includes("Create Campaign")).toBe(false);
+    expect(captureCharFrame().includes("Create Campaign")).toBe(true);
 
+    // Return to the root, then Enter on the initially selected Campaigns row.
     keys.pressEnter();
     await renderOnce();
-    expect(captureCharFrame().includes("Create Campaign")).toBe(false);
+    expect(captureCharFrame().includes("Drafting Table")).toBe(true);
+    keys.pressEnter();
+    await renderOnce();
+    expect(captureCharFrame().includes("Create Campaign")).toBe(true);
     expect(creates).toBe(0);
   });
 
@@ -302,11 +419,11 @@ describe("two-stage main menu", () => {
   test("Back and Escape both return the campaign stage to the root", async () => {
     await renderOnce();
     const rootLines = captureCharFrame().split("\n");
-    const rootOrder = ["Campaigns (Coming Soon)", "Drafting Table", "Settings", "Quit"].map((label) =>
+    const rootOrder = ["Campaigns", "Drafting Table", "Settings", "Quit"].map((label) =>
       rootLines.findIndex((line) => line.includes(label)),
     );
     expect(rootOrder.every((row, index) => index === 0 || row > rootOrder[index - 1]!)).toBe(true);
-    expect(rootLines.find((line) => line.includes("Drafting Table"))).toContain("▶ Drafting Table");
+    expect(rootLines.find((line) => line.includes("Campaigns"))).toContain("▶ Campaigns");
 
     await showMainMenu("campaigns");
     await renderOnce();

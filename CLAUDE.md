@@ -49,7 +49,7 @@ There is no lint, formatter, or CI configured.
 ## Architecture overview
 
 - **`src/index.ts`** — entry point + screen manager. One `Screen` at a time under the renderer root (dispose → remove → destroy → add).
-- **`src/screens/`** — `main-menu.ts`, `campaign-home.ts`, `chat.ts` (the shared planning/report harness screen), `settings.ts`.
+- **`src/screens/`** — `main-menu.ts`, `campaign-workspace.ts` (two-pane sessions + embedded chat), `chat.ts` (the shared harness), `settings.ts`.
 - **`src/components/`** — reusable OpenTUI widgets: generic dialogs (`dialog.ts`, `action-dialog.ts`), form dialogs (`campaign-dialog.ts`, `session-dialog.ts`), the chat `prompt.ts`, the `ask_user` question widget (`ask-widget.ts`), the `/`-command and `@`-mention completion popup (`autocomplete.ts`).
 - **`src/agent/`** — the harness core:
   - `loop.ts` — `runAgent`, the tool-call loop (stream → execute tools → feed back → repeat).

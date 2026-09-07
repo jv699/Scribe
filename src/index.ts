@@ -7,7 +7,7 @@ import { createCliRenderer, type KeyEvent } from "@opentui/core";
 import { theme } from "./theme.ts";
 import { makeCampaignDialog } from "./components/campaign-dialog.ts";
 import { makeMainMenuScreen, type MainMenuView } from "./screens/main-menu.ts";
-import { makeCampaignHomeScreen } from "./screens/campaign-home.ts";
+import { makeCampaignWorkspaceScreen, type SessionChatHost } from "./screens/campaign-workspace.ts";
 import { makeSettingsScreen } from "./screens/settings.ts";
 import { makeChatScreen, type ChatLogStore } from "./screens/chat.ts";
 import type { Screen } from "./screens/screen.ts";
@@ -18,9 +18,9 @@ import type { ChatProvider, ModelInfo } from "./provider/types.ts";
 import { toolsFor } from "./agent/agents.ts";
 import type { ActiveOneshot } from "./agent/tools/types.ts";
 import { makeAskChannel } from "./agent/ask.ts";
-import { buildOneshotSystemPrompt, buildPlanningSystemPrompt, buildReportSystemPrompt } from "./agent/context.ts";
+import { buildOneshotSystemPrompt, buildPlanningSystemPrompt } from "./agent/context.ts";
 import type { Session } from "./store/sessions.ts";
-import { loadChatLog, saveChatLog, type ChatLogMode } from "./store/chat-log.ts";
+import { loadChatLog, saveChatLog } from "./store/chat-log.ts";
 import { indexSources } from "./store/sources.ts";
 import { campaignCompletions, oneshotCompletions } from "./completions.ts";
 
@@ -103,7 +103,7 @@ async function showMainMenu(initialView: MainMenuView = "root"): Promise<void> {
       error,
       playIntro: !introPlayed,
       onCreateCampaign: () => campaignDialog.open(),
-      onSelectCampaign: (campaign) => navigate(() => showCampaignHome(campaign)),
+      onSelectCampaign: (campaign) => navigate(() => showCampaignWorkspace(campaign)),
       onSettings: () => navigate(showSettingsScreen),
       onOneshotPlanner: () => navigate(showOneshotPlanner),
       onQuit: quitApp,
@@ -176,66 +176,53 @@ async function showOneshotPlanner(): Promise<void> {
   showScreen(screen);
 }
 
-async function showCampaignHome(campaign: Campaign): Promise<void> {
+async function showCampaignWorkspace(campaign: Campaign): Promise<void> {
   // Re-read from disk so external edits (and our own changes) are reflected.
   const fresh = (await loadCampaign(campaign.dir)) ?? campaign;
   showScreen(
-    await makeCampaignHomeScreen(renderer, {
+    await makeCampaignWorkspaceScreen(renderer, {
       campaign: fresh,
       onBack: () => navigate(() => showMainMenu("campaigns")),
-      onChanged: () => navigate(() => showCampaignHome(fresh)),
-      onPlan: (session) => navigate(() => showPlanningChat(fresh, session)),
-      onReport: (session) => navigate(() => showReportChat(fresh, session)),
+      makeSessionChat: (session, host) => makeCampaignSessionChat(fresh, session, host),
     }),
   );
 }
 
-async function showPlanningChat(campaign: Campaign, session: Session): Promise<void> {
-  const systemPrompt = await buildPlanningSystemPrompt(campaign, session, settings);
+async function makeCampaignSessionChat(
+  campaign: Campaign,
+  session: Session,
+  host: SessionChatHost,
+): Promise<Awaited<ReturnType<typeof makeChatScreen>>> {
+  // Refresh campaign context whenever the user changes sessions so edits made
+  // by the previous chat are represented in the next one's system prompt.
+  const fresh = (await loadCampaign(campaign.dir)) ?? campaign;
+  const systemPrompt = await buildPlanningSystemPrompt(fresh, session, settings);
   const ask = makeAskChannel();
   const tools = toolsFor("planning", {
-    campaign,
+    campaign: fresh,
     session,
     ask,
     sourcesDir: settings.sourcesDir,
-    defaultSystem: campaign.system,
+    defaultSystem: fresh.system,
   });
-  showScreen(
-    await makeChatScreen(renderer, {
-      ...makeChatOptions(),
-      title: `Plan Session ${session.number} — ${session.title}`,
-      systemPrompt,
-      tools,
-      chatLog: makeChatLog(campaign, session, "plan"),
-      ask,
-      completions: campaignCompletions(campaign, settings.sourcesDir),
-      onBack: () => navigate(() => showCampaignHome(campaign)),
-    }),
-  );
+  return makeChatScreen(renderer, {
+    ...makeChatOptions(),
+    title: `Session ${String(session.number).padStart(3, "0")} — ${session.title}`,
+    systemPrompt,
+    tools,
+    chatLog: makeChatLog(fresh, session),
+    ask,
+    completions: campaignCompletions(fresh, settings.sourcesDir),
+    isInputActive: host.isInputActive,
+    onInputFocus: host.onInputFocus,
+    onBack: host.onBack,
+  });
 }
 
-async function showReportChat(campaign: Campaign, session: Session): Promise<void> {
-  const systemPrompt = await buildReportSystemPrompt(campaign, session, settings);
-  const ask = makeAskChannel();
-  const tools = toolsFor("report", { campaign, session, ask });
-  showScreen(
-    await makeChatScreen(renderer, {
-      ...makeChatOptions(),
-      title: `Report Session ${session.number} — ${session.title}`,
-      systemPrompt,
-      tools,
-      chatLog: makeChatLog(campaign, session, "report"),
-      ask,
-      completions: campaignCompletions(campaign, settings.sourcesDir),
-      onBack: () => navigate(() => showCampaignHome(campaign)),
-    }),
-  );
-}
-
-function makeChatLog(campaign: Campaign, session: Session, mode: ChatLogMode): ChatLogStore {
+function makeChatLog(campaign: Campaign, session: Session): ChatLogStore {
   return {
-    load: () => loadChatLog(campaign.dir, session.number, mode),
-    save: (messages) => saveChatLog(campaign.dir, session.number, mode, messages),
+    load: () => loadChatLog(campaign.dir, session.number, "plan"),
+    save: (messages) => saveChatLog(campaign.dir, session.number, "plan", messages),
   };
 }
 
@@ -243,7 +230,7 @@ const campaignDialog = makeCampaignDialog(renderer, {
   onSubmit: (input) => {
     navigate(async () => {
       const campaign = await createCampaign(settings.campaignsDir, input);
-      await showCampaignHome(campaign);
+      await showCampaignWorkspace(campaign);
     });
   },
   onCancel: () => currentScreen?.focus?.(),
