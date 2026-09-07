@@ -138,9 +138,9 @@ the chat transcript renders streamed markdown directly.
 
 ```
 Main menu          → app destinations; nested campaign list/create (exists)
-Campaign home      → system, story-so-far peek, session list w/ statuses,
-                     actions: "Plan next session" / "Report outcome" / open folder
-Chat screen        → shared by planning & report modes (different prompt/tools);
+Campaign workspace → two panes: session/status sidebar + persistent session chat;
+                     new-session form; Settings placeholder pinned at the bottom
+Chat screen        → shared harness embedded by campaign mode and used full-screen elsewhere;
                      agent questions replace the prompt box until answered;
                      `/` commands and `@` mentions complete in a popup above it
 Settings           → provider, model (inline provider-backed suggestions), key env var,
@@ -163,6 +163,11 @@ Each phase leaves the app runnable.
 
 Roadmap complete through phase 6. Remaining ideas are in **Deferred / future
 ideas** below.
+
+Campaign workflow note: the current workspace intentionally exposes one planning-capable
+chat for every session. Reporting, status-transition, trash, and archive controls are
+temporarily absent while their replacement workflow is redesigned; the underlying store
+and agent capabilities remain available for that future work.
 
 Phase 0 is a useful campaign organizer with zero AI risk and is fully testable
 headlessly (`createTestRenderer` + temp dirs). Phases 2–3 are thin once 0–1

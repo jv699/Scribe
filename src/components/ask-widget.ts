@@ -297,6 +297,14 @@ export function makeAskWidget(ctx: RenderContext, options: AskWidgetOptions): As
   return {
     node,
     focus: () => {
+      // An embedding owner may restore focus while this question is already
+      // being answered (for example, reselecting its active session). Keep
+      // typing in the visible editor rather than letting a hidden prompt take
+      // focus behind the widget.
+      if (editing) {
+        editor.focus();
+        return;
+      }
       // In list mode nothing needs focus — keys arrive via handleKey. Focus is
       // only meaningful once the editor is open, which happens if the question
       // has no options at all to choose from.

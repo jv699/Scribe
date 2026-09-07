@@ -199,9 +199,16 @@ describe("chat screen", () => {
     await wait(60); // still mid-turn
 
     keys.pressKey("ESCAPE");
-    await wait(600); // long enough for the turn to finish after we're gone
+    await wait(30);
     expect(wentBack).toBe(true);
-    current = null; // the escape handler already disposed it
+    // Navigation owners dispose after handling the request; the chat no
+    // longer destroys itself because campaign chats can stay mounted while
+    // their sibling sidebar has focus.
+    current.dispose?.();
+    renderer.root.remove(current.node);
+    current.node.destroyRecursively();
+    current = null;
+    await wait(600); // long enough for the turn to finish after we're gone
   });
 
   test("streaming mode without tools prepends the system prompt", async () => {
@@ -671,6 +678,24 @@ describe("chat screen", () => {
       expect(frame.includes("Locked in.")).toBe(true);
     });
 
+    test("refocusing the chat preserves an in-progress custom answer", async () => {
+      await ask(ONE_OF_TWO);
+      keys.pressKey("3");
+      await renderOnce();
+
+      // Campaign workspace reselection calls ChatScreen.focus(). The visible
+      // ask editor, not the hidden normal prompt, must retain keyboard focus.
+      current?.focus?.();
+      await keys.typeText("A masked envoy", 3);
+      keys.pressEnter();
+      await wait();
+      await renderOnce();
+
+      const frame = captureCharFrame();
+      expect(frame).toContain("→ A masked envoy");
+      expect(frame).toContain("Locked in.");
+    });
+
     test("a typed answer can be combined with picked options", async () => {
       await ask(
         JSON.stringify({
@@ -1070,7 +1095,6 @@ describe("chat screen", () => {
         keys.pressEnter();
         await wait(200);
         expect(wentBack).toBe(true);
-        current = null; // the command disposed it
       });
 
       test("/clear asks first, and clearing empties the transcript and the log", async () => {
