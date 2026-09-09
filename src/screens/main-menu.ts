@@ -30,6 +30,12 @@ export interface MainMenuOptions {
   error?: string | undefined;
 }
 
+enum MenuOptionValues {
+  BACK,
+  CREATE,
+  SHOW_CAMPAIGN,
+}
+
 export function makeMainMenuScreen(renderer: CliRenderer, options: MainMenuOptions): Screen {
   const rootOptions: SelectOption[] = [
     { name: "Campaigns", description: "" },
@@ -38,9 +44,9 @@ export function makeMainMenuScreen(renderer: CliRenderer, options: MainMenuOptio
     { name: "Quit", description: "" },
   ];
   const campaignOptions: SelectOption[] = [
-    { name: "Back", description: "" },
-    { name: "Create Campaign", description: "" },
-    ...options.campaigns.map((c) => ({ name: c.name, description: c.system })),
+    ...options.campaigns.map((c) => ({ name: c.name, description: c.system, value: MenuOptionValues.SHOW_CAMPAIGN })),
+    { name: "Create Campaign", description: "", value: MenuOptionValues.CREATE },
+    { name: "← Back", description: "", value: MenuOptionValues.BACK },
   ];
   let view: MainMenuView = options.initialView ?? "root";
   const initialOptions = view === "campaigns" ? campaignOptions : rootOptions;
