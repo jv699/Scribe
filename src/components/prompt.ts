@@ -1,36 +1,20 @@
-/**
- * Prompt widget (opencode-style): an accent-bordered panel holding a multi-line
- * textarea (Enter sends, Shift+Enter adds a line) and a hint footer. Self-
- * contained like the dialog widgets; the caller owns submission and
- * textarea state.
- */
 import { BoxRenderable, TextRenderable, TextareaRenderable, type RenderContext } from "@opentui/core";
 import { theme } from "../theme.ts";
 import { makeAccentPanel } from "./ui.ts";
 
 export interface PromptOptions {
-  /** Shown in the textarea while it is empty. Defaults to "Type a message…". */
   placeholder?: string;
-  /** Footer hint text. Defaults to the send/newline/exit hint. */
   hint?: string;
-  /** Called when the user submits (Enter). */
   onSubmit: () => void;
 }
 
 export interface Prompt {
-  /** Add this to a column layout. Sizes to content and never shrinks. */
   node: BoxRenderable;
-  /** The textarea, so the caller can read, clear, and focus it. */
   input: TextareaRenderable;
-  /** Replace the footer hint; omit the value to restore the initial hint. */
+  /** Omitting `hint` restores the initial value. */
   setHint(hint?: string): void;
 }
 
-/**
- * A bordered prompt panel with a growing textarea and a hint footer, built on
- * `makeAccentPanel`. Its outer box never shrinks so a flex-grow sibling (e.g.
- * a transcript scrollbox) can't squeeze the footer out.
- */
 export function makePrompt(ctx: RenderContext, options: PromptOptions): Prompt {
   const { node: promptBox, panel } = makeAccentPanel(ctx);
   const initialHint = options.hint ?? "Enter to send · Shift+Enter for a new line · Esc to exit";

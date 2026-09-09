@@ -1,7 +1,3 @@
-/**
- * "New Session" form dialog: a single title field with Create/Cancel
- * buttons. Wraps `dialog.ts` and manages its own focus chain.
- */
 import {
   BoxRenderable,
   InputRenderable,
@@ -20,10 +16,8 @@ export interface SessionDialogOptions {
 }
 
 export interface SessionDialog {
-  /** Add to the root (once) before use. */
   layer: BoxRenderable;
   open(nextSessionNumber: number): void;
-  /** Hide and release the keyboard. Safe to call when already closed. */
   close(): void;
 }
 
@@ -86,7 +80,6 @@ export function makeSessionDialog(renderer: CliRenderer, options: SessionDialogO
     titleInput.focus();
   }
 
-  // Enter in the title field submits the dialog directly.
   titleInput.on(InputRenderableEvents.ENTER, () => submit());
 
   return { layer: dialog.layer, open, close: dialog.close };

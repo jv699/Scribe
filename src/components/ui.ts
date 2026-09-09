@@ -1,11 +1,3 @@
-/**
- * Shared UI primitives: `makeAccentPanel` — the accent-strip surface used by
- * the prompt box and user chat messages — `makeButton` — flat, borderless
- * buttons colored from the app theme, with hover/focus highlight and click +
- * Enter support — `enableSelectMouse` — hover/click/scroll support for
- * `SelectRenderable` menus — and `tabWalk` — Tab / Shift+Tab focus traversal
- * along a chain of renderables.
- */
 import {
   BoxRenderable,
   RenderableEvents,
@@ -19,24 +11,16 @@ import {
 import { theme } from "../theme.ts";
 
 export interface AccentPanelOptions {
-  /** Vertical spacing above the panel. Defaults to 1. */
   marginTop?: number;
-  /** Padding inside the surface. Defaults to { left: 2, right: 2, top: 1, bottom: 1 }. */
   padding?: { top?: number; right?: number; bottom?: number; left?: number };
 }
 
 export interface AccentPanel {
-  /** Accent-bordered outer box — add this to a column layout. */
   node: BoxRenderable;
-  /** Inner padded surface — add content here. */
+  /** Add panel content here. */
   panel: BoxRenderable;
 }
 
-/**
- * The accent-strip panel that gives the prompt box its look: a burnt-orange
- * line down the left edge over a raised surface. Extracted so user chat
- * messages (and anything else) can share the same treatment.
- */
 export function makeAccentPanel(ctx: RenderContext, options: AccentPanelOptions = {}): AccentPanel {
   const node = new BoxRenderable(ctx, {
     width: "100%",
@@ -120,28 +104,15 @@ export function makeButton(ctx: RenderContext, options: ButtonOptions): BoxRende
   return button;
 }
 
-/**
- * `SelectRenderable` draws its rows into one frame buffer rather than as child
- * renderables, so there is nothing per-row to attach a click handler to. These
- * are the layout fields it uses to place rows; we read them back to map a
- * mouse y-coordinate to an option index.
- */
+// Select rows share one frame buffer; these internal fields enable mouse hit-testing.
 interface SelectRowLayout {
-  /** Index of the first visible option. */
   scrollOffset: number;
-  /** Terminal rows each option occupies (name + description + itemSpacing). */
   linesPerItem: number;
 }
 
-/**
- * Make a `SelectRenderable`'s rows mouse-driven: hover highlights an option,
- * click selects it (same as Enter), and the wheel moves the selection. Keyboard
- * behaviour is untouched, so this is purely additive.
- */
 export function enableSelectMouse(select: SelectRenderable, isEnabled: () => boolean = () => true): void {
   const layout = select as unknown as SelectRowLayout;
 
-  /** The option under an absolute terminal y, or null if the row is empty. */
   function optionAt(y: number): number | null {
     if (!isEnabled()) return null;
     const row = y - select.y;
@@ -157,8 +128,7 @@ export function enableSelectMouse(select: SelectRenderable, isEnabled: () => boo
   select.onMouseDown = (event) => {
     const index = optionAt(event.y);
     if (index === null) return;
-    // Click implies intent to drive this list — take focus so the arrow keys
-    // keep working afterwards (dialogs and prompts may hold focus otherwise).
+    // Keep subsequent arrow keys on the clicked list.
     select.focus();
     select.setSelectedIndex(index);
     select.selectCurrent();
@@ -170,10 +140,6 @@ export function enableSelectMouse(select: SelectRenderable, isEnabled: () => boo
   };
 }
 
-/**
- * Walk focus along a chain of renderables for Tab / Shift+Tab. Returns true
- * if the key was a handled Tab (so callers can return early).
- */
 export function tabWalk(renderer: CliRenderer, focusChain: readonly Renderable[], key: KeyEvent): boolean {
   if (key.name !== "tab" || focusChain.length === 0) return false;
   key.preventDefault();

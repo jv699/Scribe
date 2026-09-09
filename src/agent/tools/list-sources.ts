@@ -1,9 +1,3 @@
-/**
- * Lists the user's PDF source documents (rulebooks, bestiaries, adventures),
- * grouped by system. Granted to `planning` and `oneshot` so the agent knows
- * what reference material exists to consult via `search_sources` instead of
- * guessing at system-specific rules.
- */
 import { indexSources, listSources } from "../../store/sources.ts";
 import { stringArg } from "./shared.ts";
 import type { ToolSpec } from "./types.ts";

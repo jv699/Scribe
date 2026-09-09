@@ -1,9 +1,3 @@
-/**
- * Markdown-first persistence for saved one-shot plans: one file per plan in a
- * configurable `oneshotsDir` (`<slug>.md`) with flat frontmatter (title,
- * system, created) and the plan markdown as the body. Colliding names get a
- * numeric suffix.
- */
 import { constants } from "node:fs";
 import { join } from "node:path";
 import { mkdir, readdir, type FileHandle } from "node:fs/promises";
@@ -17,21 +11,16 @@ export interface OneshotInput {
   content: string;
 }
 
-/** A saved one-shot discovered directly inside the configured directory. */
 export interface SavedOneshot {
   /** File name without `.md`; the stable identity exposed to the agent. */
   slug: string;
-  /** Human-readable name derived from the file name for the Drafting Table. */
   displayName: string;
   /** Absolute runtime path, resolved by the store rather than model input. */
   path: string;
-  /** Flat frontmatter exactly as it appeared in the document. */
   data: Record<string, string>;
-  /** Markdown body without frontmatter. */
   body: string;
 }
 
-/** Turn `lighthouse-siege-2.md` into `Lighthouse Siege 2`. */
 export function unslugOneshot(fileName: string): string {
   const words = fileName
     .replace(/\.md$/i, "")
@@ -41,7 +30,6 @@ export function unslugOneshot(fileName: string): string {
   return words.replace(/(^|\s)\S/g, (match) => match.toUpperCase());
 }
 
-/** List readable regular `.md` files directly inside `dir`, sorted for display. */
 export async function listOneshots(dir: string): Promise<SavedOneshot[]> {
   let entries;
   try {
@@ -56,8 +44,7 @@ export async function listOneshots(dir: string): Promise<SavedOneshot[]> {
     const path = join(dir, entry.name);
 
     try {
-      // Dirent metadata can be stale by the time the entry is opened. The
-      // shared reader refuses a replacement symlink or non-regular target.
+      // Revalidate the entry when opening because Dirent metadata can be stale.
       const { data, body } = parseFrontmatter(await readRegularFileNoFollow(path));
       oneshots.push({
         slug: entry.name.slice(0, -3),
@@ -67,7 +54,7 @@ export async function listOneshots(dir: string): Promise<SavedOneshot[]> {
         body,
       });
     } catch {
-      // One unreadable document should not hide the rest of the drafting table.
+      // Keep readable documents when one entry fails.
     }
   }
   return oneshots.sort((a, b) => a.displayName.localeCompare(b.displayName) || a.slug.localeCompare(b.slug));
@@ -87,13 +74,11 @@ export async function findOneshot(dir: string, identity: string): Promise<SavedO
   return displayMatches.length === 1 ? displayMatches[0]! : null;
 }
 
-/** Replace the markdown body of a discovered one-shot, preserving frontmatter. */
 export async function writeOneshot(saved: SavedOneshot, body: string): Promise<SavedOneshot> {
   const next = await updateFrontmatterFile(saved.path, (data) => ({ data, body }));
   return { ...saved, data: next.data, body: next.body };
 }
 
-/** Write a one-shot plan to `dir`, returning the absolute path written. */
 export async function saveOneshot(dir: string, input: OneshotInput): Promise<string> {
   await mkdir(dir, { recursive: true });
 
@@ -105,8 +90,7 @@ export async function saveOneshot(dir: string, input: OneshotInput): Promise<str
   if (input.system) data["system"] = input.system;
   const content = serializeFrontmatter(data, input.content);
 
-  // Exclusive creation makes collision handling atomic across Scribe instances
-  // and refuses to overwrite a symlink installed at a candidate path.
+  // Exclusive creation handles concurrent saves and refuses symlink targets.
   for (let suffix = 1; ; suffix++) {
     const fileName = suffix === 1 ? `${slug}.md` : `${slug}-${suffix}.md`;
     const path = join(dir, fileName);

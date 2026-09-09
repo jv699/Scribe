@@ -1,23 +1,6 @@
 /**
- * The prompt-anchored completion popup: a list that opens off the top edge of
- * the chat box when the user types a trigger character (`@`, `/`).
- *
- * Anchoring is the whole trick, and it is simpler here than it looks. The popup
- * is an **absolutely positioned child of the prompt box** with `bottom: "100%"`,
- * which puts its bottom edge exactly on the prompt's top edge. Nothing measures
- * anything: the popup re-anchors on its own when the prompt grows a line or the
- * popup itself changes height, and because it is out of flow it overlays the
- * transcript instead of squeezing it (so the conversation doesn't jump around
- * while you type). opencode's equivalent polls its anchor's position every 50ms
- * to compute `top = anchorY - height`; it has to, because its prompt is nested
- * behind a plugin slot and it can't observe layout reactively. Scribe's prompt
- * *is* the anchor, so the offset is free.
- *
- * Keys are pushed in by the owner through `handleKey`, the same arrangement as
- * `ask-widget.ts`: the chat screen keeps one keypress listener and stays in
- * charge of what Escape means. The textarea keeps focus throughout — the popup
- * is never focusable — so typing continues to land in the prompt while the list
- * filters underneath the cursor.
+ * Prompt-anchored completion popup. Absolute positioning keeps it attached to
+ * a growing prompt without measuring layout or displacing the transcript.
  */
 import {
   BoxRenderable,
@@ -29,61 +12,39 @@ import {
 import { theme } from "../theme.ts";
 
 export interface CompletionItem {
-  /** Shown in the list. */
   label: string;
-  /** Dimmed detail after the label. */
   description?: string;
   /** Text substituted for the trigger and query. Defaults to `label`. */
   insert?: string;
-  /**
-   * When set, picking this item runs it instead of inserting anything — the
-   * trigger and query are removed from the prompt. This is how slash commands
-   * act on the chat rather than the message.
-   */
+  /** Runs after removing the trigger/query; overrides insertion. */
   run?: () => void;
 }
 
 export interface CompletionSource {
-  /** The single character that opens this source, e.g. "@" or "/". */
   trigger: string;
-  /**
-   * Only open when the trigger is the first character of the prompt. Slash
-   * commands want this; mentions, which can appear mid-sentence, don't.
-   */
   atStartOnly?: boolean;
-  /** Candidates for what has been typed after the trigger. May be async. */
   items(query: string): CompletionItem[] | Promise<CompletionItem[]>;
 }
 
 export interface AutocompleteOptions {
-  /** The prompt textarea to watch and complete into. */
   input: TextareaRenderable;
-  /**
-   * The prompt's outer box. The popup is mounted inside it, which is what makes
-   * `bottom: "100%"` land on the prompt's top edge.
-   */
+  /** Popup parent; `bottom: "100%"` aligns it with this box's top edge. */
   anchor: BoxRenderable;
   sources: CompletionSource[];
-  /** Rows visible at once before the list scrolls. Defaults to 8. */
   maxRows?: number;
 }
 
 export interface Autocomplete {
-  /** Whether the popup is currently open (i.e. whether it owns the keyboard). */
   readonly visible: boolean;
-  /** Feed a key in. Returns true when the popup consumed it. */
+  /** Returns whether the key was consumed. */
   handleKey(key: KeyEvent): boolean;
-  /** Close without picking. */
   close(): void;
   dispose(): void;
 }
 
-/** Where a trigger sits in the prompt and what has been typed after it. */
 interface Match {
   source: CompletionSource;
-  /** Offset of the trigger character. */
   start: number;
-  /** Text between the trigger and the cursor. */
   query: string;
 }
 
@@ -99,18 +60,13 @@ export function makeAutocomplete(ctx: RenderContext, options: AutocompleteOption
 
   const popup = new BoxRenderable(ctx, {
     position: "absolute",
-    // The bottom edge lands on the anchor's top edge. See the module comment.
     bottom: "100%",
-    // Absolute offsets resolve against the parent's *padding* box, which sits
-    // inside the prompt's left border. Pulling back a column puts our border
-    // directly over the prompt's, so the two read as one continuous strip
-    // instead of a staircase.
+    // Absolute offsets use the padding box; pull left to align both borders.
     left: -1,
     width: "100%",
     zIndex: 100,
     flexDirection: "column",
     backgroundColor: theme.surfaceRaised,
-    // Continues the prompt's accent strip, so popup and prompt read as one unit.
     border: ["left"],
     borderColor: theme.accent,
     visible: false,
@@ -138,22 +94,13 @@ export function makeAutocomplete(ctx: RenderContext, options: AutocompleteOption
 
   let items: CompletionItem[] = [];
   let selected = 0;
-  /** First item shown, for lists longer than `maxRows`. */
   let offset = 0;
   let open = false;
-  /** Guards against `replaceText` re-entering through onContentChange. */
   let substituting = false;
-  /** Discards results from a superseded async `items()` call. */
   let generation = 0;
   let destroyed = false;
 
-  // --- trigger detection ---
-
-  /**
-   * Find the trigger governing the cursor, if any. A query may not contain
-   * whitespace, so a space closes the popup, and the nearest trigger to the
-   * cursor wins when several are candidates.
-   */
+  /** Nearest trigger wins; whitespace ends the query. */
   function detect(text: string, cursor: number): Match | null {
     if (cursor <= 0) return null;
     let best: Match | null = null;
@@ -179,20 +126,15 @@ export function makeAutocomplete(ctx: RenderContext, options: AutocompleteOption
     return best;
   }
 
-  // --- painting ---
-
   function paint(): void {
-    // Keep the selection inside the visible window, scrolling as little as
-    // possible rather than recentring (which makes the list feel jumpy).
+    // Scroll only enough to keep the selection visible.
     if (selected < offset) offset = selected;
     else if (selected >= offset + maxRows) offset = selected - maxRows + 1;
 
     const shown = Math.min(maxRows, items.length);
     popup.height = shown;
 
-    // Pad labels to a common width so descriptions line up in a column. Sized
-    // from the whole list, not the visible window, so scrolling doesn't shift
-    // the column around underneath the cursor.
+    // Use the full list width so the description column does not shift while scrolling.
     const labelWidth = items.reduce((widest, item) => Math.max(widest, item.label.length), 0);
 
     for (const [i, row] of rows.entries()) {
@@ -221,18 +163,13 @@ export function makeAutocomplete(ctx: RenderContext, options: AutocompleteOption
   }
 
   function close(): void {
-    // Bumped unconditionally, before the early return: an async `items()` can
-    // still be in flight while the popup is already shut, and if that result
-    // were allowed to land it would reopen a popup the user dismissed — or,
-    // after dispose, paint into a destroyed renderable.
+    // Invalidate in-flight results even if the popup is already closed.
     generation++;
     if (!open) return;
     open = false;
     items = [];
     popup.visible = false;
   }
-
-  // --- reacting to typing ---
 
   async function refresh(): Promise<void> {
     if (substituting || destroyed) return;
@@ -247,12 +184,10 @@ export function makeAutocomplete(ctx: RenderContext, options: AutocompleteOption
     try {
       resolved = await match.source.items(match.query);
     } catch {
-      // Completion is a convenience over filesystem/provider-backed data. A
-      // failed lookup must not become an unhandled rejection or break typing.
+      // Completion failures must not break typing.
       if (mine === generation) close();
       return;
     }
-    // A later keystroke (or a close) already superseded this lookup.
     if (mine !== generation) return;
 
     if (resolved.length === 0) {
@@ -262,18 +197,14 @@ export function makeAutocomplete(ctx: RenderContext, options: AutocompleteOption
     show(resolved);
   }
 
-  // The popup owns this hook; nothing else in the app uses it.
+  // This component owns the input's content-change hook until disposal.
   input.onContentChange = () => void refresh();
-
-  // --- picking ---
 
   function pick(): void {
     const item = items[selected];
     if (!item) return;
 
-    // Re-detect against live buffer state rather than trusting the snapshot
-    // taken when the list was built: an async `items()` may have resolved a
-    // keystroke or two later.
+    // Async candidates may resolve after the buffer has changed.
     const text = input.plainText;
     const cursor = input.cursorOffset;
     const match = detect(text, cursor);
@@ -284,21 +215,18 @@ export function makeAutocomplete(ctx: RenderContext, options: AutocompleteOption
     const after = text.slice(cursor);
 
     if (item.run) {
-      // A command isn't part of the message — take its text back out.
       substitute(before + after, before.length);
       item.run();
       return;
     }
 
-    // The trailing space both separates the mention from what follows and
-    // closes the popup, since a query can't contain whitespace.
+    // The trailing space separates the mention and closes the popup.
     const insert = `${item.insert ?? item.label} `;
     substitute(before + insert + after, before.length + insert.length);
   }
 
   function substitute(text: string, cursor: number): void {
-    // replaceText fires onContentChange; the flag stops that reopening the
-    // popup we're in the middle of closing.
+    // replaceText fires onContentChange; avoid reopening during substitution.
     substituting = true;
     try {
       input.replaceText(text);
@@ -333,8 +261,6 @@ export function makeAutocomplete(ctx: RenderContext, options: AutocompleteOption
         case "return":
         case "kpenter":
         case "tab":
-          // Enter picks instead of sending, and Tab completes instead of moving
-          // focus, for as long as the list is open.
           key.preventDefault();
           pick();
           return true;

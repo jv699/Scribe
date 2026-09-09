@@ -1,18 +1,9 @@
-/**
- * Small filesystem safety primitives shared by the markdown stores.
- *
- * These helpers only cover descriptor-level invariants that are easy to get
- * subtly wrong in each store: do not follow the final path through a symlink,
- * verify the opened target is a regular file, and replace derived files via a
- * same-directory rename. Resource discovery and path confinement remain the
- * responsibility of each store.
- */
+// Guards the final path component; stores remain responsible for path confinement.
 import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { lstat, mkdir, open, rename, unlink, type FileHandle } from "node:fs/promises";
 
-/** Open a path without following its final component and require a regular file. */
 export async function openRegularFileNoFollow(
   path: string,
   flags: number,
@@ -29,8 +20,8 @@ export async function openRegularFileNoFollow(
   }
 }
 
-/** Read a regular file without following a swapped-in symlink or blocking on a FIFO. */
 export async function readRegularFileNoFollow(path: string): Promise<string> {
+  // Avoid blocking if a discovered file was replaced with a FIFO.
   const file = await openRegularFileNoFollow(path, constants.O_RDONLY | constants.O_NONBLOCK);
   try {
     return await file.readFile("utf8");
@@ -39,7 +30,6 @@ export async function readRegularFileNoFollow(path: string): Promise<string> {
   }
 }
 
-/** Whether a directory path itself is a directory rather than a symlink. */
 export async function isDirectoryNoFollow(path: string): Promise<boolean> {
   const stats = await lstat(path);
   return stats.isDirectory() && !stats.isSymbolicLink();
@@ -66,7 +56,7 @@ export async function atomicReplaceRegularFile(path: string, content: string): P
     await file.close();
     file = undefined;
 
-    // rename replaces a destination symlink itself instead of following it.
+    // rename replaces a destination symlink instead of following it.
     await rename(temporary, path);
     return true;
   } finally {

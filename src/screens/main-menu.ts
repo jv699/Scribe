@@ -1,7 +1,3 @@
-/**
- * Two-stage main menu: top-level app destinations, then campaign creation and
- * the campaign list, with the 90's intro animation on first show.
- */
 import {
   BoxRenderable,
   SelectRenderable,
@@ -24,12 +20,10 @@ export interface MainMenuOptions {
   campaigns: Campaign[];
   /** Menu stage shown initially. Defaults to the top-level menu. */
   initialView?: MainMenuView;
-  /** Play the 90's intro animation (only on first show). */
   playIntro: boolean;
   onCreateCampaign: () => void;
   onSelectCampaign: (campaign: Campaign) => void;
   onSettings: () => void;
-  /** Open the one-shot planner (Drafting Table) — free-form ideas chat. */
   onOneshotPlanner: () => void;
   onQuit: () => void;
   /** Message from a failed navigation, shown under the menu. */

@@ -1,7 +1,3 @@
-/**
- * "New Campaign" form dialog: name, system, and background fields with
- * Create/Cancel buttons. Wraps `dialog.ts` and manages its own focus chain.
- */
 import {
   BoxRenderable,
   InputRenderable,
@@ -22,10 +18,8 @@ export interface CampaignDialogOptions {
 }
 
 export interface CampaignDialog {
-  /** Add this to the root once at startup. */
   layer: BoxRenderable;
   open(): void;
-  /** Hide and release the keyboard. Safe to call when already closed. */
   close(): void;
 }
 
@@ -117,8 +111,6 @@ export function makeCampaignDialog(renderer: CliRenderer, options: CampaignDialo
     nameInput.focus();
   }
 
-  // Enter in a single-line field submits the dialog directly. Tab still
-  // walks the focus chain; the description textarea keeps Enter for newlines.
   nameInput.on(InputRenderableEvents.ENTER, () => submit());
   systemInput.on(InputRenderableEvents.ENTER, () => submit());
 

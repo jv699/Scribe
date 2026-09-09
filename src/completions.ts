@@ -1,32 +1,16 @@
-/**
- * `@` mention sources for the chat prompt.
- *
- * Kept out of the screens so they stay ignorant of the store, and out of
- * `index.ts` so they can be tested without a renderer: these are pure data
- * builders over the campaign and the source library.
- */
+// Mentions insert plain-language references that the agent's tools can resolve.
 import type { CompletionItem, CompletionSource } from "./components/autocomplete.ts";
 import { loadCampaign, type Campaign } from "./store/campaigns.ts";
 import { listOneshots } from "./store/oneshots.ts";
 import { listSessions } from "./store/sessions.ts";
 import { listSources } from "./store/sources.ts";
 
-/**
- * Case-insensitive filter over label+description, shared by every `@` source
- * below so each one only has to build its full item list.
- */
 export function filterCompletions(items: CompletionItem[], query: string): CompletionItem[] {
   const needle = query.toLowerCase();
   if (needle === "") return items;
   return items.filter((item) => `${item.label} ${item.description ?? ""}`.toLowerCase().includes(needle));
 }
 
-/**
- * `@` items for the source-document library: one per PDF, picking one inserts
- * a plain-language reference — "the ... source document" — rather than the
- * `@slug` markup, because that is what `search_sources`/`read_source_pages`
- * can act on, not a token the model has never been taught.
- */
 export async function sourceItems(sourcesDir: string): Promise<CompletionItem[]> {
   const docs = await listSources(sourcesDir);
   return docs.map((doc) => ({
@@ -36,11 +20,7 @@ export async function sourceItems(sourcesDir: string): Promise<CompletionItem[]>
   }));
 }
 
-/**
- * `@` completions for the Drafting Table: saved drafts plus reference PDFs in
- * one popup. Both libraries are re-read per keystroke so new files appear
- * without reopening the chat.
- */
+/** Re-read libraries per keystroke so new files appear without reopening chat. */
 export function oneshotCompletions(oneshotsDir: string, sourcesDir: string): CompletionSource[] {
   return [
     {
@@ -61,17 +41,7 @@ export function oneshotCompletions(oneshotsDir: string, sourcesDir: string): Com
   ];
 }
 
-/**
- * `@` mentions for a campaign chat: the campaign's two summary documents,
- * every session, and the source-document library. Picking one inserts a
- * plain-language reference rather than a markup token, because that is what
- * the agent can act on — "session 3 ("The Bell Tower")" points straight at
- * `read_session_notes(3)`, whereas `@session-3` would be syntax the model has
- * never been taught.
- *
- * Resolved on each keystroke rather than snapshotted, so sessions added while
- * the chat is open (or edited on disk) show up.
- */
+/** Re-read campaign data per keystroke to include sessions added or edited on disk. */
 export function campaignCompletions(campaign: Campaign, sourcesDir: string): CompletionSource[] {
   return [
     {
@@ -98,8 +68,6 @@ export function campaignCompletions(campaign: Campaign, sourcesDir: string): Com
           ...(await sourceItems(sourcesDir)),
         ];
 
-        // Match titles too, so "@bell" finds the session called "The Bell
-        // Tower" and not just labels that happen to start that way.
         return filterCompletions(items, query);
       },
     },

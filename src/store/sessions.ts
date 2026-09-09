@@ -1,9 +1,3 @@
-/**
- * Markdown-first persistence for sessions: one file per session in the
- * campaign's `sessions/` folder (`00N-slug.md`) with flat frontmatter and a
- * "## Plan" / "## Outcome" body. Handles numbering, status transitions, and
- * soft-delete to `.scribe/trash/`.
- */
 import { basename, join } from "node:path";
 import { mkdir, readdir, rename, writeFile } from "node:fs/promises";
 import { parseFrontmatter, serializeFrontmatter, updateFrontmatterFile } from "./frontmatter.ts";
@@ -13,21 +7,6 @@ import { readRegularFileNoFollow } from "./safe-files.ts";
 
 export type SessionStatus = "planning" | "ready" | "played";
 
-/**
- * A session is a markdown file in the campaign's `sessions/` folder:
- *
- *   ---
- *   number: 1
- *   title: Death House
- *   status: planning
- *   created: 2026-07-27
- *   ---
- *   # Death House
- *   ## Plan
- *   ...
- *   ## Outcome
- *   ...
- */
 export interface Session {
   number: number;
   title: string;
@@ -47,9 +26,7 @@ function sessionFromMarkdown(path: string, content: string): Session {
     ? (data["status"] as SessionStatus)
     : "planning";
   return {
-    // Clamped like campaignFromMarkdown's `nextSession` (campaigns.ts): session
-    // numbering starts at 1, so malformed/missing frontmatter should not
-    // produce a "session 0" that would sort before every real session.
+    // Session numbering starts at 1 even with malformed frontmatter.
     number: Math.max(1, Number.parseInt(data["number"] ?? "1", 10) || 1),
     title: data["title"] ?? basename(path, ".md"),
     status,
@@ -58,7 +35,6 @@ function sessionFromMarkdown(path: string, content: string): Session {
   };
 }
 
-/** Create session N (from campaign.nextSession) and bump the campaign counter. */
 export async function createSession(campaign: Campaign, title: string): Promise<Session> {
   const number = campaign.nextSession;
   const sessionsDir = join(campaign.dir, SESSIONS_DIR);
@@ -77,12 +53,11 @@ export async function createSession(campaign: Campaign, title: string): Promise<
   );
   await writeFile(path, markdown, "utf8");
   await updateCampaignMeta(campaign, { nextSession: number + 1 });
-  campaign.nextSession = number + 1; // keep the in-memory object in sync
+  campaign.nextSession = number + 1;
 
   return { number, title, status: "planning", created: today(), path };
 }
 
-/** List sessions sorted by number. */
 export async function listSessions(campaign: Campaign): Promise<Session[]> {
   const sessionsDir = join(campaign.dir, SESSIONS_DIR);
   let entries;
@@ -98,13 +73,12 @@ export async function listSessions(campaign: Campaign): Promise<Session[]> {
     try {
       sessions.push(sessionFromMarkdown(path, await readRegularFileNoFollow(path)));
     } catch {
-      // One unreadable or concurrently-replaced entry should not hide the rest.
+      // Keep readable sessions when one entry fails.
     }
   }
   return sessions.sort((a, b) => a.number - b.number);
 }
 
-/** Transition status, stamping the corresponding date in frontmatter. */
 export async function setSessionStatus(session: Session, status: SessionStatus): Promise<void> {
   await updateFrontmatterFile(session.path, (data, body) => {
     const patch: Record<string, string> = { status };
@@ -115,18 +89,15 @@ export async function setSessionStatus(session: Session, status: SessionStatus):
   session.status = status;
 }
 
-/** Read the session's markdown body (the Plan/Outcome sections, no frontmatter). */
 export async function readSessionNotes(session: Session): Promise<string> {
   const { body } = parseFrontmatter(await readRegularFileNoFollow(session.path));
   return body;
 }
 
-/** Replace the session's markdown body, preserving frontmatter. */
 export async function writeSessionNotes(session: Session, body: string): Promise<void> {
   await updateFrontmatterFile(session.path, (data) => ({ data, body }));
 }
 
-/** Soft-delete: move the session file into the campaign's .scribe/trash/. */
 export async function trashSession(campaign: Campaign, session: Session): Promise<void> {
   const trashDir = join(campaign.dir, TRASH_DIR);
   await mkdir(trashDir, { recursive: true });

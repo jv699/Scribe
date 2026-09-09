@@ -1,21 +1,15 @@
-/**
- * Unified app palette: burnt-orange accent over flat, dark, neutral surfaces.
- * Every color in the UI should come from here — no ad-hoc hex literals.
- */
+/** All UI colors belong here. */
 export const theme = {
-  /** App-level background — the canvas behind all screens. */
   background: "#1d1d1d",
 
-  /** Burnt orange — titles, dialog borders, selected items, primary buttons. */
   accent: "#CC5500",
-  /** Brighter orange — hover/focus state on accent-colored controls. */
   accentHover: "#E86A1C",
 
-  /** Primary text (also text on accent backgrounds). */
+  /** Also used on accent backgrounds. */
   text: "#FFFFFF",
-  /** Body text — peeks, descriptions. */
+  /** Body text and descriptions. */
   textDim: "#AAAAAA",
-  /** Metadata — paths, timestamps, secondary info. */
+  /** Metadata and secondary information. */
   textMuted: "#888888",
 
   /** Dialog/window background. */
@@ -25,10 +19,9 @@ export const theme = {
   /** Focused inputs, hovered ghost buttons. */
   surfaceActive: "#333333",
 
-  /** Validation errors and destructive hints. */
   danger: "#FF5555",
 
-  /** Flame palette — coolest to hottest. Used by the markdown syntax theme. */
+  /** Markdown highlights, coolest to hottest. */
   flameEmber: "#A63B00",
   flameCore: "#FFB84D",
 } as const;

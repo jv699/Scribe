@@ -1,23 +1,13 @@
 /**
- * Asks the user a multiple-choice question and blocks until they answer.
- *
- * This is the one tool whose result comes from the person rather than the disk.
- * It resolves only when a UI is attached to the `AskChannel` (see
- * `../ask.ts`) — a headless or scripted run declines it, exactly like the
- * campaign tools decline a campaign-less context, so granting it to every
- * agent stays safe.
- *
- * The result string doubles as the transcript row (`formatAskResult`), so the
- * model reads the same plain text the user sees.
+ * Blocks on an attached UI; headless runs decline. The result string doubles
+ * as the transcript row, so the model and user see the same answer.
  */
 import { ASK_DECLINED, ASK_USER_TOOL_NAME, formatAskResult, type AskOption } from "../ask.ts";
 import { boolArg, stringArg } from "./shared.ts";
 import type { ToolSpec } from "./types.ts";
 
-/** How many options a single question may offer (rows are pickable by digit). */
 const MAX_OPTIONS = 9;
 
-/** Generic meta-options that duplicate the widget's built-in free-text row. */
 const CUSTOM_PLACEHOLDERS = new Set([
   "custom",
   "custom answer",
@@ -95,11 +85,9 @@ export const askUserTool: ToolSpec = {
   },
 
   create({ ask }) {
-    // No channel means no UI to ask through — decline rather than hang.
     if (!ask) return null;
     return {
       definition: askUserTool.definition,
-      // Gated on a human keystroke, so it can't be part of a runaway loop.
       userDriven: true,
       execute: async (args) => {
         const question = stringArg(args, "question").trim();
@@ -125,12 +113,7 @@ export const askUserTool: ToolSpec = {
   },
 };
 
-/**
- * Normalize the `options` argument. Models are inconsistent here — the schema
- * asks for `{label, description}` objects but plain strings are just as common,
- * and a single option sometimes arrives unwrapped. All three are accepted;
- * anything else is dropped rather than throwing.
- */
+/** Accept object, string, and unwrapped options emitted despite the schema. */
 function coerceOptions(raw: unknown, custom: boolean): AskOption[] {
   const list = Array.isArray(raw) ? raw : [raw];
   const options: AskOption[] = [];
@@ -138,12 +121,9 @@ function coerceOptions(raw: unknown, custom: boolean): AskOption[] {
 
   for (const entry of list) {
     const option = coerceOption(entry);
-    // When enabled, the widget owns its free-text row. Some models still emit
-    // a placeholder choice as well, which would otherwise produce the
-    // duplicate shown as "Custom" followed by "Type your own answer…".
+    // The widget already supplies its own free-text row.
     if (custom && option && isCustomPlaceholder(option.label)) continue;
-    // Duplicate labels would make the answer ambiguous, and digit-picking
-    // confusing. First one wins.
+    // Duplicate labels make selected answers ambiguous.
     if (!option || seen.has(option.label)) continue;
     seen.add(option.label);
     options.push(option);

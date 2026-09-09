@@ -1,9 +1,3 @@
-/**
- * OpenAI-compatible chat client. One implementation covers OpenAI, OpenRouter,
- * Ollama, LM Studio, vLLM — any endpoint speaking the /chat/completions
- * protocol. Streams SSE deltas (text + tool calls) by default, with a
- * non-stream fallback.
- */
 import type { Settings } from "../store/settings.ts";
 import type {
   ChatEvent,
@@ -16,15 +10,13 @@ import type {
 } from "./types.ts";
 
 export interface OpenAIProviderOptions {
-  /** Base URL without a trailing slash, e.g. "https://api.openai.com/v1". */
   baseUrl: string;
   model: string;
   apiKey: string;
 }
 
 export const DEFAULT_BASE_URL = "https://api.openai.com/v1";
-// Fallback used only when settings/config omit a model. Not actively curated —
-// revisit periodically as OpenAI's lineup moves on.
+// Compatibility fallback for configs without a model; revisit as models change.
 export const DEFAULT_MODEL = "gpt-4o-mini";
 
 interface StreamChoice {
@@ -57,7 +49,6 @@ function toUsageInfo(raw: RawUsage): UsageInfo {
   };
 }
 
-/** Yield text + tool-call deltas from a Server-Sent-Events response body. */
 async function* streamSSE(response: Response): AsyncGenerator<ChatEvent> {
   if (!response.body) return;
   const reader = response.body.getReader();
@@ -69,7 +60,6 @@ async function* streamSSE(response: Response): AsyncGenerator<ChatEvent> {
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
 
-    // SSE events are separated by blank lines.
     const events = buffer.split(/\r?\n\r?\n/);
     buffer = events.pop() ?? "";
 
@@ -92,11 +82,10 @@ async function* streamSSE(response: Response): AsyncGenerator<ChatEvent> {
             };
             yield { type: "tool_call", toolCall };
           }
-          // Only providers that support `stream_options.include_usage` (requested
-          // below) send this — usually on a final chunk with no choices.
+          // Providers may report usage on a final chunk without choices.
           if (json.usage) yield { type: "usage", usage: toUsageInfo(json.usage) };
         } catch {
-          // Malformed keep-alive or partial line — ignore.
+          // Ignore malformed keep-alives and partial lines.
         }
       }
     }
@@ -112,8 +101,7 @@ export function createOpenAIProvider(options: OpenAIProviderOptions): ChatProvid
         model: options.model,
         messages,
         stream: true,
-        // Widely supported (OpenAI, OpenRouter, Ollama, LM Studio, vLLM); providers
-        // that don't recognize it just ignore it, so this is safe to send always.
+        // Unsupported compatible providers ignore this field.
         stream_options: { include_usage: true },
       };
       if (chatOptions?.tools?.length) body["tools"] = chatOptions.tools;
@@ -135,7 +123,7 @@ export function createOpenAIProvider(options: OpenAIProviderOptions): ChatProvid
       if (response.headers.get("content-type")?.includes("text/event-stream")) {
         yield* streamSSE(response);
       } else {
-        // Non-streaming fallback (older endpoints / proxies).
+        // Support older endpoints and proxies without SSE.
         const json = (await response.json()) as {
           choices?: { message?: { content?: string; tool_calls?: RawToolCall[] } }[];
           usage?: RawUsage;
@@ -202,12 +190,10 @@ export async function listModelInfos(options: { baseUrl: string; apiKey: string 
   return infos.sort((a, b) => a.id.localeCompare(b.id));
 }
 
-/** Fetch available model ids from an OpenAI-compatible `GET /models` endpoint. */
 export async function listModels(options: { baseUrl: string; apiKey: string }): Promise<string[]> {
   return (await listModelInfos(options)).map((info) => info.id);
 }
 
-/** Build a provider from app settings, resolving the API key from its env var. */
 export function createProviderFromSettings(settings: Settings): ChatProvider {
   const apiKey = settings.apiKeyEnv ? (process.env[settings.apiKeyEnv] ?? "") : "";
   return createOpenAIProvider({

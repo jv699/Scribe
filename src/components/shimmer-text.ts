@@ -16,15 +16,9 @@ export interface ShimmerTextOptions {
 
 export interface ShimmerText {
   node: TextRenderable;
-  /** Stop shimmering and optionally replace the text. Idempotent. */
   stop(finalText?: string): void;
 }
 
-/**
- * A fixed-width text label with a three-character color highlight sweeping
- * across it. Only styling changes between frames, so surrounding layout never
- * moves.
- */
 export function makeShimmerText(
   renderer: CliRenderer,
   options: ShimmerTextOptions,

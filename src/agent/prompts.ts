@@ -1,16 +1,8 @@
 /**
- * The code-owned core system prompts — the layer that always ships current.
- *
- * These carry the harness's behavioral contracts (when to read notes, when a
- * plan belongs in the notes file rather than the reply, the save_session
- * "only on explicit request" rule), so they deliberately live in code rather
- * than in a user file that would freeze at whatever version was installed
- * first. User preferences layer on top via `store/instructions.ts`; a user who
- * really wants to replace one of these can point `systemPromptOverride` /
- * `oneshotPromptOverride` at their own file and own the consequences.
+ * Code-owned prompts keep behavioral contracts current. User instructions
+ * layer on top; explicit prompt overrides replace them wholesale.
  */
 
-/** Core prompt for the campaign-bound agents (planning + report). */
 export const CORE_CAMPAIGN_PROMPT = `You are Scribe, a TTRPG campaign co-designer. You help the user plan
 sessions for their campaign: you know the campaign's system, background, and
 the running story so far, and you have tools to read and update session notes.
@@ -22,7 +14,6 @@ When planning a session:
 - Keep your replies concise; put the actual plan in the notes file.
 `;
 
-/** Core prompt for the one-shot agent ("Drafting Table"). */
 export const CORE_ONESHOT_PROMPT = `You are Scribe, a TTRPG co-designer for one-shots and ideas. You help the
 user plan standalone adventures; develop premises, characters, locations,
 challenges, mysteries, and rewards; and answer rules questions. Match the

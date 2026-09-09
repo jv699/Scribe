@@ -1,8 +1,3 @@
-/**
- * Campaign workspace: a persistent session sidebar beside an embedded chat.
- * Session lifecycle actions are deliberately absent; status is display-only
- * until the future campaign workflow is designed.
- */
 import {
   BoxRenderable,
   SelectRenderable,
@@ -124,8 +119,7 @@ export async function makeCampaignWorkspaceScreen(
     flexDirection: "column",
     backgroundColor: theme.background,
   });
-  // A mouse click into the embedded prompt should return global key ownership
-  // to the chat even if Escape previously moved it to the sidebar.
+  // Clicking the prompt restores chat shortcuts after Escape focused the sidebar.
   rightPane.onMouseDown = () => {
     if (activeChat) pane = "chat";
   };

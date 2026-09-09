@@ -1,25 +1,16 @@
-/**
- * Generic modal with a body and a row of buttons: adds the layer to the root,
- * wires Tab/Shift+Tab focus traversal and Escape-to-close, and returns focus
- * via `onClose`. Callers add body content and buttons; activating a button
- * (click or Enter) runs its action.
- */
 import { BoxRenderable, type CliRenderer, type KeyEvent, type Renderable } from "@opentui/core";
 import { makeDialog } from "./dialog.ts";
 import { makeButton, tabWalk } from "./ui.ts";
 
 export interface ActionDialogOptions {
   width: number;
-  /** Called once when the dialog closes (Escape or a button action). */
   onClose?: () => void;
 }
 
 export interface ActionDialog {
-  /** Centered content box — add body content here (above the button row). */
   content: BoxRenderable;
-  /** Append a button to the row. The first button added gets initial focus. */
+  /** The first button added receives initial focus. */
   addButton(label: string, variant: "primary" | "ghost", action: () => void): void;
-  /** Close the dialog (idempotent) and run onClose. */
   close(): void;
 }
 

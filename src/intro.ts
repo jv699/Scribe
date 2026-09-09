@@ -1,28 +1,18 @@
-/**
- * Startup animations: `dissolveIn` (per-character shade-ramp dissolve) and
- * `chunkyFadeIn` (stepped opacity fade). Both are 90's-style, driven by
- * setInterval. They need real renderable instances, not VNode factory proxies.
- */
+// Animations require real renderable instances, not VNode factory proxies.
 import type { Renderable, TextRenderable } from "@opentui/core";
 
-/** Classic shade ramp for the dissolve effect (DOS "materialize" look). */
 const DISSOLVE_RAMP = ["░", "▒", "▓"] as const;
 
-/** Discrete opacity levels for the chunky fade (SNES brightness-step look). */
 const FADE_STEPS = [0.2, 0.4, 0.65, 0.85, 1] as const;
 
 export interface DissolveOptions {
-  /** ms per animation frame. Higher = chunkier. */
   frameMs?: number;
   /** Max random start delay (in frames) before a character begins appearing. */
   spreadFrames?: number;
   onDone?: () => void;
 }
 
-/**
- * 90's DOS-style dissolve-in: each character pops in at a random frame and
- * cycles through the shade ramp (░ → ▒ → ▓) before settling on its final glyph.
- */
+/** Dissolve through shade glyphs at random offsets. Returns a cancellation function. */
 export function dissolveIn(target: TextRenderable, finalText: string, options: DissolveOptions = {}): () => void {
   const frameMs = options.frameMs ?? 55;
   const spreadFrames = options.spreadFrames ?? 12;
@@ -84,17 +74,12 @@ export function dissolveIn(target: TextRenderable, finalText: string, options: D
 }
 
 export interface ChunkyFadeOptions {
-  /** ms between opacity steps. Higher = chunkier. */
   stepMs?: number;
-  /** Delay in ms before the fade starts. */
   delayMs?: number;
   onDone?: () => void;
 }
 
-/**
- * SNES-style stepped fade: opacity jumps through a few discrete levels
- * instead of interpolating smoothly.
- */
+/** Fade through discrete opacity levels. Returns a cancellation function. */
 export function chunkyFadeIn(target: Renderable, options: ChunkyFadeOptions = {}): () => void {
   const stepMs = options.stepMs ?? 90;
   const delayMs = options.delayMs ?? 0;

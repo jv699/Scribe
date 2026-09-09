@@ -1,4 +1,3 @@
-/** Reads a session's planning notes, addressed by session number. */
 import { readSessionNotes } from "../../store/sessions.ts";
 import { findSession, numberArg } from "./shared.ts";
 import type { ToolSpec } from "./types.ts";

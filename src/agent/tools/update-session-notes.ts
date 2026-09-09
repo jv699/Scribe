@@ -1,4 +1,3 @@
-/** Replaces a session's planning notes — the agent's main write path. */
 import { writeSessionNotes } from "../../store/sessions.ts";
 import { findSession, numberArg, stringArg } from "./shared.ts";
 import type { ToolSpec } from "./types.ts";
