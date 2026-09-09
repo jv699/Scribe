@@ -1,35 +1,4 @@
-/**
- * Markdown-first cache + search for PDF source documents (rulebooks,
- * bestiaries, and the like), organized by system folder under the sources
- * directory:
- *
- *   <sourcesDir>/
- *     Shadowdark/
- *       Shadowdark Core Rules.pdf
- *       extracted/
- *         shadowdark-core-rules.md     # cache: frontmatter + page-marked body
- *     Knave/
- *       Knave 2e.pdf
- *       extracted/knave-2e.md
- *
- * Loose PDFs sitting directly in `<sourcesDir>` are valid documents too,
- * filed under the synthetic system "Unsorted" (their cache lands in
- * `<sourcesDir>/extracted/`, following the same "cache sits in `extracted/`
- * next to the PDF" rule as everything else).
- *
- * This is the only module in the repo allowed to import `unpdf` — all PDF
- * extraction happens here. Cache files are frontmatter (via
- * `frontmatter.ts`) + a body of `<!-- page N -->`-marked text; frontmatter
- * values are always strings, so numeric fields are parsed back with
- * `Number(...)` and guarded against `NaN`.
- *
- * **Security invariant** (see `AGENTS.md`): callers address documents by
- * identity — a slug or title — never by filesystem path. `readSourcePages`
- * resolves `slug` by scanning the in-memory index and comparing strings; the
- * caller's string is never joined into a path, so something like
- * `readSourcePages(dir, "../../etc/passwd", 1, 1)` simply fails to match
- * anything and returns `null`.
- */
+/** PDF extraction stays in this module; callers identify documents by slug or title, never path. */
 import type { Stats } from "node:fs";
 import { basename, dirname, extname, join } from "node:path";
 import { readdir, readFile, stat } from "node:fs/promises";
@@ -59,7 +28,6 @@ const UNSORTED = "Unsorted";
 const MAX_PAGE_SPAN = 10;
 const EXTRACT_CONCURRENCY = 3;
 
-/** Read a cache without following either the cache file or its `extracted/` directory through a symlink. */
 async function readCache(path: string): Promise<string> {
   const cacheDir = dirname(path);
   if (!(await isDirectoryNoFollow(cacheDir))) {
@@ -68,7 +36,6 @@ async function readCache(path: string): Promise<string> {
   return readRegularFileNoFollow(path);
 }
 
-/** Atomically replace a cache file without ever writing through a cache-file symlink. */
 async function writeCache(path: string, content: string): Promise<boolean> {
   // A sibling temporary keeps a failed refresh from truncating a good cache.
   return atomicReplaceRegularFile(path, content);
@@ -85,7 +52,6 @@ function cacheMatchesPdf(data: Record<string, string>, pdf: Stats): boolean {
   );
 }
 
-/** Read a cache only while its recorded source fingerprint matches the PDF. */
 async function readFreshCache(doc: SourceDoc): Promise<ReturnType<typeof parseFrontmatter> | null> {
   try {
     const pdf = await stat(doc.pdfPath);
@@ -106,7 +72,6 @@ interface DiscoveredPdf {
   fileName: string;
 }
 
-/** Walk `sourcesDir` for PDFs: subdirectories are systems, loose files are "Unsorted". */
 async function discoverPdfs(sourcesDir: string): Promise<DiscoveredPdf[]> {
   let topEntries;
   try {
@@ -146,18 +111,8 @@ async function discoverPdfs(sourcesDir: string): Promise<DiscoveredPdf[]> {
 }
 
 /**
- * Build the document index (identity + paths, `pages` left at 0) without
- * touching any cache.
- *
- * Slugs are unique across the *whole* library, not just within a system
- * folder, because `readSourcePages` resolves them globally — two systems that
- * each ship a "Core Rules.pdf" must not answer to the same name. Discovery
- * order is deterministic (loose PDFs, then systems alphabetically, then files
- * alphabetically), so a given library always assigns the same slugs.
- *
- * NOTE: this means the index must always be built over the full library. A
- * `systemFilter` is applied *after* slugs are assigned, so a scoped call and an
- * unscoped call agree on every slug.
+ * Assigns globally unique, deterministic slugs before filtering by system, so
+ * scoped and unscoped calls agree on document identity.
  */
 async function buildIndex(sourcesDir: string, systemFilter?: string): Promise<SourceDoc[]> {
   const discovered = await discoverPdfs(sourcesDir);
@@ -185,7 +140,6 @@ async function buildIndex(sourcesDir: string, systemFilter?: string): Promise<So
   return docs.filter((doc) => doc.system.toLowerCase() === systemFilter.toLowerCase());
 }
 
-/** List systems (folders with at least one PDF, plus "Unsorted" if loose PDFs exist). */
 export async function listSystems(sourcesDir: string): Promise<string[]> {
   const docs = await buildIndex(sourcesDir);
   const systems = new Set<string>();
@@ -193,7 +147,7 @@ export async function listSystems(sourcesDir: string): Promise<string[]> {
   return Array.from(systems).sort((a, b) => a.localeCompare(b));
 }
 
-/** List documents (optionally scoped to a system), filling in page counts from existing caches. Never extracts. */
+/** Reads page counts from fresh caches without extracting PDFs. */
 export async function listSources(sourcesDir: string, system?: string): Promise<SourceDoc[]> {
   const docs = await buildIndex(sourcesDir, system);
   for (const doc of docs) {
@@ -220,13 +174,12 @@ async function mapWithConcurrency<T>(items: readonly T[], limit: number, fn: (it
   await Promise.all(workers);
 }
 
-/** Extract (or re-extract, if stale) each discovered PDF's text into its cache file. */
 async function indexOne(doc: SourceDoc): Promise<void> {
   let st;
   try {
     st = await stat(doc.pdfPath);
   } catch {
-    return; // PDF vanished between discovery and indexing.
+    return; // The PDF may vanish after discovery.
   }
 
   let cached: Record<string, string> | null = null;
@@ -240,7 +193,7 @@ async function indexOne(doc: SourceDoc): Promise<void> {
     if (cacheMatchesPdf(cached, st)) {
       const pages = Number(cached["pages"]);
       doc.pages = Number.isFinite(pages) ? pages : 0;
-      return; // up to date
+      return;
     }
   }
 
@@ -274,14 +227,13 @@ async function indexOne(doc: SourceDoc): Promise<void> {
   doc.pages = totalPages;
 }
 
-/** Extract text for every PDF whose cache is missing or stale (size/mtime mismatch). Concurrency-capped, never throws per-doc. */
+/** Refreshes stale caches with bounded concurrency. */
 export async function indexSources(sourcesDir: string, system?: string): Promise<SourceDoc[]> {
   const docs = await buildIndex(sourcesDir, system);
   await mapWithConcurrency(docs, EXTRACT_CONCURRENCY, indexOne);
   return docs.sort((a, b) => a.title.localeCompare(b.title));
 }
 
-/** Split a cache body on its `<!-- page N -->` markers. */
 function splitCachePages(body: string): { page: number; text: string }[] {
   const chunks = body.split(/(?=<!-- page \d+ -->)/).filter((chunk) => chunk.trim() !== "");
   const pages: { page: number; text: string }[] = [];
@@ -323,7 +275,6 @@ function buildSnippet(text: string, terms: readonly string[]): string {
   return snippet;
 }
 
-/** BM25-lite search over cached page text, scoped to an optional system. */
 export async function searchSources(
   sourcesDir: string,
   query: string,
@@ -333,9 +284,7 @@ export async function searchSources(
   const queryTerms = Array.from(new Set(tokenize(query)));
   if (queryTerms.length === 0) return [];
 
-  // Build the index and read each cache file exactly once — the same file
-  // would otherwise be opened once for `pages` (via listSources) and again
-  // here for the body.
+  // Avoid reopening each cache through listSources before reading its body.
   const docs = await buildIndex(sourcesDir, opts?.system);
   docs.sort((a, b) => a.title.localeCompare(b.title));
 
@@ -415,7 +364,6 @@ export async function searchSources(
   }));
 }
 
-/** Read a page range (clamped to the document, capped at a 10-page span) from a document's cache, addressed by slug or title. */
 export async function readSourcePages(
   sourcesDir: string,
   slug: string,

@@ -1,4 +1,3 @@
-/** Reads a saved plan and makes it the active Drafting Table document. */
 import { findOneshot } from "../../store/oneshots.ts";
 import { stringArg } from "./shared.ts";
 import type { ToolSpec } from "./types.ts";

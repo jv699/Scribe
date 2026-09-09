@@ -1,9 +1,3 @@
-/**
- * Inline model selector for Settings. The input stays free-form, while a
- * provider-backed dropdown appears after the user starts editing. Models are
- * loaded once, filtered locally, and discarded when the provider settings
- * change through `invalidate()`.
- */
 import {
   BoxRenderable,
   InputRenderable,
@@ -28,11 +22,8 @@ export interface ModelCombobox {
   node: BoxRenderable;
   input: InputRenderable;
   readonly visible: boolean;
-  /** Feed keys in before the Settings screen handles navigation. */
   handleKey(key: KeyEvent): boolean;
-  /** Close the dropdown without forgetting a successful model listing. */
   close(): void;
-  /** Forget the listing after base URL or API-key configuration changes. */
   invalidate(): void;
   dispose(): void;
 }
@@ -181,9 +172,7 @@ export function makeModelCombobox(ctx: RenderContext, options: ModelComboboxOpti
       return;
     }
     if (loading) return;
-    // A fast failing endpoint can answer between individual keystrokes. Briefly
-    // suppress retries so one typed model id does not become one request per
-    // character; a later edit can still retry without leaving the screen.
+    // Avoid one failed request per keystroke while still allowing a quick retry.
     if (Date.now() < retryAfter) return;
 
     loading = true;
@@ -272,20 +261,16 @@ export function makeModelCombobox(ctx: RenderContext, options: ModelComboboxOpti
             close();
             return false;
           }
-          // Fill the selected model, then let the input's normal Enter event
-          // advance focus. One press therefore selects and commits the field.
+          // Let the input's Enter handler advance focus after selection.
           pick();
           return false;
         case "tab":
-          // Shift+Tab remains reverse focus traversal; blurring the input will
-          // close the dropdown without accepting its highlighted suggestion.
           if (key.shift) return false;
           if (filtered.length === 0) {
             close();
             return false;
           }
-          // Tab only completes the value. Focus stays in the model field so
-          // the user can continue editing against the cached listing.
+          // Tab completes without moving focus.
           key.preventDefault();
           pick();
           return true;

@@ -1,4 +1,3 @@
-/** Lists the campaign's sessions so the agent can orient itself. */
 import { listSessions } from "../../store/sessions.ts";
 import type { ToolSpec } from "./types.ts";
 

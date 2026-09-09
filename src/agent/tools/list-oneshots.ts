@@ -1,4 +1,3 @@
-/** Lists the saved plans available to the Drafting Table agent. */
 import { listOneshots } from "../../store/oneshots.ts";
 import type { ToolSpec } from "./types.ts";
 

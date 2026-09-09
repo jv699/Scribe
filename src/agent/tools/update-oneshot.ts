@@ -1,4 +1,3 @@
-/** Replaces the active saved one-shot's body while preserving frontmatter. */
 import { writeOneshot } from "../../store/oneshots.ts";
 import { stringArg } from "./shared.ts";
 import type { ToolSpec } from "./types.ts";

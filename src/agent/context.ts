@@ -1,15 +1,6 @@
 /**
- * Context assembly for the three agent modes. Every prompt is three layers, in
- * this order:
- *
- * 1. **Core** — code-owned (`prompts.ts`), so behavioral contracts always ship
- *    current. Replaceable wholesale via the `*PromptOverride` config fields.
- * 2. **Context** — campaign background + running story, source documents for
- *    modes that can search them, then the mode's framing: the session's draft
- *    notes (planning), "you just played session N" (report), or nothing
- *    (one-shot).
- * 3. **User instructions** — the user's optional file, appended last so it wins
- *    on tone and house rules without being able to delete the tool rules.
+ * Prompts are assembled in precedence order: code-owned core, mode context,
+ * then user instructions. Core overrides replace only the first layer.
  */
 import { basename } from "node:path";
 import type { Campaign } from "../store/campaigns.ts";
@@ -19,11 +10,7 @@ import type { Settings } from "../store/settings.ts";
 import { listSources } from "../store/sources.ts";
 import { CORE_CAMPAIGN_PROMPT, CORE_ONESHOT_PROMPT } from "./prompts.ts";
 
-/**
- * Summarize the source-document library for the system prompt, or `""` when
- * there is no library configured or it is empty — so users without a Sources
- * folder see no change to their prompt.
- */
+/** Omit the source section when no library is configured or indexed. */
 async function sourcesSection(sourcesDir: string | undefined): Promise<string> {
   if (!sourcesDir) return "";
   const docs = await listSources(sourcesDir);
@@ -51,15 +38,10 @@ ${lines.join("\n")}
 `;
 }
 
-/** The code-owned core, unless the user pointed config.json at their own. */
 async function core(builtIn: string, overridePath: string | undefined): Promise<string> {
   return (await loadPromptOverride(overridePath)) ?? builtIn;
 }
 
-/**
- * The user's instructions as a trailing section, or `""` when they haven't
- * written any — same "empty section disappears" convention as `sourcesSection`.
- */
 function instructionsSection(text: string): string {
   if (text.trim() === "") return "";
   return `
@@ -89,11 +71,7 @@ ${campaign.storySoFar.trim() || "(nothing yet)"}
 `;
 }
 
-/**
- * The shared layers common to both campaign-mode prompts: the code-owned core
- * and user instructions. Source-library context is optional because report
- * mode intentionally has no source tools.
- */
+/** Report mode omits sources because it has no source tools. */
 async function campaignLayers(
   settings: Settings,
   includeSources: boolean,
@@ -143,10 +121,6 @@ anything that will matter for future sessions.
 ${instructions}`;
 }
 
-/**
- * One-shot mode ("Drafting Table"): standalone planning with no campaign
- * context — the one-shot core plus whatever the user's one-shot instructions add.
- */
 export async function buildOneshotSystemPrompt(settings: Settings): Promise<string> {
   const base = await core(CORE_ONESHOT_PROMPT, settings.oneshotPromptOverride);
   const sources = await sourcesSection(settings.sourcesDir);

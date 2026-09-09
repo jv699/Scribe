@@ -1,9 +1,3 @@
-/**
- * Settings screen: edit model provider config (base URL, model, API key env
- * var name) and the campaigns / one-shots directories. The model field loads
- * provider-backed suggestions as the user types while remaining free-form.
- * Values persist to config.json on save. Escape or Back returns without saving.
- */
 import {
   BoxRenderable,
   InputRenderable,
@@ -64,8 +58,7 @@ export async function makeSettingsScreen(
   const baseUrlInput = field(options.settings.baseUrl ?? "", "https://api.openai.com/v1");
   container.add(baseUrlInput);
 
-  // Construct the key input before the model combobox so its loader can read
-  // the live provider configuration, then add it in the normal visual order.
+  // Build the key field first so the model loader can read its live value.
   const keyInput = field(options.settings.apiKeyEnv ?? "", "OPENAI_API_KEY");
 
   container.add(fieldLabel("Model"));
@@ -184,8 +177,6 @@ export async function makeSettingsScreen(
     tabWalk(renderer, focusChain, key);
   };
 
-  // dispose() only cleans up listeners (called by the screen manager on
-  // navigation); leave() is the explicit user action that also navigates back.
   function dispose(): void {
     if (disposed) return;
     disposed = true;
@@ -199,7 +190,6 @@ export async function makeSettingsScreen(
     options.onBack();
   }
 
-  // Enter in a field moves to the next one; Save/Back handled on the buttons.
   const advance = (from: Renderable): void => {
     const index = focusChain.indexOf(from);
     focusChain[index + 1]?.focus();

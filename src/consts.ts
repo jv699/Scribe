@@ -1,4 +1,3 @@
-/** Static content: ASCII art logos used on the startup screen. */
 export const logoBloody = `
   ██████  ▄████▄   ██▀███   ██▓ ▄▄▄▄   ▓█████ 
 ▒██    ▒ ▒██▀ ▀█  ▓██ ▒ ██▒▓██▒▓█████▄ ▓█   ▀ 

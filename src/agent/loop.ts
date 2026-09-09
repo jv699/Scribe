@@ -1,75 +1,44 @@
-/**
- * The agent loop: send a conversation (optionally with a system prompt) to a
- * ChatProvider, execute any tool calls it makes, feed results back, and
- * repeat until the model produces a plain-text answer. This is the "harness"
- * core that planning (and later report) mode is built on.
- */
 import type { ChatMessage, ChatProvider, ToolCall, ToolDefinition, UsageInfo } from "../provider/types.ts";
 
 export interface AgentTool {
-  /** The description sent to the model. */
   definition: ToolDefinition;
-  /** Executes the tool with parsed JSON args; result string is fed back. */
   execute: (args: Record<string, unknown>) => string | Promise<string>;
   /**
-   * This tool blocks on the user (e.g. `ask_user`). Iterations spent only on
-   * user-driven tools don't count against `maxIterations`: that budget exists
-   * to stop a model spinning on its own, and a turn the person has to answer
-   * with a keystroke can't spin. `HARD_MAX_ITERATIONS` still bounds the loop.
+   * Blocks on user input. Turns using only these tools skip the model runaway
+   * budget but still count toward HARD_MAX_ITERATIONS.
    */
   userDriven?: boolean;
 }
 
 export interface AgentOptions {
   provider: ChatProvider;
-  /** Base system instruction (e.g. the user's system-prompt.md + campaign context). */
   systemPrompt?: string;
   tools: AgentTool[];
-  /** Called with each assistant text delta (drives the streaming transcript). */
   onText?: (delta: string) => void;
-  /** Called just before a tool executes. */
   onTool?: (name: string) => void;
   /**
-   * Called once a tool has returned, so a UI can settle whatever `onTool`
-   * opened rather than leaving it running until the next thing happens. Fires
-   * for unknown tools too, and `runTool` swallows tool errors into a result
-   * string, so every `onTool` is paired. Takes no name: tools run one at a
-   * time, so the pairing is never ambiguous.
+   * Paired with every `onTool`, including unknown or failed tools. Tools run
+   * serially, so no name is needed.
    */
   onToolEnd?: () => void;
-  /** Called with token usage after each turn, when the provider reports it. */
   onUsage?: (usage: UsageInfo) => void;
   /**
-   * Called as each message joins the conversation, so a UI can mirror the turn
-   * as it happens instead of waiting for the whole thing to settle — without
-   * this, an answered `ask_user` only reaches the transcript once the model has
-   * finished its follow-up reply.
-   *
-   * The message is the **live object**, not a copy, and it is the same object
-   * that comes back in `AgentResult.messages`: an assistant message is reported
-   * empty *before* its text streams in, then mutated in place (content, then
-   * `tool_calls`) as the turn proceeds. Mirroring by reference means the caller's
-   * array ends up element-identical to the result, so nothing has to be rebuilt
-   * at the end.
+   * Receives each live message object as it joins the conversation. Assistant
+   * messages arrive empty before streaming and are mutated in place; the same
+   * objects are returned in `AgentResult.messages`.
    */
   onMessage?: (message: ChatMessage) => void;
   maxIterations?: number;
 }
 
 export interface AgentResult {
-  /** The full conversation (including system/tool messages) for future turns. */
   messages: ChatMessage[];
-  /** The final plain-text assistant answer. */
   answer: string;
 }
 
 const DEFAULT_MAX_ITERATIONS = 10;
 
-/**
- * Absolute ceiling on turns, including user-driven ones. High enough that a
- * long question-and-answer exchange never hits it, low enough that nothing can
- * loop indefinitely.
- */
+/** Absolute ceiling on all turns, including user-driven ones. */
 const HARD_MAX_ITERATIONS = 100;
 
 export async function runAgent(
@@ -94,9 +63,7 @@ export async function runAgent(
     options.onMessage?.(assistant);
 
     const { content, toolCalls } = await streamTurn(options, messages, toolDefs);
-    // Assigning (not appending) is what makes a mirroring caller and a headless
-    // one agree: a caller that appended every `onText` delta already holds this
-    // exact string, and one that ignored them gets it now.
+    // Assign because a mirroring caller may already hold the streamed content.
     assistant.content = content;
     if (toolCalls.length > 0) assistant.tool_calls = toolCalls;
     messages.push(assistant);

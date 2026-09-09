@@ -1,8 +1,3 @@
-/**
- * Entry point: sets up the renderer, loads settings, and owns the screen
- * manager (one `Screen` at a time under the renderer root) plus the
- * campaign-create dialog and app-level navigation wiring.
- */
 import { createCliRenderer, type KeyEvent } from "@opentui/core";
 import { theme } from "./theme.ts";
 import { makeCampaignDialog } from "./components/campaign-dialog.ts";
@@ -25,8 +20,7 @@ import { indexSources } from "./store/sources.ts";
 import { campaignCompletions, oneshotCompletions } from "./completions.ts";
 
 const renderer = await createCliRenderer({
-  // Scribe owns Ctrl+C so chat can use a first press to clear the prompt and
-  // require a second press to quit. Other screens still quit immediately.
+  // Chat requires a second Ctrl+C to quit; other screens quit immediately.
   exitOnCtrlC: false,
 });
 renderer.setBackgroundColor(theme.background);
@@ -35,14 +29,9 @@ renderer.setTerminalTitle("Scribe");
 
 let settings = await loadSettings();
 
-// Warm the source-document cache in the background so the first search a
-// session runs is usually instant. Extraction failures for individual PDFs
-// are already swallowed inside indexSources; this catch is only for
-// unexpected errors (e.g. an unreadable sourcesDir), which must never crash
-// startup or block the UI from appearing.
+// Warm the cache without letting indexing failures block startup.
 void indexSources(settings.sourcesDir).catch(() => {});
 
-// --- Screen management: one screen at a time under the renderer root ---
 let currentScreen: Screen | null = null;
 
 function quitApp(): void {
@@ -81,10 +70,7 @@ let introPlayed = false;
 /** Set by a failed navigation, shown once on the menu it falls back to. */
 let pendingError: string | undefined;
 
-/**
- * Navigate safely: if building a screen throws, fall back to the menu and
- * report there — console output is invisible behind the alt screen.
- */
+// Report failures in the menu: console output is hidden behind the alt screen.
 function navigate(fn: () => Promise<unknown>): void {
   void fn().catch((err: unknown) => {
     pendingError = `Navigation failed: ${err instanceof Error ? err.message : String(err)}`;
@@ -126,11 +112,7 @@ async function showSettingsScreen(): Promise<void> {
   );
 }
 
-/**
- * Look up the current model's metadata (display name, context window,
- * pricing) from the provider's `/models` listing. Never throws — a failed or
- * unsupported lookup just leaves the chat header showing the bare model id.
- */
+/** Failed or unsupported metadata lookups leave the header showing the model ID. */
 async function fetchModelInfo(model: string): Promise<ModelInfo | undefined> {
   try {
     const infos = await listModelInfos({
@@ -143,7 +125,6 @@ async function fetchModelInfo(model: string): Promise<ModelInfo | undefined> {
   }
 }
 
-/** Build a ChatProvider + model from the current settings. */
 function makeChatOptions(): { provider: ChatProvider; model: string; modelInfo: Promise<ModelInfo | undefined> } {
   const model = settings.model ?? DEFAULT_MODEL;
   return {
@@ -154,8 +135,6 @@ function makeChatOptions(): { provider: ChatProvider; model: string; modelInfo: 
 }
 
 async function showOneshotPlanner(): Promise<void> {
-  // One channel per chat screen: the tools ask through it, the screen answers.
-  // It has to exist before either, since tools are resolved up front.
   const ask = makeAskChannel();
   const activeOneshot: ActiveOneshot = { current: null };
   const screen = await makeChatScreen(renderer, {
@@ -193,8 +172,7 @@ async function makeCampaignSessionChat(
   session: Session,
   host: SessionChatHost,
 ): Promise<Awaited<ReturnType<typeof makeChatScreen>>> {
-  // Refresh campaign context whenever the user changes sessions so edits made
-  // by the previous chat are represented in the next one's system prompt.
+  // Include the previous chat's edits in the next session's system prompt.
   const fresh = (await loadCampaign(campaign.dir)) ?? campaign;
   const systemPrompt = await buildPlanningSystemPrompt(fresh, session, settings);
   const ask = makeAskChannel();

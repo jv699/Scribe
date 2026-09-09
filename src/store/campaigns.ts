@@ -1,33 +1,12 @@
-/**
- * Markdown-first persistence for campaigns: each campaign is a folder in the
- * campaigns dir containing a `campaign.md` with flat frontmatter + a body of
- * "## Background" and "## The Story So Far" sections.
- */
 import { join } from "node:path";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { parseFrontmatter, serializeFrontmatter, updateFrontmatterFile } from "./frontmatter.ts";
 import { sanitizeFolderName, today, uniqueName } from "./naming.ts";
 
-/**
- * A campaign is a folder containing `campaign.md`:
- *
- *   ---
- *   name: Curse of Strahd
- *   system: D&D 5e
- *   created: 2026-07-27
- *   nextSession: 1
- *   ---
- *   ## Background
- *   ...
- *   ## The Story So Far
- *   ...
- */
 export interface Campaign {
   name: string;
   system: string;
-  /** Campaign background (the "## Background" body section). */
   description: string;
-  /** The "## The Story So Far" body section — the agent's running memory. */
   storySoFar: string;
   created: string;
   nextSession: number;
@@ -58,7 +37,6 @@ function buildCampaignMarkdown(campaign: NewCampaign & { created: string; nextSe
   );
 }
 
-/** Extract the text between `heading` and the next "## " heading. */
 function extractSection(body: string, heading: string): string {
   const start = body.indexOf(heading);
   if (start === -1) return "";
@@ -106,7 +84,7 @@ export async function loadCampaign(dir: string): Promise<Campaign | null> {
   return campaignFromMarkdown(dir, content);
 }
 
-/** List all campaigns (folders containing a campaign.md), oldest first. */
+/** Returns campaigns oldest first. */
 export async function listCampaigns(campaignsDir: string): Promise<Campaign[]> {
   const entries = await readdir(campaignsDir, { withFileTypes: true });
   const campaigns: Campaign[] = [];
@@ -118,7 +96,6 @@ export async function listCampaigns(campaignsDir: string): Promise<Campaign[]> {
   return campaigns.sort((a, b) => a.created.localeCompare(b.created));
 }
 
-/** Patch campaign.md frontmatter fields (e.g. bump nextSession). */
 export async function updateCampaignMeta(
   campaign: Campaign,
   patch: Partial<Pick<Campaign, "nextSession" | "name" | "system">>,
@@ -130,11 +107,7 @@ export async function updateCampaignMeta(
   }));
 }
 
-/**
- * Append an entry to the campaign's "The Story So Far" section (the running
- * summary the agent maintains after each session). Updates the in-memory
- * campaign's storySoFar too.
- */
+/** Also updates the in-memory campaign. */
 export async function appendStorySoFar(campaign: Campaign, entry: string): Promise<void> {
   const filePath = join(campaign.dir, CAMPAIGN_FILE);
   let newBody = "";

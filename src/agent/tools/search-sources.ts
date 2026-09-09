@@ -53,10 +53,8 @@ export const searchSourcesTool: ToolSpec = {
           ...limitOpt,
         });
 
-        // `defaultSystem` is the campaign's free-text system field ("D&D 5e"),
-        // which need not match a folder name ("5e"). Rather than report a
-        // silent miss caused by that mismatch, widen to the whole library and
-        // say so — the agent can then judge whether the hits are relevant.
+        // A free-text system name may not match its source folder, so widen a
+        // default-scoped miss and tell the agent.
         let widened = false;
         if (hits.length === 0 && system !== undefined && explicitSystem === "") {
           hits = await searchSources(sourcesDir, query, limitOpt);

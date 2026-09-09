@@ -1,8 +1,4 @@
-/**
- * Minimal frontmatter handling: flat `key: value` lines between `---` fences.
- * Deliberately NOT YAML — see PLAN.md ("no YAML dependency"). Multi-line
- * content belongs in the markdown body, not in frontmatter.
- */
+/** Flat `key: value` frontmatter; deliberately not YAML. */
 import { constants } from "node:fs";
 import { openRegularFileNoFollow } from "./safe-files.ts";
 
@@ -35,7 +31,7 @@ export function parseFrontmatter(content: string): FrontmatterDoc {
     }
   }
 
-  // No closing fence: treat the whole file as body (defensive).
+  // Preserve malformed content as body when the closing fence is missing.
   if (end === -1) {
     return { data: {}, body: content };
   }
@@ -55,18 +51,11 @@ export function serializeFrontmatter(data: Record<string, string>, body: string)
   return lines.join("\n") + body.replace(/^\n+/, "");
 }
 
-/**
- * Read a frontmatter file, let `update` compute the new data/body, and write
- * the result back. Consolidates the read-parse-modify-serialize-write
- * sequence duplicated across campaigns.ts and sessions.ts.
- */
 export async function updateFrontmatterFile(
   path: string,
   update: (data: Record<string, string>, body: string) => FrontmatterDoc,
 ): Promise<FrontmatterDoc> {
-  // Hold one no-follow descriptor from read through write. A path-level
-  // read/modify/write would follow a symlink swapped in after discovery and
-  // could escape the store directory.
+  // One descriptor prevents a symlink swap between the read and write.
   const file = await openRegularFileNoFollow(path, constants.O_RDWR);
   try {
     const { data, body } = parseFrontmatter(await file.readFile("utf8"));

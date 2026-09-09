@@ -1,4 +1,3 @@
-/** Reads the campaign's running summary ("The Story So Far"). */
 import { freshCampaign } from "./shared.ts";
 import type { ToolSpec } from "./types.ts";
 
@@ -19,7 +18,6 @@ export const readCampaignSummaryTool: ToolSpec = {
     if (!campaign) return null;
     return {
       definition: readCampaignSummaryTool.definition,
-      // Re-read from disk: append_campaign_summary may have run this turn.
       execute: async () => (await freshCampaign(campaign)).storySoFar || "(no story yet)",
     };
   },

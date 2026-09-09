@@ -1,26 +1,14 @@
-/**
- * App-level settings in `~/.config/scribe/config.json` (separate from
- * campaign data, which lives in the campaigns dir). Created with defaults on
- * first run; API keys are referenced by env var name, never stored.
- */
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 
-/**
- * App settings live in ~/.config/scribe/config.json (campaign data lives
- * elsewhere — see PLAN.md). The API key is only ever an env var *name*.
- */
 export interface Settings {
-  /** Directory containing one folder per campaign. Default: ~/Scribe */
+  /** One folder per campaign. */
   campaignsDir: string;
-  /** Directory where saved one-shot plans are written. Default: ~/Scribe/One-Shots */
   oneshotsDir: string;
-  /** Directory containing source PDFs (rulebooks, bestiaries, etc.), organized by system folder. Default: ~/Scribe/Sources */
+  /** Source PDFs organized by system folder. */
   sourcesDir: string;
-  /** OpenAI-compatible base URL (Phase 1). */
   baseUrl?: string;
-  /** Model name (Phase 1). */
   model?: string;
   /** Name of the env var holding the API key — never the key itself. */
   apiKeyEnv?: string;
@@ -47,7 +35,7 @@ const OPTIONAL_STRING_SETTINGS = [
   "oneshotPromptOverride",
 ] as const satisfies readonly (keyof Settings)[];
 
-/** Merge only well-typed config values, so hand-edited JSON cannot crash startup. */
+/** Accept only well-typed values from hand-edited config. */
 function settingsFromJson(value: unknown): Settings {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return { ...DEFAULT_SETTINGS };
   const raw = value as Record<string, unknown>;
@@ -64,10 +52,8 @@ function settingsFromJson(value: unknown): Settings {
   return settings;
 }
 
-/** Directory holding the app config files (config.json + prompts). */
 export function defaultConfigDir(): string {
-  // SCRIBE_CONFIG_DIR relocates the whole config dir (config.json + the user's
-  // instruction files) — useful for separate profiles, and for tests.
+  // Relocates config and instruction files together.
   const override = process.env["SCRIBE_CONFIG_DIR"];
   if (override && override.trim() !== "") return expandHome(override);
   return join(homedir(), ".config", "scribe");
@@ -77,14 +63,12 @@ function defaultConfigPath(): string {
   return join(defaultConfigDir(), "config.json");
 }
 
-/** Expand a leading "~" to the home directory. */
 export function expandHome(path: string): string {
   if (path === "~") return homedir();
   if (path.startsWith("~/")) return join(homedir(), path.slice(2));
   return path;
 }
 
-/** Abbreviate a path under the home directory to a leading "~". */
 export function abbreviateHome(path: string): string {
   if (path === homedir()) return "~";
   if (path.startsWith(homedir() + "/")) return "~" + path.slice(homedir().length);
@@ -129,7 +113,6 @@ export async function loadSettings(configPath: string = defaultConfigPath()): Pr
   return settings;
 }
 
-/** Persist settings back to the config file. */
 export async function saveSettings(settings: Settings, configPath: string = defaultConfigPath()): Promise<void> {
   await mkdir(settings.campaignsDir, { recursive: true });
   await mkdir(settings.oneshotsDir, { recursive: true });
