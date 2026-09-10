@@ -25,8 +25,9 @@ import type { ChatMessage, ChatProvider, ModelInfo, UsageInfo } from "../provide
 import { formatDollars, formatTokenCount } from "../format.ts";
 import type { Screen } from "./screen.ts";
 
-const DOUBLE_CTRL_C_MS = 750;
+const DOUBLE_PRESS_MS = 750;
 const QUIT_HINT = "Press Ctrl+C again to quit";
+const BACK_HINT = "Press Escape again to go back";
 
 export interface ChatLogStore {
   load(): Promise<ChatMessage[]>;
@@ -238,36 +239,54 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
   /** True while the clear-confirmation dialog owns the keyboard. */
   let modalOpen = false;
 
-  let interruptDeadline = 0;
-  let interruptTimer: ReturnType<typeof setTimeout> | undefined;
+  let pendingShortcut: "quit" | "back" | null = null;
+  let shortcutDeadline = 0;
+  let shortcutTimer: ReturnType<typeof setTimeout> | undefined;
 
-  function disarmInterrupt(): void {
-    interruptDeadline = 0;
-    if (interruptTimer !== undefined) {
-      clearTimeout(interruptTimer);
-      interruptTimer = undefined;
+  function disarmShortcut(): void {
+    pendingShortcut = null;
+    shortcutDeadline = 0;
+    if (shortcutTimer !== undefined) {
+      clearTimeout(shortcutTimer);
+      shortcutTimer = undefined;
     }
     prompt.setHint();
   }
 
+  function armShortcut(shortcut: "quit" | "back", hint: string): void {
+    disarmShortcut();
+    pendingShortcut = shortcut;
+    prompt.setHint(hint);
+    shortcutDeadline = Date.now() + DOUBLE_PRESS_MS;
+    shortcutTimer = setTimeout(() => {
+      shortcutTimer = undefined;
+      pendingShortcut = null;
+      shortcutDeadline = 0;
+      if (!disposed) prompt.setHint();
+    }, DOUBLE_PRESS_MS);
+  }
+
   function handleInterrupt(): "handled" | "quit" {
     const now = Date.now();
-    if (interruptDeadline > now) {
-      disarmInterrupt();
+    if (pendingShortcut === "quit" && shortcutDeadline > now) {
+      disarmShortcut();
       return "quit";
     }
 
-    disarmInterrupt();
     // Preserve modal answers and the prompt hidden beneath them.
     if (!askWidget && !modalOpen) prompt.input.clear();
-    prompt.setHint(QUIT_HINT);
-    interruptDeadline = now + DOUBLE_CTRL_C_MS;
-    interruptTimer = setTimeout(() => {
-      interruptTimer = undefined;
-      interruptDeadline = 0;
-      if (!disposed) prompt.setHint();
-    }, DOUBLE_CTRL_C_MS);
+    armShortcut("quit", QUIT_HINT);
     return "handled";
+  }
+
+  function handleBack(): void {
+    const now = Date.now();
+    if (pendingShortcut === "back" && shortcutDeadline > now) {
+      disarmShortcut();
+      leave();
+      return;
+    }
+    armShortcut("back", BACK_HINT);
   }
 
   function leave(): void {
@@ -407,26 +426,35 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
   const onKeypress = (key: KeyEvent): void => {
     if (options.isInputActive && !options.isInputActive()) return;
 
-    // Ctrl+C is intercepted by the app; any other key cancels the pending exit.
-    if (interruptDeadline !== 0) disarmInterrupt();
-
     // Let the confirmation dialog's later listener receive the key.
-    if (modalOpen) return;
+    if (modalOpen) {
+      disarmShortcut();
+      return;
+    }
 
     // Escape dismisses the question; unclaimed keys reach its answer textarea.
     if (askWidget) {
+      disarmShortcut();
       askWidget.handleKey(key);
       return;
     }
 
     // The popup gets Enter/Escape before submission or navigation.
-    if (autocomplete.handleKey(key)) return;
+    if (autocomplete.handleKey(key)) {
+      disarmShortcut();
+      return;
+    }
 
     if (key.name === "escape") {
       key.preventDefault();
-      leave();
+      // A held key is not a deliberate second press when the terminal reports repeats.
+      if (key.eventType === "repeat" || key.repeated) return;
+      handleBack();
       return;
     }
+
+    // Ctrl+C is intercepted by the app; any other key cancels either pending shortcut.
+    if (pendingShortcut !== null) disarmShortcut();
   };
   renderer.keyInput.on("keypress", onKeypress);
 
@@ -436,7 +464,7 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
     disposeRan = true;
     disposed = true;
     dropUnfinishedAssistant();
-    disarmInterrupt();
+    disarmShortcut();
     // Detaching declines pending questions so the agent turn can finish.
     detachAsk?.();
     autocomplete.dispose();
