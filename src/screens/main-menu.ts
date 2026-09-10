@@ -30,23 +30,27 @@ export interface MainMenuOptions {
   error?: string | undefined;
 }
 
-enum MenuOptionValues {
+enum MenuOptions {
   BACK,
   CREATE,
   SHOW_CAMPAIGN,
+  CAMPAIGNS,
+  DRAFTING_TABLE,
+  SETTINGS,
+  QUIT,
 }
 
 export function makeMainMenuScreen(renderer: CliRenderer, options: MainMenuOptions): Screen {
   const rootOptions: SelectOption[] = [
-    { name: "Campaigns", description: "" },
-    { name: "Drafting Table", description: "one-shot and ideas planner" },
-    { name: "Settings", description: "" },
-    { name: "Quit", description: "" },
+    { name: "Campaigns", description: "", value: MenuOptions.CAMPAIGNS },
+    { name: "Drafting Table", description: "one-shot and ideas planner", value: MenuOptions.DRAFTING_TABLE },
+    { name: "Settings", description: "", value: MenuOptions.SETTINGS },
+    { name: "Quit", description: "", value: MenuOptions.QUIT },
   ];
   const campaignOptions: SelectOption[] = [
-    ...options.campaigns.map((c) => ({ name: c.name, description: c.system, value: MenuOptionValues.SHOW_CAMPAIGN })),
-    { name: "Create Campaign", description: "", value: MenuOptionValues.CREATE },
-    { name: "← Back", description: "", value: MenuOptionValues.BACK },
+    ...options.campaigns.map((c) => ({ name: c.name, description: c.system, value: MenuOptions.SHOW_CAMPAIGN })),
+    { name: "Create Campaign", description: "", value: MenuOptions.CREATE },
+    { name: "← Back", description: "", value: MenuOptions.BACK },
   ];
   let view: MainMenuView = options.initialView ?? "root";
   const initialOptions = view === "campaigns" ? campaignOptions : rootOptions;
@@ -75,20 +79,20 @@ export function makeMainMenuScreen(renderer: CliRenderer, options: MainMenuOptio
     mainMenu.setSelectedIndex(view === "root" ? rootSelectedIndex : 0);
   }
 
-  mainMenu.on(SelectRenderableEvents.ITEM_SELECTED, (index: number) => {
+  mainMenu.on(SelectRenderableEvents.ITEM_SELECTED, (index: number, option: SelectOption) => {
     if (view === "root") {
-      if (index === 0) showView("campaigns");
-      else if (index === 1) options.onOneshotPlanner();
-      else if (index === 2) options.onSettings();
-      else if (index === 3) options.onQuit();
+      if (option.value === MenuOptions.CAMPAIGNS) showView("campaigns");
+      else if (option.value === MenuOptions.DRAFTING_TABLE) options.onOneshotPlanner();
+      else if (option.value === MenuOptions.SETTINGS) options.onSettings();
+      else if (option.value === MenuOptions.QUIT) options.onQuit();
       return;
     }
 
-    if (index === 0) {
+    if (option.value === MenuOptions.BACK) {
       showView("root");
       return;
     }
-    if (index === 1) {
+    if (option.value === MenuOptions.CREATE) {
       options.onCreateCampaign();
       return;
     }
