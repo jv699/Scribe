@@ -6,8 +6,12 @@ import { sanitizeFolderName, today, uniqueName } from "./naming.ts";
 export interface Campaign {
   name: string;
   system: string;
+  /** A short premise used in listings and agent context. */
+  shortDescription: string;
+  /** The longer campaign background/backstory. */
   description: string;
   storySoFar: string;
+  planningPreferences: string;
   created: string;
   nextSession: number;
   /** Absolute path to the campaign folder (runtime only, not persisted). */
@@ -21,11 +25,20 @@ export interface NewCampaign {
 }
 
 const CAMPAIGN_FILE = "campaign.md";
+const DESCRIPTION_HEADING = "## Description";
 const BACKGROUND_HEADING = "## Background";
 const STORY_HEADING = "## The Story So Far";
+const PREFERENCES_HEADING = "## Planning Preferences";
+
+function validateSectionContent(content: string): void {
+  // H2 headings delimit campaign fields, including user-owned custom sections.
+  if (/^## /m.test(content.trim())) {
+    throw new Error("Use ### or deeper headings within campaign content; ## headings separate campaign sections.");
+  }
+}
 
 function buildCampaignMarkdown(campaign: NewCampaign & { created: string; nextSession: number }): string {
-  const body = `${BACKGROUND_HEADING}\n\n${campaign.description.trim()}\n\n${STORY_HEADING}\n`;
+  const body = `${DESCRIPTION_HEADING}\n\n\n${BACKGROUND_HEADING}\n\n${campaign.description.trim()}\n\n${STORY_HEADING}\n\n\n${PREFERENCES_HEADING}\n`;
   return serializeFrontmatter(
     {
       name: campaign.name,
@@ -37,13 +50,29 @@ function buildCampaignMarkdown(campaign: NewCampaign & { created: string; nextSe
   );
 }
 
+interface SectionBounds {
+  headingStart: number;
+  contentStart: number;
+  contentEnd: number;
+}
+
+function sectionBounds(body: string, heading: string): SectionBounds | null {
+  const escaped = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const headingStart = new RegExp(`^${escaped}[ \\t]*$`, "m").exec(body)?.index;
+  if (headingStart === undefined) return null;
+
+  const contentStart = headingStart + heading.length;
+  const nextHeadingOffset = body.slice(contentStart).search(/^## /m);
+  return {
+    headingStart,
+    contentStart,
+    contentEnd: nextHeadingOffset === -1 ? body.length : contentStart + nextHeadingOffset,
+  };
+}
+
 function extractSection(body: string, heading: string): string {
-  const start = body.indexOf(heading);
-  if (start === -1) return "";
-  const afterHeading = body.slice(start + heading.length);
-  const nextHeading = afterHeading.search(/^## /m);
-  const section = nextHeading === -1 ? afterHeading : afterHeading.slice(0, nextHeading);
-  return section.trim();
+  const bounds = sectionBounds(body, heading);
+  return bounds ? body.slice(bounds.contentStart, bounds.contentEnd).trim() : "";
 }
 
 function campaignFromMarkdown(dir: string, content: string): Campaign {
@@ -51,8 +80,10 @@ function campaignFromMarkdown(dir: string, content: string): Campaign {
   return {
     name: data["name"] ?? "(unnamed campaign)",
     system: data["system"] ?? "",
+    shortDescription: extractSection(body, DESCRIPTION_HEADING),
     description: extractSection(body, BACKGROUND_HEADING),
     storySoFar: extractSection(body, STORY_HEADING),
+    planningPreferences: extractSection(body, PREFERENCES_HEADING),
     created: data["created"] ?? "",
     nextSession: Math.max(1, Number.parseInt(data["nextSession"] ?? "1", 10) || 1),
     dir,
@@ -60,6 +91,7 @@ function campaignFromMarkdown(dir: string, content: string): Campaign {
 }
 
 export async function createCampaign(campaignsDir: string, input: NewCampaign): Promise<Campaign> {
+  validateSectionContent(input.description);
   const existing = await readdir(campaignsDir);
   const folderName = uniqueName(sanitizeFolderName(input.name), existing);
   const dir = join(campaignsDir, folderName);
@@ -71,7 +103,15 @@ export async function createCampaign(campaignsDir: string, input: NewCampaign): 
   const markdown = buildCampaignMarkdown({ ...input, created, nextSession: 1 });
   await writeFile(join(dir, CAMPAIGN_FILE), markdown, "utf8");
 
-  return { ...input, storySoFar: "", created, nextSession: 1, dir };
+  return {
+    ...input,
+    shortDescription: "",
+    storySoFar: "",
+    planningPreferences: "",
+    created,
+    nextSession: 1,
+    dir,
+  };
 }
 
 export async function loadCampaign(dir: string): Promise<Campaign | null> {
@@ -107,24 +147,96 @@ export async function updateCampaignMeta(
   }));
 }
 
+function replaceSection(body: string, heading: string, content: string, beforeHeading?: string): string {
+  const bounds = sectionBounds(body, heading);
+  const section = `${heading}\n\n${content.trim()}\n`;
+  if (!bounds) {
+    const before = beforeHeading ? sectionBounds(body, beforeHeading) : null;
+    if (before) {
+      const prefix = body.slice(0, before.headingStart).trimEnd();
+      return `${prefix ? `${prefix}\n\n` : ""}${section}\n${body.slice(before.headingStart).replace(/^\n+/, "")}`;
+    }
+    return `${body.trimEnd()}\n\n${section}`;
+  }
+
+  const following = body.slice(bounds.contentEnd).replace(/^\n+/, "");
+  return `${body.slice(0, bounds.headingStart)}${section}${following ? `\n${following}` : ""}`;
+}
+
+export interface CampaignDetails {
+  name: string;
+  system: string;
+  shortDescription: string;
+  description: string;
+  planningPreferences: string;
+}
+
+/** Replace user-editable campaign details while preserving all unrelated sections. */
+export async function updateCampaignDetails(
+  campaign: Campaign,
+  details: CampaignDetails,
+  expected?: CampaignDetails,
+): Promise<void> {
+  validateSectionContent(details.shortDescription);
+  validateSectionContent(details.description);
+  validateSectionContent(details.planningPreferences);
+  const filePath = join(campaign.dir, CAMPAIGN_FILE);
+  let nextBody = "";
+  await updateFrontmatterFile(filePath, (data, body) => {
+    const current = campaignFromMarkdown(campaign.dir, serializeFrontmatter(data, body));
+    if (
+      expected &&
+      (current.name !== expected.name ||
+        current.system !== expected.system ||
+        current.shortDescription !== expected.shortDescription ||
+        current.description !== expected.description ||
+        current.planningPreferences !== expected.planningPreferences)
+    ) {
+      throw new Error("Campaign details changed on disk; reload before saving.");
+    }
+    nextBody = replaceSection(body, DESCRIPTION_HEADING, details.shortDescription, BACKGROUND_HEADING);
+    nextBody = replaceSection(nextBody, BACKGROUND_HEADING, details.description);
+    nextBody = replaceSection(nextBody, PREFERENCES_HEADING, details.planningPreferences);
+    return { data: { ...data, name: details.name, system: details.system }, body: nextBody };
+  });
+  Object.assign(campaign, details);
+}
+
+/** Replace the running story without affecting the background or other sections. */
+export async function replaceStorySoFar(
+  campaign: Campaign,
+  story: string,
+  expected?: string,
+): Promise<void> {
+  validateSectionContent(story);
+  const filePath = join(campaign.dir, CAMPAIGN_FILE);
+  let nextBody = "";
+  await updateFrontmatterFile(filePath, (data, body) => {
+    const current = extractSection(body, STORY_HEADING);
+    if (expected !== undefined && current !== expected) {
+      throw new Error("The story changed on disk; reload before saving.");
+    }
+    nextBody = replaceSection(body, STORY_HEADING, story);
+    return { data, body: nextBody };
+  });
+  campaign.storySoFar = extractSection(nextBody, STORY_HEADING);
+}
+
 /** Also updates the in-memory campaign. */
 export async function appendStorySoFar(campaign: Campaign, entry: string): Promise<void> {
+  validateSectionContent(entry);
   const filePath = join(campaign.dir, CAMPAIGN_FILE);
   let newBody = "";
   await updateFrontmatterFile(filePath, (data, body) => {
-    const headingIndex = body.indexOf(STORY_HEADING);
-    if (headingIndex === -1) {
+    const bounds = sectionBounds(body, STORY_HEADING);
+    if (!bounds) {
       newBody = `${body.trimEnd()}\n\n${STORY_HEADING}\n\n${entry.trim()}\n`;
       return { data, body: newBody };
     }
 
-    const contentStart = headingIndex + STORY_HEADING.length;
-    const afterHeading = body.slice(contentStart);
-    const nextHeadingOffset = afterHeading.search(/^## /m);
-    const contentEnd = nextHeadingOffset === -1 ? body.length : contentStart + nextHeadingOffset;
-    const currentStory = body.slice(contentStart, contentEnd).trim();
-    const followingSections = body.slice(contentEnd).replace(/^\n+/, "");
-    newBody = `${body.slice(0, contentStart)}\n\n${currentStory ? `${currentStory}\n\n` : ""}${entry.trim()}\n`;
+    const currentStory = body.slice(bounds.contentStart, bounds.contentEnd).trim();
+    const followingSections = body.slice(bounds.contentEnd).replace(/^\n+/, "");
+    newBody = `${body.slice(0, bounds.contentStart)}\n\n${currentStory ? `${currentStory}\n\n` : ""}${entry.trim()}\n`;
     if (followingSections !== "") newBody += `\n${followingSections}`;
     return { data, body: newBody };
   });

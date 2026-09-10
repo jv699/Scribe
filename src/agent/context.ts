@@ -4,6 +4,7 @@
  */
 import { basename } from "node:path";
 import type { Campaign } from "../store/campaigns.ts";
+import { listCharacters } from "../store/characters.ts";
 import { loadInstructions, loadOneshotInstructions, loadPromptOverride } from "../store/instructions.ts";
 import { readSessionNotes, type Session } from "../store/sessions.ts";
 import type { Settings } from "../store/settings.ts";
@@ -54,12 +55,26 @@ ${text.trim()}
 `;
 }
 
-function campaignSection(campaign: Campaign): string {
+async function campaignSection(campaign: Campaign): Promise<string> {
+  const characters = await listCharacters(campaign);
+  const party = characters.length === 0
+    ? "(none saved)"
+    : characters
+        .map((character) => {
+          const className = character.className ? ` — ${character.className}` : "";
+          const description = character.description ? `\n${character.description}` : "";
+          return `### ${character.name}${className}${description}`;
+        })
+        .join("\n\n");
   return `
 # Campaign
 
 Name: ${campaign.name}
 System: ${campaign.system || "(not set)"}
+
+## Description
+
+${campaign.shortDescription.trim() || "(none)"}
 
 ## Background
 
@@ -68,6 +83,14 @@ ${campaign.description.trim() || "(none)"}
 ## The Story So Far
 
 ${campaign.storySoFar.trim() || "(nothing yet)"}
+
+## Party Characters
+
+${party}
+
+## Planning Preferences
+
+${campaign.planningPreferences.trim() || "(none)"}
 `;
 }
 
@@ -90,7 +113,7 @@ export async function buildPlanningSystemPrompt(
   const { base, sources, instructions } = await campaignLayers(settings, true);
   const notes = await readSessionNotes(session);
 
-  return `${base}${campaignSection(campaign)}${sources}
+  return `${base}${await campaignSection(campaign)}${sources}
 
 # Current Session
 
@@ -109,7 +132,7 @@ export async function buildReportSystemPrompt(
 ): Promise<string> {
   const { base, instructions } = await campaignLayers(settings, false);
 
-  return `${base}${campaignSection(campaign)}
+  return `${base}${await campaignSection(campaign)}
 
 # Session Report
 

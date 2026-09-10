@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { createMockMouse, type createMockKeys, type TestRenderer } from "@opentui/core/testing";
 import { setupRenderer, wait } from "./helpers/renderer.ts";
-import type { KeyEvent } from "@opentui/core";
+import { TextareaRenderable, type KeyEvent } from "@opentui/core";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,6 +15,9 @@ import type { Screen } from "../src/screens/screen.ts";
 import type { ChatProvider } from "../src/provider/types.ts";
 import { createCampaign, listCampaigns, loadCampaign, type Campaign } from "../src/store/campaigns.ts";
 import { createSession, setSessionStatus } from "../src/store/sessions.ts";
+import { listCharacters } from "../src/store/characters.ts";
+import { makeAskChannel } from "../src/agent/ask.ts";
+import { resolveTools } from "../src/agent/tools/index.ts";
 
 /**
  * End-to-end UI flow test — must live inside the project so @opentui/core
@@ -109,6 +112,153 @@ afterEach(async () => {
 });
 
 describe("campaign workspace flow", () => {
+  test.each(["Characters", "Story So Far", "Settings"])("clicking back into %s restores editor keyboard navigation", async (destination) => {
+    const campaign = await createCampaign(campaignsDir, { name: "Focus", system: "5e", description: "" });
+    await showCampaignWorkspace(campaign);
+    await renderOnce();
+    const lines = captureCharFrame().split("\n");
+    const y = lines.findIndex((line) => line.includes(destination));
+    const mouse = createMockMouse(renderer);
+    await mouse.click(lines[y]!.indexOf(destination), y);
+    await wait(40);
+    if (destination !== "Settings") {
+      keys.pressEnter(); // Add character / Add campaign history
+      await wait(20);
+    }
+    await renderOnce();
+    const editor = renderer.currentFocusedRenderable!;
+    keys.pressKey("ESCAPE");
+    await wait(20);
+    await renderOnce();
+    expect(renderer.currentFocusedRenderable?.constructor.name).toBe("SelectRenderable");
+    await mouse.click(editor.x + 1, editor.y);
+    expect(renderer.currentFocusedRenderable === editor).toBe(true);
+    await keys.pressKeys(["TAB"], 20);
+    expect(renderer.currentFocusedRenderable === editor).toBe(false);
+    expect(renderer.currentFocusedRenderable?.constructor.name).not.toBe("SelectRenderable");
+    keys.pressTab({ shift: true });
+    await wait(20);
+    expect(renderer.currentFocusedRenderable === editor).toBe(true);
+    if (destination === "Settings") {
+      await renderOnce();
+      const frame = captureCharFrame().split("\n");
+      const cancelY = frame.findIndex((line) => line.includes("Cancel"));
+      await mouse.click(frame[cancelY]!.indexOf("Cancel"), cancelY);
+      await keys.pressKeys(["TAB"], 20);
+      expect(renderer.currentFocusedRenderable?.constructor.name).toBe("SelectRenderable");
+    }
+  });
+
+  test("a rejected story heading leaves the draft available to correct and save", async () => {
+    const campaign = await createCampaign(campaignsDir, { name: "History", system: "", description: "" });
+    await showCampaignWorkspace(campaign);
+    await renderOnce();
+    const lines = captureCharFrame().split("\n");
+    const y = lines.findIndex((line) => line.includes("Story So Far"));
+    await createMockMouse(renderer).click(lines[y]!.indexOf("Story So Far"), y);
+    await wait(20);
+    keys.pressEnter();
+    await wait(20);
+    const editor = renderer.currentFocusedRenderable as TextareaRenderable;
+    const draft = "Opening\n\n## Session 1\n\nThe party arrived.";
+    editor.setText(draft);
+    await keys.pressKeys(["TAB"], 20);
+    keys.pressEnter();
+    await wait(40);
+    await renderOnce();
+    expect(captureCharFrame()).toContain("Use ###");
+    expect(editor.plainText).toBe(draft);
+    expect((await loadCampaign(campaign.dir))?.storySoFar).toBe("");
+    editor.focus();
+    editor.setText(draft.replace("## Session", "### Session"));
+    expect(editor.plainText).toBe(draft.replace("## Session", "### Session"));
+    await keys.pressKeys(["TAB"], 20);
+    keys.pressEnter();
+    await wait(40);
+    expect((await loadCampaign(campaign.dir))?.storySoFar).toBe(draft.replace("## Session", "### Session"));
+  });
+
+  test("repeatedly discarding campaign settings restores multiline fields each time", async () => {
+    const campaign = await createCampaign(campaignsDir, { name: "Discard", system: "5e", description: "Original background" });
+    await showCampaignWorkspace(campaign);
+    await renderOnce();
+    const lines = captureCharFrame().split("\n");
+    const y = lines.findIndex((line) => line.includes("Settings"));
+    await createMockMouse(renderer).click(lines[y]!.indexOf("Settings"), y);
+    await wait(30);
+    for (const text of ["First draft", "Second draft"]) {
+      await keys.pressKeys(["TAB", "TAB", "TAB"], 10);
+      const background = renderer.currentFocusedRenderable as TextareaRenderable;
+      background.setText(text);
+      keys.pressKey("ESCAPE");
+      await wait(20);
+      await keys.pressKeys(["TAB"], 10); // Cancel -> Discard
+      keys.pressEnter();
+      await wait(20);
+      expect(background.plainText).toBe("Original background");
+      expect(renderer.currentFocusedRenderable?.constructor.name).toBe("SelectRenderable");
+      keys.pressEnter(); // Return to the same editor.
+      await wait(20);
+    }
+    expect((await loadCampaign(campaign.dir))?.description).toBe("Original background");
+  });
+
+  test.each(["working", "awaiting-answer"])("switching sessions clears a disposed chat's %s indicator", async (state) => {
+    const campaign = await createCampaign(campaignsDir, { name: "Activity", system: "", description: "" });
+    await createSession(campaign, "First");
+    await createSession(campaign, "Second");
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => { release = resolve; });
+    showScreen(await makeCampaignWorkspaceScreen(renderer, {
+      campaign,
+      onBack: () => {},
+      makeSessionChat: (session, host) => {
+        const ask = makeAskChannel();
+        return makeChatScreen(renderer, {
+          ...host,
+          title: session.title,
+          ask,
+          tools: state === "awaiting-answer" ? resolveTools(["ask_user"], { ask }) : [],
+          provider: {
+            async *streamChat(messages) {
+              if (state === "awaiting-answer" && !messages.some((message) => message.role === "tool")) {
+                yield { type: "tool_call", toolCall: {
+                  index: 0, id: "question", name: "ask_user",
+                  arguments: JSON.stringify({ question: "Which road?", options: [{ label: "Forest" }, { label: "Coast" }] }),
+                } };
+                return;
+              }
+              await pending;
+              yield { type: "text", delta: "Finished" };
+            },
+          },
+        });
+      },
+    }));
+    try {
+      await keys.typeText("plan", 1);
+      keys.pressEnter();
+      await wait(40);
+      await renderOnce();
+      const indicator = state === "working" ? "…" : "?";
+      expect(captureCharFrame()).toContain(`${indicator} 002 Second`);
+      const lines = captureCharFrame().split("\n");
+      const y = lines.findIndex((line) => line.includes("001 First"));
+      await createMockMouse(renderer).click(lines[y]!.indexOf("001 First"), y);
+      await wait(40);
+      await renderOnce();
+      expect(captureCharFrame()).toContain("002 Second [planning]");
+      expect(captureCharFrame()).not.toContain(`${indicator} 002 Second`);
+      release();
+      await wait(40);
+      await renderOnce();
+      expect(captureCharFrame()).not.toContain(`${indicator} 002 Second`);
+    } finally {
+      release();
+      await wait(20);
+    }
+  });
+
   test("create campaign -> create session -> chat -> sidebar -> persistence", async () => {
     // Campaigns is the initially selected, live main-menu destination.
     keys.pressEnter();
@@ -133,7 +283,7 @@ describe("campaign workspace flow", () => {
     expect(frame.includes("Curse of Strahd")).toBe(true);
     expect(frame.includes("D&D 5e")).toBe(true);
     expect(frame.includes("No sessions yet")).toBe(true);
-    expect(frame.includes("Settings (coming soon)")).toBe(true);
+    expect(frame.includes("Settings")).toBe(true);
 
     const onDisk = await listCampaigns(campaignsDir);
     expect(onDisk.length).toBe(1);
@@ -293,6 +443,179 @@ describe("campaign workspace flow", () => {
     expect(frame).toContain("Session 002 — Fast Road");
     expect(frame).not.toContain("Session 001 — Slow Road");
     expect(disposedSessions).toContain(1);
+  });
+
+  test("creates a character and edits story and campaign details from sidebar destinations", async () => {
+    const campaign = await createCampaign(campaignsDir, {
+      name: "Ember Company",
+      system: "Shadowdark",
+      description: "A dangerous frontier.",
+    });
+    await showCampaignWorkspace(campaign);
+    await renderOnce();
+
+    // The session list contains only + New Session. Down crosses into the
+    // pinned campaign destinations and selects Characters.
+    keys.pressKey("ARROW_DOWN");
+    keys.pressEnter();
+    await wait(80);
+    await renderOnce();
+    expect(captureCharFrame()).toContain("No party characters yet");
+
+    keys.pressEnter(); // + Add Character
+    await wait(30);
+    await keys.typeText("Mara", 3);
+    await keys.pressKeys(["TAB"], 20);
+    await keys.typeText("Fighter", 3);
+    await keys.pressKeys(["TAB"], 20);
+    await keys.typeText("Carries the broken crown.", 2);
+    await keys.pressKeys(["TAB"], 20);
+    keys.pressEnter(); // Save
+    await wait(100);
+    await renderOnce();
+    expect(captureCharFrame()).toContain("Mara — Fighter");
+    expect((await listCharacters(campaign))[0]?.description).toBe("Carries the broken crown.");
+
+    keys.pressKey("ESCAPE"); // back to destination list
+    await wait(20);
+    keys.pressKey("ARROW_DOWN");
+    keys.pressEnter(); // Story So Far
+    await wait(60);
+    await renderOnce();
+    expect(captureCharFrame()).toContain("Nothing has been recorded yet");
+    keys.pressEnter(); // Add campaign history
+    await keys.typeText("The company opened the ash gate.", 2);
+    await keys.pressKeys(["TAB"], 20);
+    keys.pressEnter(); // Save
+    await wait(80);
+    await renderOnce();
+    expect(captureCharFrame()).toContain("company opened the ash gate");
+
+    keys.pressKey("ESCAPE");
+    await wait(20);
+    keys.pressKey("ARROW_DOWN");
+    keys.pressEnter(); // Campaign Settings
+    await wait(60);
+    await renderOnce();
+    expect(captureCharFrame()).toContain("Campaign Settings");
+    await keys.typeText(" Revised", 2);
+    await keys.pressKeys(["TAB", "TAB"], 20);
+    await keys.typeText("Heroes against the dying light.", 2);
+    await keys.pressKeys(["TAB", "TAB"], 20);
+    await keys.typeText("Favor hard choices.", 2);
+    await keys.pressKeys(["TAB"], 20);
+    keys.pressEnter();
+    await wait(100);
+
+    const saved = (await loadCampaign(campaign.dir))!;
+    expect(saved.name).toBe("Ember Company Revised");
+    expect(saved.shortDescription).toBe("Heroes against the dying light.");
+    expect(saved.planningPreferences).toBe("Favor hard choices.");
+    expect(saved.storySoFar).toBe("The company opened the ash gate.");
+    await renderOnce();
+    expect(captureCharFrame()).toContain("Ember Company Revised");
+  }, 15000);
+
+  test("keeps a session chat and its draft alive while campaign sections are open", async () => {
+    const campaign = await createCampaign(campaignsDir, {
+      name: "Crossroads",
+      system: "5e",
+      description: "",
+    });
+    await createSession(campaign, "The Gate");
+    showScreen(
+      await makeCampaignWorkspaceScreen(renderer, {
+        campaign,
+        onBack: () => {},
+        makeSessionChat: (session, host) => makeChatScreen(renderer, {
+          provider: {
+            async *streamChat() {
+              await wait(220);
+              yield { type: "text", delta: "The reply finished in the background." };
+            },
+          },
+          title: session.title,
+          isInputActive: host.isInputActive,
+          onInputFocus: host.onInputFocus,
+          onStateChange: host.onStateChange,
+          onBack: host.onBack,
+        }),
+      }),
+    );
+    await keys.typeText("keep this draft", 2);
+
+    // Hand control to the sidebar, cross + New Session, and open Characters.
+    keys.pressKey("ESCAPE");
+    await wait(20);
+    keys.pressKey("ESCAPE");
+    await wait(20);
+    keys.pressKey("ARROW_DOWN");
+    keys.pressKey("ARROW_DOWN");
+    keys.pressEnter();
+    await wait(70);
+    keys.pressKey("ESCAPE");
+    await wait(20);
+    keys.pressKey("ARROW_UP");
+    keys.pressKey("ARROW_UP");
+    keys.pressEnter();
+    await wait(40);
+    await renderOnce();
+    expect(captureCharFrame()).toContain("keep this draft");
+
+    // Send it, then visit Characters while the provider is still streaming.
+    keys.pressEnter();
+    await wait(20);
+    keys.pressKey("ESCAPE");
+    await wait(20);
+    keys.pressKey("ESCAPE");
+    await wait(20);
+    keys.pressKey("ARROW_DOWN");
+    keys.pressKey("ARROW_DOWN");
+    keys.pressEnter();
+    await wait(60);
+    await renderOnce();
+    expect(captureCharFrame()).toContain("… 001 The Gate");
+
+    await wait(240);
+    const mouse = createMockMouse(renderer);
+    const lines = captureCharFrame().split("\n");
+    const sessionY = lines.findIndex((line) => line.includes("001 The Gate"));
+    expect(sessionY).toBeGreaterThanOrEqual(0);
+    await mouse.click(lines[sessionY]!.indexOf("001 The Gate"), sessionY);
+    await wait(50);
+    await renderOnce();
+    expect(captureCharFrame()).toContain("reply finished in the background");
+  }, 15000);
+
+  test("guards unsaved campaign-view edits before returning to the sidebar", async () => {
+    const campaign = await createCampaign(campaignsDir, {
+      name: "Unwritten",
+      system: "",
+      description: "",
+    });
+    await showCampaignWorkspace(campaign);
+    keys.pressKey("ARROW_DOWN");
+    keys.pressEnter();
+    await wait(60);
+    keys.pressEnter();
+    await keys.typeText("Unsaved Hero", 2);
+    keys.pressKey("ESCAPE");
+    await wait(40);
+    await renderOnce();
+    expect(captureCharFrame()).toContain("Discard character changes?");
+
+    keys.pressKey("ESCAPE"); // Cancel the discard dialog.
+    await wait(30);
+    await renderOnce();
+    expect(captureCharFrame()).toContain("Unsaved Hero");
+    keys.pressKey("ESCAPE");
+    await wait(20);
+    await keys.pressKeys(["TAB"], 20); // Cancel -> Discard
+    keys.pressEnter();
+    await wait(40);
+    expect(await listCharacters(campaign)).toEqual([]);
+    await renderOnce();
+    expect(captureCharFrame()).not.toContain("Unsaved Hero");
   });
 });
 

@@ -1,11 +1,25 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, readFile, rm, readdir, symlink, unlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, readdir, rename, symlink, unlink, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join, relative } from "node:path";
 
 import { parseFrontmatter, serializeFrontmatter, updateFrontmatterFile } from "../src/store/frontmatter.ts";
 import { loadSettings, saveSettings } from "../src/store/settings.ts";
-import { createCampaign, listCampaigns, loadCampaign, updateCampaignMeta, appendStorySoFar } from "../src/store/campaigns.ts";
+import {
+  createCampaign,
+  listCampaigns,
+  loadCampaign,
+  updateCampaignMeta,
+  appendStorySoFar,
+  replaceStorySoFar,
+  updateCampaignDetails,
+} from "../src/store/campaigns.ts";
+import {
+  createCharacter,
+  listCharacters,
+  trashCharacter,
+  updateCharacter,
+} from "../src/store/characters.ts";
 import { createSession, listSessions, readSessionNotes, setSessionStatus, trashSession } from "../src/store/sessions.ts";
 import { loadChatLog, saveChatLog, clearChatLog, chatLogPath } from "../src/store/chat-log.ts";
 import { loadInstructions, loadOneshotInstructions, loadPromptOverride } from "../src/store/instructions.ts";
@@ -244,7 +258,27 @@ describe("campaigns", () => {
     expect(strahd.system).toBe("D&D 5e");
     expect(strahd.description).toBe("Gothic horror.");
     expect(strahd.storySoFar).toBe("");
+    expect(strahd.shortDescription).toBe("");
+    expect(strahd.planningPreferences).toBe("");
     expect(strahd.nextSession).toBe(1);
+  });
+
+  test("loads legacy campaign files without the new optional sections", async () => {
+    const campaignDir = join(dir, "Legacy");
+    await mkdir(campaignDir, { recursive: true });
+    await writeFile(
+      join(campaignDir, "campaign.md"),
+      serializeFrontmatter(
+        { name: "Legacy", system: "B/X", created: "2025-01-01", nextSession: "2" },
+        "## Background\n\nAn old campaign.\n\n## The Story So Far\n\nThey entered the dungeon.\n",
+      ),
+    );
+
+    const campaign = (await loadCampaign(campaignDir))!;
+    expect(campaign.shortDescription).toBe("");
+    expect(campaign.description).toBe("An old campaign.");
+    expect(campaign.storySoFar).toBe("They entered the dungeon.");
+    expect(campaign.planningPreferences).toBe("");
   });
 
   test("folders without campaign.md are ignored", async () => {
@@ -301,6 +335,27 @@ describe("campaigns", () => {
     expect(campaign.storySoFar).toBe("Old event.\n\nNew event.");
   });
 
+  test("section headings match exactly while allowing trailing whitespace", async () => {
+    const campaign = await createCampaign(dir, input);
+    const path = join(campaign.dir, "campaign.md");
+    const { data } = parseFrontmatter(await readFile(path, "utf8"));
+    await writeFile(
+      path,
+      serializeFrontmatter(
+        data,
+        "## The Story So Far Extended\n\nNot the story.\n\n## The Story So Far \t\n\nOld event.\n\n## Notes\n\nKeep me.\n",
+      ),
+      "utf8",
+    );
+
+    expect((await loadCampaign(campaign.dir))?.storySoFar).toBe("Old event.");
+    await appendStorySoFar(campaign, "New event.");
+
+    const raw = await readFile(path, "utf8");
+    expect(raw).toContain("## The Story So Far Extended\n\nNot the story.");
+    expect(raw).toContain("Old event.\n\nNew event.\n\n## Notes\n\nKeep me.");
+  });
+
   test("appendStorySoFar synchronizes memory when it creates a missing section", async () => {
     const campaign = await createCampaign(dir, input);
     const path = join(campaign.dir, "campaign.md");
@@ -311,6 +366,137 @@ describe("campaigns", () => {
 
     expect(campaign.storySoFar).toBe("The story begins.");
     expect((await loadCampaign(campaign.dir))?.storySoFar).toBe("The story begins.");
+  });
+
+  test("updates editable details and story while preserving unrelated sections", async () => {
+    const campaign = await createCampaign(dir, input);
+    const path = join(campaign.dir, "campaign.md");
+    await writeFile(path, (await readFile(path, "utf8")).trimEnd() + "\n\n## Notes\n\nKeep me.\n", "utf8");
+    const expected = {
+      name: campaign.name,
+      system: campaign.system,
+      shortDescription: campaign.shortDescription,
+      description: campaign.description,
+      planningPreferences: campaign.planningPreferences,
+    };
+    await updateCampaignDetails(campaign, {
+      name: "Barovia After Dark",
+      system: "D&D 5e 2024",
+      shortDescription: "Heroes trapped in the mists.",
+      description: "### Premise\n\nGothic horror with doomed allies.",
+      planningPreferences: "Favor difficult bargains.",
+    }, expected);
+    await replaceStorySoFar(campaign, "### Arrival\n\nThe party reached Vallaki.", "");
+
+    const reloaded = (await loadCampaign(campaign.dir))!;
+    expect(reloaded.name).toBe("Barovia After Dark");
+    expect(reloaded.shortDescription).toBe("Heroes trapped in the mists.");
+    expect(reloaded.description).toContain("### Premise");
+    expect(reloaded.planningPreferences).toBe("Favor difficult bargains.");
+    expect(reloaded.storySoFar).toContain("### Arrival");
+    expect(await readFile(path, "utf8")).toContain("## Notes\n\nKeep me.");
+  });
+
+  test("refuses to overwrite campaign sections changed since editing began", async () => {
+    const campaign = await createCampaign(dir, input);
+    const stale = { name: campaign.name, system: campaign.system, shortDescription: "", description: campaign.description, planningPreferences: "" };
+    await replaceStorySoFar(campaign, "A newer event.", "");
+    await expect(replaceStorySoFar(campaign, "Stale replacement.", "")).rejects.toThrow("changed on disk");
+    await updateCampaignDetails(campaign, { ...stale, description: "A newer background." }, stale);
+    await expect(updateCampaignDetails(campaign, stale, stale)).rejects.toThrow("changed on disk");
+  });
+
+  test("rejects section-separator headings before changing files or in-memory campaign data", async () => {
+    const campaign = await createCampaign(dir, input);
+    const path = join(campaign.dir, "campaign.md");
+    const original = await readFile(path, "utf8");
+    const baseline = { ...campaign };
+    const content = "Opening\n\n## Session 1\n\nThe party arrived.";
+    for (const invalid of [content, "  ## Session 1\n\nThe party arrived."]) {
+      await expect(replaceStorySoFar(campaign, invalid, "")).rejects.toThrow("Use ###");
+      await expect(appendStorySoFar(campaign, invalid)).rejects.toThrow("Use ###");
+      for (const field of ["description", "shortDescription", "planningPreferences"] as const) {
+        await expect(updateCampaignDetails(campaign, { ...campaign, [field]: invalid }, campaign)).rejects.toThrow("Use ###");
+      }
+    }
+    expect(await readFile(path, "utf8")).toBe(original);
+    expect(campaign).toEqual(baseline);
+
+    const accepted = content.replace("## Session", "### Session");
+    await replaceStorySoFar(campaign, accepted, "");
+    await appendStorySoFar(campaign, "### Session 2\n\nThey returned.");
+    const details = { ...campaign, description: accepted, planningPreferences: accepted };
+    await updateCampaignDetails(campaign, details, campaign);
+    await updateCampaignDetails(campaign, { ...details, name: "Renamed" }, details);
+    const reloaded = (await loadCampaign(campaign.dir))!;
+    expect(reloaded.description).toBe(accepted);
+    expect(reloaded.planningPreferences).toBe(accepted);
+    expect(reloaded.storySoFar).toBe(`${accepted}\n\n### Session 2\n\nThey returned.`);
+    expect(reloaded.name).toBe("Renamed");
+  });
+
+  test("rejects ambiguous campaign backgrounds before creating a campaign folder", async () => {
+    await expect(createCampaign(dir, { ...input, description: "## Premise\n\nA campaign." })).rejects.toThrow("Use ###");
+    expect(await readdir(dir)).toEqual([]);
+  });
+});
+
+describe("characters", () => {
+  test.each(["characters", "campaign"])("refuses discovery, updates, and removal after the %s directory becomes a symlink", async (target) => {
+    const campaign = await createCampaign(dir, { name: "Company", system: "5e", description: "" });
+    const character = await createCharacter(campaign, { name: "Mara", className: "Rogue", description: "Original" });
+    const original = await readFile(character.path, "utf8");
+    const linkedDir = target === "characters" ? join(campaign.dir, "characters") : campaign.dir;
+    const outside = join(dir, "outside");
+    await rename(linkedDir, outside);
+    await symlink(outside, linkedDir);
+
+    expect(await listCharacters(campaign)).toEqual([]);
+    await expect(updateCharacter(campaign, character, { ...character, description: "Changed" })).rejects.toThrow();
+    await expect(trashCharacter(campaign, character)).rejects.toThrow();
+    expect(await readFile(character.path, "utf8")).toBe(original);
+    expect(await readdir(join(campaign.dir, ".scribe"))).toEqual([]);
+  });
+
+  test("creates, lists, updates, and trashes markdown character records", async () => {
+    const campaign = await createCampaign(dir, { name: "Company", system: "Shadowdark", description: "" });
+    const first = await createCharacter(campaign, {
+      name: "Mara",
+      className: "Fighter",
+      description: "Carries the broken crown.",
+    });
+    const duplicate = await createCharacter(campaign, {
+      name: "Mara",
+      className: "Wizard",
+      description: "Knows the old road.",
+    });
+    expect(first.path).not.toBe(duplicate.path);
+    expect((await listCharacters(campaign)).map((character) => character.className)).toEqual(["Fighter", "Wizard"]);
+
+    const renamed = await updateCharacter(campaign, first, {
+      name: "Mara Voss",
+      className: "Knight",
+      description: "### Bond\n\nProtects the heir.",
+    });
+    expect(renamed.path).toBe(first.path);
+    expect(renamed.description).toContain("### Bond");
+    await trashCharacter(campaign, renamed);
+    expect((await listCharacters(campaign)).map((character) => character.className)).toEqual(["Wizard"]);
+    expect(await readdir(join(campaign.dir, ".scribe", "trash", "characters"))).toHaveLength(1);
+  });
+
+  test("detects character conflicts and refuses symlinked character directories", async () => {
+    const campaign = await createCampaign(dir, { name: "Company", system: "5e", description: "" });
+    const character = await createCharacter(campaign, { name: "Mara", className: "Rogue", description: "Old" });
+    await writeFile(character.path, serializeFrontmatter({ name: "Mara", class: "Rogue" }, "External edit\n"));
+    await expect(updateCharacter(campaign, character, { name: "Mara", className: "Rogue", description: "Mine" })).rejects.toThrow("changed on disk");
+
+    const second = await createCampaign(dir, { name: "Unsafe", system: "5e", description: "" });
+    const outside = join(dir, "outside");
+    await mkdir(outside);
+    await symlink(outside, join(second.dir, "characters"));
+    await expect(createCharacter(second, { name: "Escape", className: "", description: "" })).rejects.toThrow("safe directory");
+    expect(await readdir(outside)).toEqual([]);
   });
 });
 

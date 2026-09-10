@@ -13,18 +13,22 @@ import { enableSelectMouse } from "../components/ui.ts";
 import { createSession, listSessions, type Session } from "../store/sessions.ts";
 import type { Campaign } from "../store/campaigns.ts";
 import { theme } from "../theme.ts";
-import type { ChatScreen } from "./chat.ts";
+import type { ChatScreen, ChatState } from "./chat.ts";
+import {
+  makeCampaignSettingsPane,
+  makeCharactersPane,
+  makeStoryPane,
+  type CampaignPane,
+} from "./campaign-views.ts";
 import type { Screen } from "./screen.ts";
 
 const SIDEBAR_WIDTH = 32;
 
 export interface SessionChatHost {
-  /** Return keyboard control to the workspace sidebar. */
   onBack: () => void;
-  /** Global chat shortcuts must stand down while the sidebar owns focus. */
   isInputActive: () => boolean;
-  /** Restore chat key ownership when its prompt is focused directly. */
   onInputFocus: () => void;
+  onStateChange: (state: ChatState) => void;
 }
 
 export interface CampaignWorkspaceOptions {
@@ -33,15 +37,31 @@ export interface CampaignWorkspaceOptions {
   makeSessionChat: (session: Session, host: SessionChatHost) => Promise<ChatScreen>;
 }
 
-function sessionOptions(sessions: readonly Session[]): SelectOption[] {
+type Destination = "characters" | "story" | "settings";
+
+function sessionOptions(
+  sessions: readonly Session[],
+  activeSessionNumber: number | null,
+  activeChatState: ChatState,
+): SelectOption[] {
   return [
-    ...sessions.map((session) => ({
-      name: `${String(session.number).padStart(3, "0")} ${session.title} [${session.status}]`,
-      description: "",
-    })),
+    ...sessions.map((session) => {
+      const state = session.number === activeSessionNumber ? activeChatState : "idle";
+      const activity = state === "working" ? "… " : state === "awaiting-answer" ? "? " : "";
+      return {
+        name: `${activity}${String(session.number).padStart(3, "0")} ${session.title} [${session.status}]`,
+        description: "",
+      };
+    }),
     { name: "+ New Session", description: "" },
   ];
 }
+
+const destinationOptions: SelectOption[] = [
+  { name: "Characters", description: "", value: "characters" satisfies Destination },
+  { name: "Story So Far", description: "", value: "story" satisfies Destination },
+  { name: "Settings", description: "", value: "settings" satisfies Destination },
+];
 
 export async function makeCampaignWorkspaceScreen(
   renderer: CliRenderer,
@@ -52,11 +72,16 @@ export async function makeCampaignWorkspaceScreen(
   let disposed = false;
   let modalOpen = false;
   let creating = false;
-  let pane: "sidebar" | "chat" = sessions.length > 0 ? "chat" : "sidebar";
+  let pane: "sidebar" | "chat" | "view" = sessions.length > 0 ? "chat" : "sidebar";
+  let sidebarFocus: "sessions" | "destinations" = "sessions";
   let activation = 0;
+  let chatGeneration = 0;
   let activeSessionNumber: number | null = null;
+  let activeChatState: ChatState = "idle";
   let activeChat: ChatScreen | null = null;
-  let rightChild: Renderable | null = null;
+  let activeView: CampaignPane | null = null;
+  let activeDestination: Destination | null = null;
+  let auxiliaryChild: Renderable | null = null;
 
   const container = new BoxRenderable(renderer, {
     width: "100%",
@@ -78,40 +103,45 @@ export async function makeCampaignWorkspaceScreen(
     borderColor: theme.surfaceActive,
     backgroundColor: theme.surface,
   });
-  sidebar.add(new TextRenderable(renderer, { content: campaign.name, fg: theme.accent }));
-  sidebar.add(
-    new TextRenderable(renderer, {
-      content: campaign.system || "System not set",
-      fg: theme.textMuted,
-      marginBottom: 1,
-    }),
-  );
+  const campaignName = new TextRenderable(renderer, { content: campaign.name, fg: theme.accent });
+  const campaignSystem = new TextRenderable(renderer, {
+    content: campaign.system || "System not set",
+    fg: theme.textMuted,
+    marginBottom: 1,
+  });
+  sidebar.add(campaignName);
+  sidebar.add(campaignSystem);
   sidebar.add(new TextRenderable(renderer, { content: "Sessions", fg: theme.textDim }));
 
   const status = new TextRenderable(renderer, { content: "", fg: theme.danger, height: 1 });
   sidebar.add(status);
 
-  const menu = new SelectRenderable(renderer, {
+  const sessionMenu = new SelectRenderable(renderer, {
     width: "100%",
     height: 1,
     flexGrow: 1,
     showDescription: false,
-    options: sessionOptions(sessions),
+    showScrollIndicator: true,
+    options: sessionOptions(sessions, activeSessionNumber, activeChatState),
     selectedIndex: sessions.length > 0 ? sessions.length - 1 : 0,
     selectedBackgroundColor: theme.accent,
     selectedTextColor: theme.text,
   });
-  enableSelectMouse(menu, () => !modalOpen && !creating);
-  sidebar.add(menu);
+  enableSelectMouse(sessionMenu, () => !modalOpen && !creating);
+  sidebar.add(sessionMenu);
 
-  sidebar.add(
-    new TextRenderable(renderer, {
-      content: "Settings (coming soon)",
-      fg: theme.textMuted,
-      flexShrink: 0,
-      marginTop: 1,
-    }),
-  );
+  const destinationMenu = new SelectRenderable(renderer, {
+    width: "100%",
+    height: destinationOptions.length,
+    flexShrink: 0,
+    marginTop: 1,
+    showDescription: false,
+    options: destinationOptions,
+    selectedBackgroundColor: theme.accent,
+    selectedTextColor: theme.text,
+  });
+  enableSelectMouse(destinationMenu, () => !modalOpen && !creating);
+  sidebar.add(destinationMenu);
 
   const rightPane = new BoxRenderable(renderer, {
     height: "100%",
@@ -119,9 +149,9 @@ export async function makeCampaignWorkspaceScreen(
     flexDirection: "column",
     backgroundColor: theme.background,
   });
-  // Clicking the prompt restores chat shortcuts after Escape focused the sidebar.
   rightPane.onMouseDown = () => {
-    if (activeChat) pane = "chat";
+    if (disposed || modalOpen) return;
+    if (activeChat?.node.visible) pane = "chat";
   };
 
   container.add(sidebar);
@@ -134,104 +164,231 @@ export async function makeCampaignWorkspaceScreen(
       justifyContent: "center",
       alignItems: "center",
     });
-    box.add(
-      new TextRenderable(renderer, {
-        content: message,
-        fg: tone === "error" ? theme.danger : theme.textMuted,
-      }),
-    );
+    box.add(new TextRenderable(renderer, {
+      content: message,
+      fg: tone === "error" ? theme.danger : theme.textMuted,
+    }));
     return box;
   }
 
-  function removeRightChild(): void {
-    if (!rightChild) return;
-    rightPane.remove(rightChild);
-    rightChild.destroyRecursively();
-    rightChild = null;
+  function clearAuxiliary(): void {
+    if (!auxiliaryChild) return;
+    rightPane.remove(auxiliaryChild);
+    auxiliaryChild.destroyRecursively();
+    auxiliaryChild = null;
   }
 
-  function disposeActiveChat(): void {
-    if (!activeChat) return;
-    activeChat.dispose?.();
-    activeChat = null;
-    activeSessionNumber = null;
-  }
-
-  function showRight(child: Renderable): void {
-    removeRightChild();
-    rightChild = child;
+  function showAuxiliary(child: Renderable): void {
+    clearAuxiliary();
+    auxiliaryChild = child;
     rightPane.add(child);
   }
 
-  function focusSidebar(): void {
-    if (disposed) return;
-    pane = "sidebar";
-    menu.focus();
+  function disposeActiveView(): void {
+    if (!activeView) return;
+    const view = activeView;
+    activeView = null;
+    activeDestination = null;
+    view.dispose();
+    if (auxiliaryChild === view.node) auxiliaryChild = null;
+    rightPane.remove(view.node);
+    view.node.destroyRecursively();
   }
 
-  async function activateSession(session: Session): Promise<void> {
+  function disposeActiveChat(): void {
+    chatGeneration++;
+    const chat = activeChat;
+    activeChat = null;
+    activeSessionNumber = null;
+    activeChatState = "idle";
+    if (chat) {
+      chat.dispose?.();
+      rightPane.remove(chat.node);
+      chat.node.destroyRecursively();
+    }
+    if (!disposed) refreshSessionOptions();
+  }
+
+  function focusSidebar(target: "sessions" | "destinations" = sidebarFocus): void {
+    if (disposed) return;
+    pane = "sidebar";
+    sidebarFocus = target;
+    (target === "sessions" ? sessionMenu : destinationMenu).focus();
+  }
+
+  function refreshSessionOptions(): void {
+    const selected = sessionMenu.getSelectedIndex();
+    sessionMenu.options = sessionOptions(sessions, activeSessionNumber, activeChatState);
+    sessionMenu.setSelectedIndex(Math.min(selected, sessions.length));
+  }
+
+  function clearPendingChat(sessionNumber: number, generation: number): void {
+    if (generation !== chatGeneration || activeSessionNumber !== sessionNumber) return;
+    chatGeneration++;
+    activeSessionNumber = null;
+    activeChatState = "idle";
+    if (!disposed) refreshSessionOptions();
+  }
+
+  function leaveActiveView(next: () => void): void {
+    if (!activeView) {
+      next();
+      return;
+    }
+    activeView.requestLeave(() => {
+      disposeActiveView();
+      next();
+    });
+  }
+
+  function showChat(): void {
+    clearAuxiliary();
+    if (!activeChat) return;
+    activeChat.node.visible = true;
+    pane = "chat";
+    activeChat.focus?.();
+  }
+
+  async function activateSessionNow(session: Session): Promise<void> {
     if (disposed) return;
     const index = sessions.findIndex((candidate) => candidate.number === session.number);
-    if (index >= 0) menu.setSelectedIndex(index);
+    if (index >= 0) sessionMenu.setSelectedIndex(index);
+    sidebarFocus = "sessions";
 
     if (activeChat && activeSessionNumber === session.number) {
-      pane = "chat";
-      activeChat.focus?.();
+      showChat();
       return;
     }
 
     const request = ++activation;
     disposeActiveChat();
-    showRight(placeholder(`Opening session ${String(session.number).padStart(3, "0")}…`));
+    const chatRequest = chatGeneration;
+    activeSessionNumber = session.number;
+    activeChatState = "idle";
+    refreshSessionOptions();
+    clearAuxiliary();
+    showAuxiliary(placeholder(`Opening session ${String(session.number).padStart(3, "0")}…`));
 
     try {
       const chat = await options.makeSessionChat(session, {
-        onBack: focusSidebar,
+        onBack: () => focusSidebar("sessions"),
         isInputActive: () => !disposed && pane === "chat" && !modalOpen,
         onInputFocus: () => {
-          if (!disposed && !modalOpen) pane = "chat";
+          if (!disposed && !modalOpen && activeChat?.node.visible) pane = "chat";
+        },
+        onStateChange: (state) => {
+          if (
+            disposed ||
+            chatRequest !== chatGeneration ||
+            activeSessionNumber !== session.number
+          ) return;
+          activeChatState = state;
+          refreshSessionOptions();
         },
       });
       if (disposed || request !== activation) {
+        clearPendingChat(session.number, chatRequest);
         chat.dispose?.();
         chat.node.destroyRecursively();
         return;
       }
-      removeRightChild();
+      clearAuxiliary();
       activeChat = chat;
       activeSessionNumber = session.number;
-      rightChild = chat.node;
       rightPane.add(chat.node);
       pane = "chat";
       chat.focus?.();
     } catch (error) {
+      clearPendingChat(session.number, chatRequest);
       if (disposed || request !== activation) return;
-      showRight(
-        placeholder(
-          `Failed to open session: ${error instanceof Error ? error.message : String(error)}`,
-          "error",
-        ),
-      );
-      focusSidebar();
+      showAuxiliary(placeholder(
+        `Failed to open session: ${error instanceof Error ? error.message : String(error)}`,
+        "error",
+      ));
+      focusSidebar("sessions");
     }
+  }
+
+  function activateSession(session: Session): void {
+    leaveActiveView(() => void activateSessionNow(session));
+  }
+
+  async function showDestinationNow(destination: Destination): Promise<void> {
+    if (disposed) return;
+    const request = ++activation;
+    disposeActiveView();
+    clearAuxiliary();
+    if (activeChat) activeChat.node.visible = false;
+    else disposeActiveChat();
+    pane = "view";
+    sidebarFocus = "destinations";
+    showAuxiliary(placeholder(destination === "characters" ? "Opening characters…" : "Opening campaign…"));
+
+    const paneOptions = {
+      campaign,
+      isActive: () => !disposed && pane === "view" && !modalOpen,
+      onBack: () => focusSidebar("destinations"),
+      onInputFocus: () => {
+        if (!disposed && !modalOpen && activeView) pane = "view";
+      },
+      onCampaignChange: () => {
+        campaignName.content = campaign.name;
+        campaignSystem.content = campaign.system || "System not set";
+      },
+    };
+    // Yield even for synchronous panes so the clicked menu finishes handling
+    // focus before the newly mounted editor takes it.
+    const view = await (destination === "characters"
+      ? makeCharactersPane(renderer, paneOptions)
+      : destination === "story"
+        ? makeStoryPane(renderer, paneOptions)
+        : makeCampaignSettingsPane(renderer, paneOptions));
+
+    if (disposed || request !== activation) {
+      view.dispose();
+      view.node.destroyRecursively();
+      return;
+    }
+    clearAuxiliary();
+    activeView = view;
+    activeDestination = destination;
+    auxiliaryChild = view.node;
+    rightPane.add(view.node);
+    pane = "view";
+    view.focus();
+  }
+
+  function showDestination(destination: Destination): void {
+    if (activeView && activeDestination === destination && pane === "sidebar") {
+      pane = "view";
+      activeView.focus();
+      return;
+    }
+    leaveActiveView(() => void showDestinationNow(destination));
   }
 
   function updateSessions(next: Session[], selected?: Session): void {
     sessions = next;
-    menu.options = sessionOptions(sessions);
+    refreshSessionOptions();
     const selectedIndex = selected
       ? sessions.findIndex((session) => session.number === selected.number)
       : Math.max(0, sessions.length - 1);
-    menu.setSelectedIndex(selectedIndex >= 0 ? selectedIndex : sessions.length);
+    sessionMenu.setSelectedIndex(selectedIndex >= 0 ? selectedIndex : sessions.length);
   }
 
-  const sessionDialog = makeSessionDialog(renderer, {
-    onSubmit: (title) => {
+  let sessionDialog: ReturnType<typeof makeSessionDialog>;
+  function openSessionDialog(): void {
+    modalOpen = true;
+    sessionDialog.open(campaign.nextSession);
+  }
+
+  sessionDialog = makeSessionDialog(renderer, {
+    onSubmit: (sessionTitle) => {
       modalOpen = false;
       creating = true;
       status.fg = theme.textMuted;
       status.content = "Creating session…";
-      void createSession(campaign, title)
+      void createSession(campaign, sessionTitle)
         .then(async (session) => {
           if (disposed) return;
           const next = await listSessions(campaign);
@@ -239,54 +396,82 @@ export async function makeCampaignWorkspaceScreen(
           updateSessions(next, session);
           status.content = "";
           creating = false;
-          await activateSession(session);
+          await activateSessionNow(session);
         })
         .catch((error: unknown) => {
           if (disposed) return;
           creating = false;
           status.fg = theme.danger;
           status.content = `Failed to create: ${error instanceof Error ? error.message : String(error)}`;
-          focusSidebar();
+          focusSidebar("sessions");
         });
     },
     onCancel: () => {
       modalOpen = false;
-      focusSidebar();
+      focusSidebar("sessions");
     },
   });
   renderer.root.add(sessionDialog.layer);
 
-  menu.on(SelectRenderableEvents.ITEM_SELECTED, (index: number) => {
+  sessionMenu.on(SelectRenderableEvents.ITEM_SELECTED, (index: number) => {
     if (modalOpen || creating) return;
     const session = sessions[index];
-    if (session) {
-      void activateSession(session);
-      return;
-    }
-    if (index === sessions.length) {
-      modalOpen = true;
-      sessionDialog.open(campaign.nextSession);
-    }
+    if (session) activateSession(session);
+    else if (index === sessions.length) leaveActiveView(openSessionDialog);
+  });
+
+  destinationMenu.on(SelectRenderableEvents.ITEM_SELECTED, (index: number) => {
+    if (modalOpen || creating) return;
+    const destination = destinationOptions[index]?.value as Destination | undefined;
+    if (destination) showDestination(destination);
   });
 
   const onScreenKeypress = (key: KeyEvent): void => {
-    if (modalOpen || pane !== "sidebar" || key.name !== "escape") return;
-    key.preventDefault();
-    options.onBack();
+    if (modalOpen || pane !== "sidebar") return;
+    if (key.name === "escape") {
+      key.preventDefault();
+      leaveActiveView(options.onBack);
+      return;
+    }
+    if (key.name === "tab") {
+      key.preventDefault();
+      sidebarFocus = renderer.currentFocusedRenderable === sessionMenu ? "destinations" : "sessions";
+      (sidebarFocus === "sessions" ? sessionMenu : destinationMenu).focus();
+      return;
+    }
+    if (
+      (key.name === "down" || key.name === "j") &&
+      renderer.currentFocusedRenderable === sessionMenu &&
+      sessionMenu.getSelectedIndex() === sessions.length
+    ) {
+      key.preventDefault();
+      sidebarFocus = "destinations";
+      destinationMenu.setSelectedIndex(0);
+      destinationMenu.focus();
+      return;
+    }
+    if (
+      (key.name === "up" || key.name === "k") &&
+      renderer.currentFocusedRenderable === destinationMenu &&
+      destinationMenu.getSelectedIndex() === 0
+    ) {
+      key.preventDefault();
+      sidebarFocus = "sessions";
+      sessionMenu.setSelectedIndex(sessions.length);
+      sessionMenu.focus();
+    }
   };
   renderer.keyInput.on("keypress", onScreenKeypress);
 
-  if (sessions.length > 0) {
-    await activateSession(sessions[sessions.length - 1]!);
-  } else {
-    showRight(placeholder("No sessions yet — create one from the sidebar."));
-  }
+  if (sessions.length > 0) await activateSessionNow(sessions[sessions.length - 1]!);
+  else showAuxiliary(placeholder("No sessions yet — create one from the sidebar."));
 
   return {
     node: container,
     focus: () => {
       if (pane === "chat" && activeChat) activeChat.focus?.();
-      else menu.focus();
+      else if (pane === "view" && activeView) activeView.focus();
+      else (sidebarFocus === "sessions" ? sessionMenu : destinationMenu).focus();
     },
     handleInterrupt: () =>
       pane === "chat" && activeChat ? (activeChat.handleInterrupt?.() ?? "quit") : "quit",
@@ -298,8 +483,9 @@ export async function makeCampaignWorkspaceScreen(
       sessionDialog.close();
       renderer.root.remove(sessionDialog.layer);
       sessionDialog.layer.destroyRecursively();
+      disposeActiveView();
       disposeActiveChat();
-      removeRightChild();
+      clearAuxiliary();
     },
   };
 }
