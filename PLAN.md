@@ -42,7 +42,8 @@ A **Session** has three statuses:
 
 - **System** — freeform string ("D&D 5e", "Shadowdark"). Not an enum; UI may
   offer suggestions. Later: system-specific prompt hints.
-- **Campaign** — name, system, background, running summary, session counter.
+- **Campaign** — name, system, short description, background, running summary,
+  planning preferences, party characters, session counter.
 - **Session** — number, title, status, planning notes (markdown), outcome
   report, derived summary.
 - **Conversation** — planning/report chat transcripts, kept so planning can
@@ -57,7 +58,9 @@ A **Session** has three statuses:
 ~/Scribe/
   Curse of Strahd/
     campaign.md              # frontmatter: name, system, created, nextSession
-                             # body: ## Background … ## The Story So Far
+                             # body: description/background/story/preferences
+    characters/
+      mara-voss.md           # frontmatter: name, class; body: description
     sessions/
       001-death-house.md     # frontmatter: number, title, status, dates
                              # body: plan; outcome + summary appended later
@@ -127,8 +130,10 @@ tools.**
   tone and house rules without being able to delete the tool rules above it.
   These instruction files are never created by the app; if absent they
   contribute nothing.
-- **Context assembly** — system prompt (as above) + campaign background +
-  running summary + current draft + chat history. Known future issue: the
+- **Context assembly** — system prompt (as above) + campaign details + party
+  characters + running summary + current draft + chat history. Campaign chat
+  reloads mutable context before each turn, so workspace edits are immediately
+  available to the next request. Known future issue: the
   running summary grows unboundedly; add a compression step later (not v1).
 
 UI notes: OpenTUI 0.4.5 already ships `Markdown` and `ScrollBox` renderables —
@@ -139,7 +144,7 @@ the chat transcript renders streamed markdown directly.
 ```
 Main menu          → app destinations; nested campaign list/create (exists)
 Campaign workspace → two panes: session/status sidebar + persistent session chat;
-                     new-session form; Settings placeholder pinned at the bottom
+                     pinned Characters, Story So Far, and campaign Settings views
 Chat screen        → shared harness embedded by campaign mode and used full-screen elsewhere;
                      agent questions replace the prompt box until answered;
                      `/` commands and `@` mentions complete in a popup above it

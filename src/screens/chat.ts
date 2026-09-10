@@ -34,6 +34,13 @@ export interface ChatLogStore {
   save(messages: ChatMessage[]): Promise<void>;
 }
 
+export type ChatState = "idle" | "working" | "awaiting-answer";
+
+export interface ChatTurnContext {
+  systemPrompt?: string;
+  tools?: AgentTool[];
+}
+
 export interface ChatScreenOptions {
   provider: ChatProvider;
   /** Shown on the right of the title bar. */
@@ -45,6 +52,8 @@ export interface ChatScreenOptions {
   systemPrompt?: string;
   /** Non-empty tools enable the agent loop; otherwise use plain streaming. */
   tools?: AgentTool[];
+  /** Reload mutable context immediately before each submitted turn. */
+  loadTurnContext?: () => Promise<ChatTurnContext>;
   chatLog?: ChatLogStore;
   /** Must be the same channel passed to the tools' ToolContext. */
   ask?: AskChannel;
@@ -54,6 +63,7 @@ export interface ChatScreenOptions {
   isInputActive?: () => boolean;
   /** Notify an embedding owner when the prompt takes focus (including by mouse). */
   onInputFocus?: () => void;
+  onStateChange?: (state: ChatState) => void;
   /** Request navigation away from the chat. The owner remains responsible for disposal. */
   onBack: () => void;
 }
@@ -143,6 +153,11 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
   // Turns can outlive the screen; guard access to destroyed renderables/styles.
   let disposed = false;
 
+  function setState(state: ChatState): void {
+    if (!disposed) options.onStateChange?.(state);
+  }
+  setState("idle");
+
   if (options.modelInfo) {
     void options.modelInfo.then((info) => {
       if (disposed) return;
@@ -212,6 +227,8 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
       });
       askWidget = widget;
 
+      setState("awaiting-answer");
+
       endActivity();
 
       prompt.node.visible = false;
@@ -219,7 +236,7 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
       prompt.input.blur();
       // A hidden prompt takes no layout space, so the question fills its slot.
       container.add(widget.node);
-      widget.focus();
+      if (!options.isInputActive || options.isInputActive()) widget.focus();
     });
   }
 
@@ -231,7 +248,8 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
     widget.node.destroyRecursively();
     prompt.node.visible = true;
     if (disposed) return;
-    prompt.input.focus();
+    setState(busy ? "working" : "idle");
+    if (!options.isInputActive || options.isInputActive()) prompt.input.focus();
   }
 
   const detachAsk = options.ask?.attach(presentQuestion);
@@ -350,12 +368,30 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
   async function send(): Promise<void> {
     const text = prompt.input.plainText.trim();
     if (text === "" || busy) return;
+    busy = true;
+    setState("working");
+    let turnContext: ChatTurnContext = {};
+    try {
+      turnContext = (await options.loadTurnContext?.()) ?? {};
+    } catch (err) {
+      busy = false;
+      if (disposed) return;
+      setState("idle");
+      transcript.addNotice(
+        `Couldn't prepare this turn: ${err instanceof Error ? err.message : String(err)}`,
+        "danger",
+      );
+      if (!options.isInputActive || options.isInputActive()) prompt.input.focus();
+      return;
+    }
+    if (disposed) return;
     prompt.input.clear();
     messages.push({ role: "user", content: text });
-    const agentTools = options.tools && options.tools.length > 0 ? options.tools : null;
+    const configuredTools = turnContext.tools ?? options.tools;
+    const systemPrompt = turnContext.systemPrompt ?? options.systemPrompt;
+    const agentTools = configuredTools && configuredTools.length > 0 ? configuredTools : null;
     // The agent loop supplies its own assistant messages through onMessage.
     if (!agentTools) messages.push({ role: "assistant", content: "" });
-    busy = true;
     render();
 
     try {
@@ -363,7 +399,7 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
         const result = await runAgent(
           {
             provider: options.provider,
-            ...(options.systemPrompt !== undefined ? { systemPrompt: options.systemPrompt } : {}),
+            ...(systemPrompt !== undefined ? { systemPrompt } : {}),
             tools: agentTools,
             onText: (delta) => appendStreamed(delta),
             // Preserve message identity so the final splice reuses rendered rows.
@@ -393,8 +429,8 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
       } else {
         // Keep the system prompt out of the transcript and saved log.
         const context: ChatMessage[] =
-          options.systemPrompt && options.systemPrompt.trim() !== ""
-            ? [{ role: "system", content: options.systemPrompt }, ...messages]
+          systemPrompt && systemPrompt.trim() !== ""
+            ? [{ role: "system", content: systemPrompt }, ...messages]
             : messages;
         beginThinking();
         for await (const event of options.provider.streamChat(context)) {
@@ -410,6 +446,7 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
     } finally {
       busy = false;
       if (!disposed) {
+        setState("idle");
         endActivity();
         render();
         if (options.chatLog) {

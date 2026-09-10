@@ -10,6 +10,7 @@ import {
 } from "../src/agent/context.ts";
 import { CORE_CAMPAIGN_PROMPT, CORE_ONESHOT_PROMPT } from "../src/agent/prompts.ts";
 import type { Campaign } from "../src/store/campaigns.ts";
+import { createCharacter } from "../src/store/characters.ts";
 import type { Session } from "../src/store/sessions.ts";
 import type { Settings } from "../src/store/settings.ts";
 
@@ -40,8 +41,10 @@ beforeEach(async () => {
   campaign = {
     name: "Curse of Strahd",
     system: "D&D 5e",
+    shortDescription: "A gothic horror campaign.",
     description: "Gothic horror in Barovia.",
     storySoFar: "The party arrived in Vallaki.",
+    planningPreferences: "Keep the pressure high.",
     created: "2026-01-01",
     nextSession: 4,
     dir: join(dir, "Scribe", "Curse of Strahd"),
@@ -66,11 +69,20 @@ afterEach(async () => {
 
 describe("prompt assembly", () => {
   test("planning prompt is core + campaign context, with no instructions file", async () => {
+    await createCharacter(campaign, {
+      name: "Ireena",
+      className: "Noble",
+      description: "Determined to escape Strahd.",
+    });
     const prompt = await buildPlanningSystemPrompt(campaign, session, settings);
     expect(prompt).toContain(CORE_CAMPAIGN_PROMPT.trim());
     expect(prompt).toContain("Curse of Strahd");
     expect(prompt).toContain("The party arrived in Vallaki.");
     expect(prompt).toContain("The bones are missing.");
+    expect(prompt).toContain("A gothic horror campaign.");
+    expect(prompt).toContain("Ireena — Noble");
+    expect(prompt).toContain("Determined to escape Strahd.");
+    expect(prompt).toContain("Keep the pressure high.");
     expect(prompt).not.toContain("# User Instructions");
   });
 

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { createMockKeys, type TestRenderer } from "@opentui/core/testing";
 import { setupRenderer, wait } from "./helpers/renderer.ts";
-import { MarkdownRenderable, TextareaRenderable, type Renderable } from "@opentui/core";
+import { BoxRenderable, MarkdownRenderable, TextareaRenderable, type Renderable } from "@opentui/core";
 import { makeChatScreen, type ChatLogStore } from "../src/screens/chat.ts";
 import type { Screen } from "../src/screens/screen.ts";
 import type { ChatEvent, ChatMessage, ChatProvider } from "../src/provider/types.ts";
@@ -55,6 +55,104 @@ async function open(provider: ChatProvider): Promise<void> {
 }
 
 describe("chat screen", () => {
+  test.each(["resolve", "reject"])("leaving while turn context loads safely handles a later %s", async (outcome) => {
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => { release = resolve; });
+    let requests = 0;
+    const states: string[] = [];
+    current = await makeChatScreen(renderer, {
+      provider: {
+        async *streamChat() {
+          requests++;
+          yield { type: "text", delta: "Should not be requested" };
+        },
+      },
+      loadTurnContext: async () => {
+        await pending;
+        if (outcome === "reject") throw new Error("context unavailable");
+        return { systemPrompt: "fresh" };
+      },
+      onStateChange: (state) => states.push(state),
+      onBack: () => {},
+    });
+    renderer.root.add(current.node);
+    current.focus?.();
+    await keys.typeText("plan", 1);
+    keys.pressEnter();
+    await wait(20);
+    expect(states.at(-1)).toBe("working");
+    current.dispose?.();
+    renderer.root.remove(current.node);
+    current.node.destroyRecursively();
+    current = null;
+    release();
+    await wait(40);
+    expect(requests).toBe(0);
+    expect(states).toEqual(["idle", "working"]);
+  });
+
+  test("reloads turn context before every submission", async () => {
+    const systemPrompts: string[] = [];
+    let context = "first campaign context";
+    const states: string[] = [];
+    current = await makeChatScreen(renderer, {
+      provider: {
+        async *streamChat(messages) {
+          systemPrompts.push(messages[0]?.content ?? "");
+          yield { type: "text", delta: "done" };
+        },
+      },
+      loadTurnContext: async () => ({ systemPrompt: context }),
+      onStateChange: (state) => states.push(state),
+      onBack: () => {},
+    });
+    renderer.root.add(current.node);
+    current.focus?.();
+
+    await keys.typeText("one", 3);
+    keys.pressEnter();
+    await wait();
+    context = "second campaign context";
+    await keys.typeText("two", 3);
+    keys.pressEnter();
+    await wait();
+
+    expect(systemPrompts).toEqual(["first campaign context", "second campaign context"]);
+    expect(states).toEqual(["idle", "working", "idle", "working", "idle"]);
+  });
+
+  test("keeps the prompt intact when loading turn context fails", async () => {
+    let fail = true;
+    let requests = 0;
+    current = await makeChatScreen(renderer, {
+      provider: {
+        async *streamChat() {
+          requests++;
+          yield { type: "text", delta: "sent" };
+        },
+      },
+      loadTurnContext: async () => {
+        if (fail) throw new Error("campaign file is busy");
+        return { systemPrompt: "fresh" };
+      },
+      onBack: () => {},
+    });
+    renderer.root.add(current.node);
+    current.focus?.();
+    await keys.typeText("keep this draft", 2);
+    keys.pressEnter();
+    await wait(60);
+    await renderOnce();
+    expect(captureCharFrame()).toContain("keep this draft");
+    expect(captureCharFrame()).toContain("campaign file is busy");
+    expect(requests).toBe(0);
+
+    fail = false;
+    keys.pressEnter();
+    await wait();
+    expect(requests).toBe(1);
+  });
+
   test("streams an assistant reply into the transcript", async () => {
     await open(okProvider);
     await keys.typeText("hello", 5);
@@ -556,6 +654,37 @@ describe("chat screen", () => {
       expect(frame.includes("Waiting for your answer")).toBe(false);
       // Still mid-turn: the tool result hasn't gone back to the model yet.
       expect(turns).toBe(1);
+    });
+
+    test("a question arriving while embedded chat is hidden does not steal focus", async () => {
+      let active = true;
+      const states: string[] = [];
+      const channel = makeAskChannel();
+      current = await makeChatScreen(renderer, {
+        provider: askingProvider(ONE_OF_TWO),
+        tools: resolveTools(["ask_user"], { ask: channel }),
+        ask: channel,
+        isInputActive: () => active,
+        onStateChange: (state) => states.push(state),
+        onBack: () => {},
+      });
+      renderer.root.add(current.node);
+      current.focus?.();
+      await keys.typeText("plan it", 3);
+      keys.pressEnter();
+      active = false;
+      const outside = new BoxRenderable(renderer, { width: 1, height: 1, focusable: true });
+      renderer.root.add(outside);
+      outside.focus();
+      await wait(80);
+
+      expect(states).toContain("awaiting-answer");
+      expect(renderer.currentFocusedRenderable).toBe(outside);
+      active = true;
+      current.focus?.();
+      keys.pressKey("1");
+      await wait();
+      expect(states.at(-1)).toBe("idle");
     });
 
     test("a digit picks an option, and the turn resumes with the answer", async () => {

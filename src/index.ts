@@ -172,27 +172,29 @@ async function makeCampaignSessionChat(
   session: Session,
   host: SessionChatHost,
 ): Promise<Awaited<ReturnType<typeof makeChatScreen>>> {
-  // Include the previous chat's edits in the next session's system prompt.
-  const fresh = (await loadCampaign(campaign.dir)) ?? campaign;
-  const systemPrompt = await buildPlanningSystemPrompt(fresh, session, settings);
   const ask = makeAskChannel();
-  const tools = toolsFor("planning", {
-    campaign: fresh,
-    session,
-    ask,
-    sourcesDir: settings.sourcesDir,
-    defaultSystem: fresh.system,
-  });
   return makeChatScreen(renderer, {
     ...makeChatOptions(),
     title: `Session ${String(session.number).padStart(3, "0")} — ${session.title}`,
-    systemPrompt,
-    tools,
-    chatLog: makeChatLog(fresh, session),
+    loadTurnContext: async () => {
+      const fresh = (await loadCampaign(campaign.dir)) ?? campaign;
+      return {
+        systemPrompt: await buildPlanningSystemPrompt(fresh, session, settings),
+        tools: toolsFor("planning", {
+          campaign: fresh,
+          session,
+          ask,
+          sourcesDir: settings.sourcesDir,
+          defaultSystem: fresh.system,
+        }),
+      };
+    },
+    chatLog: makeChatLog(campaign, session),
     ask,
-    completions: campaignCompletions(fresh, settings.sourcesDir),
+    completions: campaignCompletions(campaign, settings.sourcesDir),
     isInputActive: host.isInputActive,
     onInputFocus: host.onInputFocus,
+    onStateChange: host.onStateChange,
     onBack: host.onBack,
   });
 }
