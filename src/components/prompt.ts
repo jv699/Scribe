@@ -17,7 +17,7 @@ export interface Prompt {
 
 export function makePrompt(ctx: RenderContext, options: PromptOptions): Prompt {
   const { node: promptBox, panel } = makeAccentPanel(ctx);
-  const initialHint = options.hint ?? "Enter to send · Shift+Enter for a new line · Esc to exit";
+  const initialHint = options.hint ?? "Enter to send · Shift+Enter for a new line · Esc twice to go back";
 
   const input = new TextareaRenderable(ctx, {
     placeholder: options.placeholder ?? "Type a message…",

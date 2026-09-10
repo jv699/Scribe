@@ -116,8 +116,7 @@ describe("campaign workspace flow", () => {
     let frame = captureCharFrame();
     expect(frame.includes("Back") && frame.includes("Create Campaign")).toBe(true);
 
-    // Create a campaign through the dialog.
-    await keys.pressKeys(["ARROW_DOWN"], 20);
+    // With no campaigns, Create Campaign is the first row.
     keys.pressEnter();
     await wait(100);
     await keys.typeText("Curse of Strahd", 5);
@@ -155,13 +154,18 @@ describe("campaign workspace flow", () => {
     expect(frame.includes("Report outcome")).toBe(false);
     expect(frame.includes("Move to Trash")).toBe(false);
 
-    // First Escape moves from chat to the sidebar; the workspace remains.
+    // First Escape warns; the chat keeps focus and the workspace remains.
     keys.pressKey("ESCAPE");
     await wait(100);
     await renderOnce();
     expect(captureCharFrame().includes("Session 001 — Death House")).toBe(true);
+    expect(captureCharFrame().includes("Press Escape again to go back")).toBe(true);
 
-    // A second Escape returns to the campaign submenu.
+    // A quick second Escape moves from chat to the sidebar.
+    keys.pressKey("ESCAPE");
+    await wait(100);
+
+    // Escape from the sidebar returns to the campaign submenu.
     keys.pressKey("ESCAPE");
     await wait(300);
     await renderOnce();
@@ -169,8 +173,7 @@ describe("campaign workspace flow", () => {
     expect(frame.includes("Create Campaign")).toBe(true);
     expect(frame.includes("Curse of Strahd")).toBe(true);
 
-    // navigate back in — loaded from disk
-    await keys.pressKeys(["ARROW_DOWN", "ARROW_DOWN"], 20);
+    // The saved campaign is now the first row; reopen it from disk.
     keys.pressEnter();
     await wait();
     await renderOnce();
@@ -223,7 +226,9 @@ describe("campaign workspace flow", () => {
     expect(frame).toContain("History for The Keep");
     expect(frame).not.toContain("Report outcome");
 
-    // Escape hands control to the selected sidebar row; choose the prior one.
+    // Double Escape hands control to the selected sidebar row; choose the prior one.
+    keys.pressKey("ESCAPE");
+    await wait(30);
     keys.pressKey("ESCAPE");
     await wait(30);
     await keys.pressKeys(["ARROW_UP"], 20);
@@ -273,6 +278,8 @@ describe("campaign workspace flow", () => {
 
     // Start loading session 1, then select session 2 before the first load
     // resolves. Session 1's eventual chat must be discarded as stale.
+    keys.pressKey("ESCAPE");
+    await wait(30);
     keys.pressKey("ESCAPE");
     await wait(30);
     await keys.pressKeys(["ARROW_UP"], 10);
@@ -374,7 +381,8 @@ describe("select mouse support", () => {
     await renderOnce();
     expect(captureCharFrame().includes("Create Campaign")).toBe(true);
 
-    // Return to the root, then Enter on the initially selected Campaigns row.
+    // Back follows Create Campaign in an empty campaign list.
+    await keys.pressKeys(["ARROW_DOWN"], 20);
     keys.pressEnter();
     await renderOnce();
     expect(captureCharFrame().includes("Drafting Table")).toBe(true);
@@ -396,6 +404,28 @@ describe("select mouse support", () => {
 });
 
 describe("two-stage main menu", () => {
+  test("campaign rows select their matching campaigns before Create and Back", async () => {
+    const first = await createCampaign(campaignsDir, { name: "First Campaign", system: "5e", description: "" });
+    const second = await createCampaign(campaignsDir, { name: "Second Campaign", system: "5e", description: "" });
+    const selected: Campaign[] = [];
+    showScreen(makeMainMenuScreen(renderer, {
+      campaigns: [first, second],
+      initialView: "campaigns",
+      playIntro: false,
+      onCreateCampaign: () => {},
+      onSelectCampaign: (campaign) => selected.push(campaign),
+      onSettings: () => {},
+      onOneshotPlanner: () => {},
+      onQuit: () => {},
+    }));
+    await renderOnce();
+
+    keys.pressEnter();
+    await keys.pressKeys(["ARROW_DOWN"], 20);
+    keys.pressEnter();
+    expect(selected).toEqual([first, second]);
+  });
+
   test("disposing the first menu cancels its intro animations", async () => {
     const intro = makeMainMenuScreen(renderer, {
       campaigns: [],
@@ -429,6 +459,7 @@ describe("two-stage main menu", () => {
     await renderOnce();
     expect(captureCharFrame().includes("Create Campaign")).toBe(true);
 
+    await keys.pressKeys(["ARROW_DOWN"], 20);
     keys.pressEnter();
     await renderOnce();
     expect(captureCharFrame().includes("Drafting Table")).toBe(true);
@@ -446,9 +477,10 @@ describe("two-stage main menu", () => {
   test("cancelling campaign creation stays in the campaign stage", async () => {
     await showMainMenu("campaigns");
     await renderOnce();
-    await keys.pressKeys(["ARROW_DOWN"], 20);
     keys.pressEnter();
     await wait(100);
+    await renderOnce();
+    expect(captureCharFrame()).toContain("New Campaign");
 
     keys.pressKey("ESCAPE");
     await wait(100);

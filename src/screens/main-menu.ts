@@ -96,7 +96,7 @@ export function makeMainMenuScreen(renderer: CliRenderer, options: MainMenuOptio
       options.onCreateCampaign();
       return;
     }
-    const campaign = options.campaigns[index - 2];
+    const campaign = options.campaigns[index];
     if (campaign) options.onSelectCampaign(campaign);
   });
 

@@ -136,10 +136,19 @@ describe("chat screen", () => {
     expect(stored).toEqual([{ role: "user", content: "hi" }]);
   });
 
-  test("escape goes back", async () => {
+  test("Escape warns first, then goes back on a quick second press", async () => {
     await open(okProvider);
+    await keys.typeText("unfinished thought", 5);
     keys.pressKey("ESCAPE");
-    await wait(500);
+    await wait(100);
+    await renderOnce();
+    expect(wentBack).toBe(false);
+    const frame = captureCharFrame();
+    expect(frame.includes("Press Escape again to go back")).toBe(true);
+    expect(frame.includes("unfinished thought")).toBe(true);
+
+    keys.pressKey("ESCAPE");
+    await wait(100);
     expect(wentBack).toBe(true);
   });
 
@@ -198,6 +207,8 @@ describe("chat screen", () => {
     keys.pressEnter();
     await wait(60); // still mid-turn
 
+    keys.pressKey("ESCAPE");
+    await wait(30);
     keys.pressKey("ESCAPE");
     await wait(30);
     expect(wentBack).toBe(true);
@@ -403,7 +414,7 @@ describe("chat screen", () => {
     renderer.root.add(current.node);
     current.focus?.();
     await renderOnce();
-    await keys.typeText("go", 5);
+    await keys.typeText("overflow-marker", 5);
     keys.pressEnter();
     await wait();
     await renderOnce();
@@ -414,7 +425,7 @@ describe("chat screen", () => {
     expect(rows[1]!).toContain("test-model");
     // The transcript really did overflow, so the assertions above mean
     // something: the user message has scrolled out of view.
-    expect(rows.join("\n").includes("go")).toBe(false);
+    expect(rows.join("\n").includes("overflow-marker")).toBe(false);
   });
 
   // Regression: MarkdownRenderable only builds a synchronous first paint while
@@ -619,9 +630,12 @@ describe("chat screen", () => {
       // A skipped fork isn't part of the story, so it leaves no row.
       expect(frame.includes("Which hook drives session 2?")).toBe(false);
 
-      // And Escape goes back to meaning "leave" again.
+      // And Escape goes back to meaning "confirm leaving" again.
       keys.pressKey("ESCAPE");
-      await wait(500);
+      await wait(100);
+      expect(wentBack).toBe(false);
+      keys.pressKey("ESCAPE");
+      await wait(100);
       expect(wentBack).toBe(true);
     });
 
@@ -966,9 +980,12 @@ describe("chat screen", () => {
       expect(captureCharFrame().includes("@session-1")).toBe(false);
       expect(wentBack).toBe(false);
 
-      // Escape means "leave" again now the list is gone.
+      // Escape means "confirm leaving" again now the list is gone.
       keys.pressKey("ESCAPE");
-      await wait(500);
+      await wait(100);
+      expect(wentBack).toBe(false);
+      keys.pressKey("ESCAPE");
+      await wait(100);
       expect(wentBack).toBe(true);
     });
 
