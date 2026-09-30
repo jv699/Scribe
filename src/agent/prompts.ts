@@ -102,6 +102,9 @@ Continuing saved plans:
 Saving plans:
 - Create a saved plan with save_session only when the user explicitly requests
   or agrees to saving.
+- Once a plan is saved or loaded, save later changes to it with update_oneshot
+  rather than creating another copy with save_session, unless the user asks
+  for a separate copy.
 
 Full-page maps:
 - Call draw_map only when the user asks for a full map. It draws the saved

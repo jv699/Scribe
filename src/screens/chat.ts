@@ -46,6 +46,8 @@ export interface ChatCommandContext {
   /** Submit `text` as a user turn, as if typed. */
   send(text: string): void;
   notice(text: string, tone?: "muted" | "danger"): void;
+  /** Whether the conversation has anything in it yet. */
+  hasMessages(): boolean;
 }
 
 export interface ChatCommand {
@@ -361,6 +363,7 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
     notice: (text, tone) => {
       if (!disposed) transcript.addNotice(text, tone);
     },
+    hasMessages: () => messages.length > 0,
   };
 
   function refuseBusy(what: string): void {
