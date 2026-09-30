@@ -1407,6 +1407,32 @@ describe("chat screen", () => {
         expect(turns).toBe(0);
       });
 
+      test("a screen command can see whether the conversation has started", async () => {
+        const seen: boolean[] = [];
+        current = await makeChatScreen(renderer, {
+          provider: okProvider,
+          commands: [{ name: "peek", description: "Peek", run: (chat) => void seen.push(chat.hasMessages()) }],
+          onBack: () => {},
+        });
+        renderer.root.add(current.node);
+        current.focus?.();
+        await renderOnce();
+
+        const peek = async () => {
+          await keys.typeText("/peek", 5);
+          await wait(60);
+          keys.pressEnter();
+          await wait(60);
+        };
+        await peek();
+        await keys.typeText("hi", 5);
+        keys.pressEnter();
+        await wait(150);
+        await peek();
+
+        expect(seen).toEqual([false, true]);
+      });
+
       test("screen commands are refused while Scribe is working", async () => {
         let ran = false;
         const stalled: ChatProvider = {
