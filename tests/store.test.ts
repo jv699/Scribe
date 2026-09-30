@@ -23,7 +23,14 @@ import {
 import { createSession, listSessions, readSessionNotes, setSessionStatus, trashSession } from "../src/store/sessions.ts";
 import { loadChatLog, saveChatLog, clearChatLog, chatLogPath } from "../src/store/chat-log.ts";
 import { loadInstructions, loadOneshotInstructions, loadPromptOverride } from "../src/store/instructions.ts";
-import { findOneshot, listOneshots, saveOneshot, unslugOneshot, writeOneshot } from "../src/store/oneshots.ts";
+import {
+  findOneshot,
+  listOneshots,
+  saveOneshot,
+  unslugOneshot,
+  writeOneshot,
+  writeOneshotMap,
+} from "../src/store/oneshots.ts";
 import { sanitizeFolderName, uniqueName } from "../src/store/naming.ts";
 
 let dir: string;
@@ -802,6 +809,57 @@ describe("saveOneshot", () => {
     await symlink(outside, path);
 
     await expect(writeOneshot(saved!, "replacement")).rejects.toThrow();
+    expect(await readFile(outside, "utf8")).toBe("must stay untouched");
+  });
+});
+
+describe("one-shot map files", () => {
+  test("write beside the plan as <slug>.map.md, and redraws replace them", async () => {
+    await saveOneshot(dir, { title: "Sunken Abbey", content: "## Map" });
+    const saved = (await findOneshot(dir, "sunken-abbey"))!;
+
+    const path = await writeOneshotMap(saved, "Sunken Abbey", "+--+\n|  |\n+--+");
+    expect(path).toBe(join(dir, "sunken-abbey.map.md"));
+    const { data, body } = parseFrontmatter(await readFile(path, "utf8"));
+    expect(data).toMatchObject({ title: "Sunken Abbey", plan: "sunken-abbey" });
+    expect(body).toBe("```text\n+--+\n|  |\n+--+\n```\n");
+
+    await writeOneshotMap(saved, "Sunken Abbey", "redrawn");
+    expect(await readFile(path, "utf8")).toContain("```text\nredrawn\n```");
+    // The plan itself is untouched.
+    expect((await findOneshot(dir, "sunken-abbey"))!.body).toBe("## Map");
+  });
+
+  test("are not listed or resolvable as plans", async () => {
+    await saveOneshot(dir, { title: "Sunken Abbey", content: "## Map" });
+    await writeOneshotMap((await findOneshot(dir, "sunken-abbey"))!, "Sunken Abbey", "map");
+
+    expect((await listOneshots(dir)).map((oneshot) => oneshot.slug)).toEqual(["sunken-abbey"]);
+    expect(await findOneshot(dir, "sunken-abbey.map")).toBeNull();
+  });
+
+  test("a .map.md file the user wrote stays a plan and is never overwritten", async () => {
+    await saveOneshot(dir, { title: "Sunken Abbey", content: "## Map" });
+    const theirs = join(dir, "sunken-abbey.map.md");
+    await writeFile(theirs, "My own hand-drawn map notes.", "utf8");
+
+    expect((await listOneshots(dir)).map((oneshot) => oneshot.slug)).toEqual(["sunken-abbey", "sunken-abbey.map"]);
+    await expect(writeOneshotMap((await findOneshot(dir, "sunken-abbey"))!, "Sunken Abbey", "map")).rejects.toThrow(
+      "sunken-abbey.map.md already exists and isn't this plan's map",
+    );
+    expect(await readFile(theirs, "utf8")).toBe("My own hand-drawn map notes.");
+  });
+
+  test("won't replace a symlink at the map's name", async () => {
+    const oneshotsDir = join(dir, "One-Shots");
+    await saveOneshot(oneshotsDir, { title: "Sunken Abbey", content: "## Map" });
+    const outside = join(dir, "outside.md");
+    await writeFile(outside, "must stay untouched", "utf8");
+    await symlink(outside, join(oneshotsDir, "sunken-abbey.map.md"));
+
+    await expect(
+      writeOneshotMap((await findOneshot(oneshotsDir, "sunken-abbey"))!, "Sunken Abbey", "map"),
+    ).rejects.toThrow("isn't this plan's map");
     expect(await readFile(outside, "utf8")).toBe("must stay untouched");
   });
 });

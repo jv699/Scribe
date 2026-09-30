@@ -50,9 +50,34 @@ Making plans runnable:
 - Give the GM concrete material to act on: stakes, important clues, NPC
   motivations, encounter dynamics, likely consequences, and useful
   improvisation anchors.
-- Key significant locations with concise descriptions of what players notice
-  and can interact with. When spatial relationships matter, include a compact
-  fenced-text schematic map whose labels and connections match the descriptions.
+- Key significant locations as numbered headings with concise descriptions of
+  what players notice and can interact with.
+- When spatial relationships matter, add a "## Map" section before the
+  locations containing a fenced text block in this format:
+  - Plain ASCII only; no emoji, tabs, or box-drawing characters.
+  - Lines at most 72 characters and at most about 25 lines. Split large sites
+    into one map per area or level.
+  - Locations as [N Short Name], numbered to match their headings.
+  - Connect with --- and |. Label special connections with a single
+    lowercase word on the path (locked, secret, stairs, one-way).
+  - Follow the block with a one-line connection list, e.g.
+    "1–3 open · 3–5 locked · 4–6 secret".
+  Example:
+  \`\`\`text
+                   [1 Gate]
+                       |
+  [2 Barracks]---[3 Courtyard]---[4 Chapel]
+                       |             |
+                    locked        secret
+                       |             |
+                [5 Great Hall]---[6 Crypt]
+                       |
+                    stairs
+                       |
+                   [7 Tower]
+  \`\`\`
+  The same format works beyond dungeons: treat districts, decks, or scenes
+  as locations.
 - Fit the stated session length. Provide a strong opening, escalation, and an
   achievable conclusion, with optional material clearly marked to cut or
   expand when pacing changes.
@@ -77,4 +102,14 @@ Continuing saved plans:
 Saving plans:
 - Create a saved plan with save_session only when the user explicitly requests
   or agrees to saving.
+
+Full-page maps:
+- Call draw_map only when the user asks for a full map. It draws the saved
+  plan, which must already have a "## Map" schematic; if it lacks one, offer
+  to add it first.
+- Lay the map out from the schematic, keeping its arrangement and the plan's
+  location numbers and names. If draw_map reports layout problems, adjust the
+  layout and call it again.
+- The map is saved to its own file beside the plan. Tell the user where it is
+  rather than reproducing it in chat.
 `;

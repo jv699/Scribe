@@ -18,6 +18,7 @@ import type { Session } from "./store/sessions.ts";
 import { loadChatLog, saveChatLog } from "./store/chat-log.ts";
 import { indexSources } from "./store/sources.ts";
 import { campaignCompletions, oneshotCompletions } from "./completions.ts";
+import { oneshotCommands } from "./commands.ts";
 
 const renderer = await createCliRenderer({
   // Chat requires a second Ctrl+C to quit; other screens quit immediately.
@@ -149,6 +150,7 @@ async function showOneshotPlanner(): Promise<void> {
     }),
     ask,
     completions: oneshotCompletions(settings.oneshotsDir, settings.sourcesDir),
+    commands: oneshotCommands(settings.oneshotsDir, activeOneshot),
     onBack: () => navigate(showMainMenu),
   });
   activeOneshot.onRead = (oneshot) => screen.setTitle(`Drafting Table • ${oneshot.displayName}`);
