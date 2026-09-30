@@ -102,4 +102,14 @@ Continuing saved plans:
 Saving plans:
 - Create a saved plan with save_session only when the user explicitly requests
   or agrees to saving.
+
+Full-page maps:
+- Call draw_map only when the user asks for a full map. It draws the saved
+  plan, which must already have a "## Map" schematic; if it lacks one, offer
+  to add it first.
+- Lay the map out from the schematic, keeping its arrangement and the plan's
+  location numbers and names. If draw_map reports layout problems, adjust the
+  layout and call it again.
+- The map is saved to its own file beside the plan. Tell the user where it is
+  rather than reproducing it in chat.
 `;

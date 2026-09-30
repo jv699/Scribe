@@ -67,6 +67,9 @@ A **Session** has three statuses:
       002-village-of-barovia.md
     .scribe/
       chat-001.jsonl         # conversation logs (resumable), hidden
+  One-Shots/
+    sunken-abbey.md          # frontmatter: title, created, system; body: plan
+    sunken-abbey.map.md      # full-page ASCII map drawn by draw_map
   Sources/
     Shadowdark/
       Shadowdark Core Rules.pdf
@@ -98,7 +101,9 @@ tools.**
 
   Plus, added in later phases: `save_session` (one-shot only, on explicit user
   request), `list_oneshots` / `read_oneshot` / `update_oneshot` (one-shot only;
-  safely continue a saved plan with wholesale body replacement), and the source-document tools `list_sources` / `search_sources` /
+  safely continue a saved plan with wholesale body replacement), `draw_map`
+  (one-shot only; a full-page map of a saved plan with a `## Map` schematic),
+  and the source-document tools `list_sources` / `search_sources` /
   `read_source_pages` (granted to planning and one-shot, not report). See
   `AGENTS.md` for the full current tool list and per-agent grants.
 - **Asking the user** — `ask_user(question, options)` blocks the turn on a
@@ -198,3 +203,12 @@ exist.
   `save_session`: the Drafting Table saves a one-shot to the configured
   one-shots directory, only on the user's explicit request.
 - File-watching for external edits to campaign files while the app is open.
+- **Full-page maps for campaign sessions.** `draw_map` and `/map` are
+  Drafting Table only today. Bringing them to campaign sessions needs: the
+  `## Map` schematic rules added to `CORE_CAMPAIGN_PROMPT` (they live only in
+  `CORE_ONESHOT_PROMPT` now); a session-scoped map file (e.g.
+  `sessions/00N-slug.map.md`, which `listSessions` must then skip, as
+  `listOneshots` skips `.map.md`); a planning-agent variant of the tool that
+  resolves the session by identity; and `commands` passed to the workspace's
+  session chat in `makeCampaignSessionChat`. The renderer (`src/map.ts`) is
+  already context-free.

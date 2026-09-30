@@ -1,9 +1,21 @@
 import { constants } from "node:fs";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { mkdir, readdir, type FileHandle } from "node:fs/promises";
 import { parseFrontmatter, serializeFrontmatter, updateFrontmatterFile } from "./frontmatter.ts";
 import { slugify, today } from "./naming.ts";
-import { openRegularFileNoFollow, readRegularFileNoFollow } from "./safe-files.ts";
+import { atomicReplaceRegularFile, openRegularFileNoFollow, readRegularFileNoFollow } from "./safe-files.ts";
+
+/**
+ * A plan's full-page map lives beside it as `<slug>.map.md`, marked by a
+ * `plan: <slug>` frontmatter field. The marker, not the name, is what makes it
+ * a map: the user owns this folder, so a `.map.md` file they wrote is still a
+ * plan to list and never a map to overwrite.
+ */
+export const ONESHOT_MAP_SUFFIX = ".map.md";
+
+function isOneshotMap(fileName: string, data: Record<string, string>): boolean {
+  return fileName.endsWith(ONESHOT_MAP_SUFFIX) && data["plan"] === fileName.slice(0, -ONESHOT_MAP_SUFFIX.length);
+}
 
 export interface OneshotInput {
   title: string;
@@ -46,6 +58,7 @@ export async function listOneshots(dir: string): Promise<SavedOneshot[]> {
     try {
       // Revalidate the entry when opening because Dirent metadata can be stale.
       const { data, body } = parseFrontmatter(await readRegularFileNoFollow(path));
+      if (isOneshotMap(entry.name, data)) continue;
       oneshots.push({
         slug: entry.name.slice(0, -3),
         displayName: unslugOneshot(entry.name),
@@ -77,6 +90,27 @@ export async function findOneshot(dir: string, identity: string): Promise<SavedO
 export async function writeOneshot(saved: SavedOneshot, body: string): Promise<SavedOneshot> {
   const next = await updateFrontmatterFile(saved.path, (data) => ({ data, body }));
   return { ...saved, data: next.data, body: next.body };
+}
+
+/**
+ * Write (or redraw) the plan's map file; `map` is the rendered page, fenced
+ * here. Refuses to replace a file at that name that isn't this plan's map.
+ */
+export async function writeOneshotMap(saved: SavedOneshot, title: string, map: string): Promise<string> {
+  const path = join(dirname(saved.path), `${saved.slug}${ONESHOT_MAP_SUFFIX}`);
+  let existing: string | null = null;
+  try {
+    existing = await readRegularFileNoFollow(path);
+  } catch (error) {
+    // Anything but "not there" (a symlink, a folder) is also not ours to replace.
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") existing = "";
+  }
+  if (existing !== null && !isOneshotMap(basename(path), parseFrontmatter(existing).data)) {
+    throw new Error(`${basename(path)} already exists and isn't this plan's map; rename or move it to draw one`);
+  }
+  const content = serializeFrontmatter({ title, plan: saved.slug, updated: today() }, `\`\`\`text\n${map}\n\`\`\`\n`);
+  if (!(await atomicReplaceRegularFile(path, content))) throw new Error("the one-shots folder is not a directory");
+  return path;
 }
 
 export async function saveOneshot(dir: string, input: OneshotInput): Promise<string> {

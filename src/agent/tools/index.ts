@@ -1,6 +1,7 @@
 // Explicit registration keeps tool names type-checked. Grants live in ../agents.ts.
 import { appendCampaignSummaryTool } from "./append-campaign-summary.ts";
 import { askUserTool } from "./ask-user.ts";
+import { drawMapTool } from "./draw-map.ts";
 import { listSessionsTool } from "./list-sessions.ts";
 import { listOneshotsTool } from "./list-oneshots.ts";
 import { listSourcesTool } from "./list-sources.ts";
@@ -24,6 +25,7 @@ export const registry = {
   list_oneshots: listOneshotsTool,
   read_oneshot: readOneshotTool,
   update_oneshot: updateOneshotTool,
+  draw_map: drawMapTool,
   ask_user: askUserTool,
   list_sources: listSourcesTool,
   search_sources: searchSourcesTool,

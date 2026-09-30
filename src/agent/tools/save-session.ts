@@ -3,8 +3,11 @@
  * directory. Granted to the oneshot (Drafting Table) agent only. Saving is
  * gated on an explicit user request: both this tool's description and the
  * one-shot system prompt forbid calling it on the agent's own initiative.
+ * With active state, the saved plan becomes the active one, so draw_map and
+ * /map work on it straight away.
  */
-import { saveOneshot } from "../../store/oneshots.ts";
+import { basename } from "node:path";
+import { findOneshot, saveOneshot } from "../../store/oneshots.ts";
 import { abbreviateHome } from "../../store/settings.ts";
 import { stringArg } from "./shared.ts";
 import type { ToolSpec } from "./types.ts";
@@ -30,7 +33,7 @@ export const saveSessionTool: ToolSpec = {
       },
     },
   },
-  create({ oneshotsDir }) {
+  create({ oneshotsDir, activeOneshot }) {
     if (!oneshotsDir) return null;
     return {
       definition: saveSessionTool.definition,
@@ -40,6 +43,13 @@ export const saveSessionTool: ToolSpec = {
         if (title === "" || content === "") return "(title and content cannot be empty)";
         const system = stringArg(args, "system").trim();
         const path = await saveOneshot(oneshotsDir, { title, content, ...(system !== "" ? { system } : {}) });
+        if (activeOneshot) {
+          const saved = await findOneshot(oneshotsDir, basename(path, ".md"));
+          if (saved) {
+            activeOneshot.current = saved;
+            activeOneshot.onRead?.(saved);
+          }
+        }
         return `Saved one-shot "${title}" to ${abbreviateHome(path)}`;
       },
     };

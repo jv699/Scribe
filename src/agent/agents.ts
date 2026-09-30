@@ -35,6 +35,7 @@ export const AGENTS = {
       "list_oneshots",
       "read_oneshot",
       "update_oneshot",
+      "draw_map",
       "ask_user",
       "list_sources",
       "search_sources",

@@ -41,6 +41,21 @@ export interface ChatTurnContext {
   tools?: AgentTool[];
 }
 
+/** What a slash command can do to the chat it runs in. */
+export interface ChatCommandContext {
+  /** Submit `text` as a user turn, as if typed. */
+  send(text: string): void;
+  notice(text: string, tone?: "muted" | "danger"): void;
+}
+
+export interface ChatCommand {
+  name: string;
+  description: string;
+  /** Run even while a turn is in flight; otherwise the command is refused. */
+  whileBusy?: boolean;
+  run(chat: ChatCommandContext): void | Promise<void>;
+}
+
 export interface ChatScreenOptions {
   provider: ChatProvider;
   /** Shown on the right of the title bar. */
@@ -59,6 +74,8 @@ export interface ChatScreenOptions {
   ask?: AskChannel;
   /** Added alongside the built-in slash commands. */
   completions?: CompletionSource[];
+  /** Screen-specific slash commands, listed after the built-in ones. */
+  commands?: ChatCommand[];
   /** Owns global keys when true; defaults to true for standalone chats. */
   isInputActive?: () => boolean;
   /** Notify an embedding owner when the prompt takes focus (including by mouse). */
@@ -321,10 +338,6 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
   }
 
   function confirmClear(): void {
-    if (busy) {
-      transcript.addNotice("Can't clear while Scribe is working — wait for the reply.");
-      return;
-    }
     modalOpen = true;
     showConfirmDialog(renderer, {
       title: "Clear this conversation?",
@@ -338,10 +351,44 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
     });
   }
 
-  /** Commands that act on the chat, not the message — never sent to the model. */
-  const commands = [
+  const commandContext: ChatCommandContext = {
+    send: (text) => {
+      // An async command can finish after the user has left.
+      if (disposed) return;
+      if (busy) refuseBusy("send that");
+      else void submit(text, false);
+    },
+    notice: (text, tone) => {
+      if (!disposed) transcript.addNotice(text, tone);
+    },
+  };
+
+  function refuseBusy(what: string): void {
+    transcript.addNotice(`Can't ${what} while Scribe is working — wait for the reply.`);
+  }
+
+  async function runCommand(command: ChatCommand): Promise<void> {
+    if (busy && !command.whileBusy) {
+      refuseBusy(`run /${command.name}`);
+      return;
+    }
+    try {
+      await command.run(commandContext);
+    } catch (err) {
+      commandContext.notice(`/${command.name} failed: ${err instanceof Error ? err.message : String(err)}`, "danger");
+    }
+  }
+
+  /**
+   * The built-ins act on the chat, not the message, and never reach the model;
+   * they live here because every chat has them. Screen commands come in through
+   * `options.commands` and may start a turn through their context's `send`.
+   */
+  const commands: ChatCommand[] = [
     { name: "clear", description: "Start this conversation over", run: confirmClear },
-    { name: "back", description: "Leave the chat", run: leave },
+    // An in-flight turn outlives the screen, so leaving mid-turn is safe.
+    { name: "back", description: "Leave the chat", whileBusy: true, run: leave },
+    ...(options.commands ?? []),
   ];
 
   const slashCommands: CompletionSource = {
@@ -354,7 +401,7 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
         .map((command) => ({
           label: `/${command.name}`,
           description: command.description,
-          run: command.run,
+          run: () => void runCommand(command),
         }));
     },
   };
@@ -368,6 +415,11 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
   async function send(): Promise<void> {
     const text = prompt.input.plainText.trim();
     if (text === "" || busy) return;
+    await submit(text, true);
+  }
+
+  /** `fromPrompt` turns clear the prompt once the turn starts; command turns leave any draft alone. */
+  async function submit(text: string, fromPrompt: boolean): Promise<void> {
     busy = true;
     setState("working");
     let turnContext: ChatTurnContext = {};
@@ -385,7 +437,7 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
       return;
     }
     if (disposed) return;
-    prompt.input.clear();
+    if (fromPrompt) prompt.input.clear();
     messages.push({ role: "user", content: text });
     const configuredTools = turnContext.tools ?? options.tools;
     const systemPrompt = turnContext.systemPrompt ?? options.systemPrompt;

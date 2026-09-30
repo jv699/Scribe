@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { copyFile, mkdir, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -406,6 +406,92 @@ describe("save_session tool", () => {
   });
 });
 
+describe("draw_map tool", () => {
+  const schematic = "## Map\n\n```text\n[1 Gate]---[2 Hall]\n```\n\n### 1. Gate\n\n### 2. Hall";
+  const layout = {
+    title: "Abbey",
+    locations: [
+      { id: 1, name: "Gate", column: 1, row: 1 },
+      { id: 2, name: "Hall", column: 2, row: 1 },
+    ],
+    connections: [{ from: 1, to: 2, type: "door" }],
+  };
+
+  function oneshotTools(active: ActiveOneshot) {
+    const tools = toolsFor("oneshot", { oneshotsDir, activeOneshot: active });
+    return (name: string) => tools.find((tool) => tool.definition.function.name === name)!;
+  }
+
+  test("needs a saved plan with a ## Map schematic before drawing anything", async () => {
+    const active: ActiveOneshot = { current: null };
+    const pick = oneshotTools(active);
+    expect(await pick("draw_map").execute(layout)).toBe(
+      "(no map drawn: save the plan with save_session, or open one with read_oneshot, first)",
+    );
+
+    await saveOneshot(oneshotsDir, { title: "Abbey", content: "## Hook\n\nNo map yet." });
+    await pick("read_oneshot").execute({ document: "abbey" });
+    expect(await pick("draw_map").execute(layout)).toBe(
+      '(no map drawn: "Abbey" has no "## Map" schematic yet; offer to add one first)',
+    );
+    expect(await readdir(oneshotsDir)).toEqual(["abbey.md"]);
+  });
+
+  test("sees a schematic added since the plan was read", async () => {
+    await saveOneshot(oneshotsDir, { title: "Abbey", content: "No map yet." });
+    const active: ActiveOneshot = { current: null };
+    const pick = oneshotTools(active);
+    await pick("read_oneshot").execute({ document: "abbey" });
+    await writeFile(join(oneshotsDir, "abbey.md"), `---\ntitle: Abbey\n---\n${schematic}`, "utf8");
+
+    expect(String(await pick("draw_map").execute(layout))).toStartWith('Drew the full-page map for "Abbey"');
+  });
+
+  test("draws the map into <slug>.map.md beside the plan", async () => {
+    await saveOneshot(oneshotsDir, { title: "Abbey", content: schematic });
+    const active: ActiveOneshot = { current: null };
+    const pick = oneshotTools(active);
+    await pick("read_oneshot").execute({ document: "abbey" });
+
+    const result = String(await pick("draw_map").execute(layout));
+    expect(result).toContain("abbey.map.md (2 locations, 1 connections)");
+    const map = await readFile(join(oneshotsDir, "abbey.map.md"), "utf8");
+    expect(map).toContain("plan: abbey");
+    expect(map).toContain("ABBEY");
+    expect(map).toMatch(/Gate +\|-+D-+\|/);
+    // The plan is left as it was.
+    expect(await readFile(join(oneshotsDir, "abbey.md"), "utf8")).toContain(schematic);
+  });
+
+  test("hands layout problems back so the model can retry", async () => {
+    await saveOneshot(oneshotsDir, { title: "Abbey", content: schematic });
+    const active: ActiveOneshot = { current: null };
+    const pick = oneshotTools(active);
+    await pick("read_oneshot").execute({ document: "abbey" });
+
+    const result = await pick("draw_map").execute({
+      ...layout,
+      locations: [layout.locations[0], { ...layout.locations[1], column: 1 }],
+    });
+    expect(result).toBe(
+      "(no map drawn; fix the layout and call draw_map again:\n" +
+        "- location 2: column 1, row 1 is already taken by location 1)",
+    );
+    expect(await readdir(oneshotsDir)).toEqual(["abbey.md"]);
+  });
+
+  test("save_session makes the saved plan the active one", async () => {
+    let selected = "";
+    const active: ActiveOneshot = { current: null, onRead: (oneshot) => (selected = oneshot.displayName) };
+    const pick = oneshotTools(active);
+    await pick("save_session").execute({ title: "Abbey", content: schematic });
+
+    expect(active.current?.slug).toBe("abbey");
+    expect(selected).toBe("Abbey");
+    expect(String(await pick("draw_map").execute(layout))).toStartWith("Drew the full-page map");
+  });
+});
+
 describe("saved one-shot tools", () => {
   test("list, read, and update share one active document and preserve frontmatter", async () => {
     await saveOneshot(oneshotsDir, { title: "Lighthouse Siege", system: "5e", content: "old lighthouse" });
@@ -456,7 +542,7 @@ describe("saved one-shot tools", () => {
   });
 
   test("the saved-document tools are granted only to the one-shot agent", () => {
-    const names = ["list_oneshots", "read_oneshot", "update_oneshot"];
+    const names = ["list_oneshots", "read_oneshot", "update_oneshot", "draw_map"];
     expect(grantedNames("oneshot")).toEqual(expect.arrayContaining(names));
     for (const agent of ["planning", "report"] as const) {
       for (const name of names) expect(grantedNames(agent)).not.toContain(name);
@@ -783,7 +869,7 @@ describe("agent gateway", () => {
       toolsFor("oneshot", { oneshotsDir, activeOneshot: { current: null } }).map(
         (t) => t.definition.function.name,
       ),
-    ).toEqual(["save_session", "list_oneshots", "read_oneshot", "update_oneshot"]);
+    ).toEqual(["save_session", "list_oneshots", "read_oneshot", "update_oneshot", "draw_map"]);
     // Declines without a dir — plain streaming remains the fallback.
     expect(toolsFor("oneshot", {})).toEqual([]);
     expect(toolsFor("oneshot", { campaign })).toEqual([]);

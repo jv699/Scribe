@@ -1322,10 +1322,149 @@ describe("chat screen", () => {
         await renderOnce();
 
         const frame = captureCharFrame();
-        const refusals = (frame.match(/Can't clear while Scribe is working/g) ?? []).length;
+        const refusals = (frame.match(/Can't run \/clear while Scribe is working/g) ?? []).length;
         expect(refusals).toBe(1);
         // Refused, not asked: the confirmation never came up.
         expect(frame.includes("Clear this conversation?")).toBe(false);
+      });
+
+      test("screen commands list after the built-ins and can start a turn", async () => {
+        const sent: ChatMessage[][] = [];
+        const provider: ChatProvider = {
+          async *streamChat(messages) {
+            sent.push([...messages]);
+            yield { type: "text", delta: "Map drawn." };
+          },
+        };
+        current = await makeChatScreen(renderer, {
+          provider,
+          commands: [{ name: "map", description: "Draw a full-page map", run: (chat) => chat.send("Draw the map.") }],
+          onBack: () => {},
+        });
+        renderer.root.add(current.node);
+        current.focus?.();
+        await renderOnce();
+
+        await keys.typeText("/", 5);
+        await wait(60);
+        await renderOnce();
+        const frame = captureCharFrame();
+        expect(frame.indexOf("/map")).toBeGreaterThan(frame.indexOf("/back"));
+
+        await keys.typeText("ma", 5);
+        await wait(60);
+        keys.pressEnter();
+        await wait(150);
+        await renderOnce();
+
+        expect(sent).toHaveLength(1);
+        expect(sent[0]).toContainEqual({ role: "user", content: "Draw the map." });
+        expect(captureCharFrame().includes("Map drawn.")).toBe(true);
+        expect(promptText()).toBe("");
+      });
+
+      test("a screen command can answer with a notice instead of a turn", async () => {
+        let turns = 0;
+        const provider: ChatProvider = {
+          async *streamChat() {
+            turns++;
+            yield { type: "text", delta: "unused" };
+          },
+        };
+        current = await makeChatScreen(renderer, {
+          provider,
+          commands: [
+            {
+              name: "map",
+              description: "Draw a full-page map",
+              run: async (chat) => chat.notice("Save the plan first."),
+            },
+            {
+              name: "broken",
+              description: "Always fails",
+              run: async () => {
+                throw new Error("disk on fire");
+              },
+            },
+          ],
+          onBack: () => {},
+        });
+        renderer.root.add(current.node);
+        current.focus?.();
+        await renderOnce();
+
+        for (const command of ["/map", "/broken"]) {
+          await keys.typeText(command, 5);
+          await wait(60);
+          keys.pressEnter();
+          await wait(60);
+        }
+        await renderOnce();
+
+        const frame = captureCharFrame();
+        expect(frame.includes("Save the plan first.")).toBe(true);
+        expect(frame.includes("/broken failed: disk on fire")).toBe(true);
+        expect(turns).toBe(0);
+      });
+
+      test("screen commands are refused while Scribe is working", async () => {
+        let ran = false;
+        const stalled: ChatProvider = {
+          async *streamChat(): AsyncGenerator<ChatEvent> {
+            await wait(600);
+            yield { type: "text", delta: "done" };
+          },
+        };
+        current = await makeChatScreen(renderer, {
+          provider: stalled,
+          commands: [{ name: "map", description: "Draw a full-page map", run: () => void (ran = true) }],
+          onBack: () => {},
+        });
+        renderer.root.add(current.node);
+        current.focus?.();
+        await renderOnce();
+
+        await keys.typeText("hi", 5);
+        keys.pressEnter();
+        await wait(60);
+        await keys.typeText("/map", 5);
+        await wait(60);
+        keys.pressEnter();
+        await wait(60);
+        await renderOnce();
+
+        expect(captureCharFrame().includes("Can't run /map while Scribe is working")).toBe(true);
+        expect(ran).toBe(false);
+      });
+
+      test("/back still leaves while Scribe is working", async () => {
+        const stalled: ChatProvider = {
+          async *streamChat(): AsyncGenerator<ChatEvent> {
+            await wait(600);
+            yield { type: "text", delta: "done" };
+          },
+        };
+        current = await makeChatScreen(renderer, {
+          provider: stalled,
+          onBack: () => {
+            wentBack = true;
+          },
+        });
+        renderer.root.add(current.node);
+        current.focus?.();
+        await renderOnce();
+
+        await keys.typeText("hi", 5);
+        keys.pressEnter();
+        await wait(60);
+        await keys.typeText("/back", 5);
+        await wait(60);
+        keys.pressEnter();
+        await wait(60);
+        await renderOnce();
+
+        expect(wentBack).toBe(true);
+        expect(captureCharFrame().includes("Can't run /back")).toBe(false);
       });
 
       test("Escape in the clear dialog cancels without leaving the chat", async () => {

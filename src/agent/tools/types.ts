@@ -14,6 +14,7 @@ export type { AgentTool, ToolDefinition };
 
 export interface ActiveOneshot {
   current: SavedOneshot | null;
+  /** Called whenever a plan becomes active: read with read_oneshot or saved with save_session. */
   onRead?: (oneshot: SavedOneshot) => void;
 }
 
