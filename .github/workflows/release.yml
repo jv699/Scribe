@@ -1,0 +1,93 @@
+name: Release
+
+# Pushing a v* tag builds every platform's binary and opens a draft GitHub
+# Release. Nothing is public until the draft is published by hand.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - name: Tag matches package.json version
+        run: |
+          version="$(bun -e 'console.log(require("./package.json").version)')"
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match package.json version $version" >&2
+            exit 1
+          fi
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun test
+
+  build:
+    needs: check
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          # macOS binaries are built on macOS so they are ad-hoc signed;
+          # Apple Silicon refuses to run unsigned executables.
+          - { runner: macos-latest, os: darwin, cpu: arm64, target: bun-darwin-arm64, name: scribe-darwin-arm64 }
+          - { runner: macos-latest, os: darwin, cpu: x64, target: bun-darwin-x64, name: scribe-darwin-x64 }
+          - { runner: ubuntu-latest, os: linux, cpu: x64, target: bun-linux-x64, name: scribe-linux-x64 }
+          - { runner: ubuntu-latest, os: linux, cpu: arm64, target: bun-linux-arm64, name: scribe-linux-arm64 }
+          - { runner: ubuntu-latest, os: win32, cpu: x64, target: bun-windows-x64, name: scribe-windows-x64 }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      # OpenTUI's native library ships in a per-platform optional package, so
+      # install the target's rather than the runner's before cross-compiling.
+      - run: bun install --frozen-lockfile --os=${{ matrix.os }} --cpu=${{ matrix.cpu }}
+      - name: Compile
+        run: |
+          mkdir -p out
+          if [ "${{ matrix.os }}" = "win32" ]; then
+            bun build --compile --target=${{ matrix.target }} src/index.ts --outfile out/scribe.exe
+            (cd out && zip ../${{ matrix.name }}.zip scribe.exe)
+          else
+            bun build --compile --target=${{ matrix.target }} src/index.ts --outfile out/scribe
+            cp LICENSE out/
+            tar -czf ${{ matrix.name }}.tar.gz -C out scribe LICENSE
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: |
+            ${{ matrix.name }}.tar.gz
+            ${{ matrix.name }}.zip
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+      - name: Checksums
+        run: cd assets && sha256sum scribe-* > SHA256SUMS
+      - name: Release notes from the changelog
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v v="$version" '
+            /^## / { printing = (index($0, "## " v) == 1); next }
+            printing { print }
+          ' CHANGELOG.md > notes.md
+          test -s notes.md || { echo "No CHANGELOG.md entry for $version" >&2; exit 1; }
+      - name: Draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" assets/* --draft --title "Scribe $GITHUB_REF_NAME" --notes-file notes.md

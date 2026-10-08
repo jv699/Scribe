@@ -1,10 +1,17 @@
 {
   "name": "scribe",
+  "version": "0.1.0",
+  "description": "A bring-your-own-model TTRPG campaign builder and organizer for the terminal.",
+  "license": "GPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jv699/Scribe.git"
+  },
   "module": "src/index.ts",
   "type": "module",
   "private": true,
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "1.3.14"
   },
   "peerDependencies": {
     "typescript": "^5"
@@ -15,6 +22,9 @@
   },
   "scripts": {
     "start": "bun src/index.ts",
-    "dev": "bun --watch src/index.ts"
+    "dev": "bun --watch src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "build": "bun build --compile src/index.ts --outfile dist/scribe"
   }
 }

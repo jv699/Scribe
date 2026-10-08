@@ -11,6 +11,7 @@ import { enableSelectMouse } from "../components/ui.ts";
 import * as consts from "../consts.ts";
 import { chunkyFadeIn, dissolveIn } from "../intro.ts";
 import { theme } from "../theme.ts";
+import { VERSION } from "../version.ts";
 import type { Campaign } from "../store/campaigns.ts";
 import type { Screen } from "./screen.ts";
 
@@ -124,6 +125,7 @@ export function makeMainMenuScreen(renderer: CliRenderer, options: MainMenuOptio
     container.add(new TextRenderable(renderer, { content: options.error, fg: theme.danger, marginTop: 1 }));
   }
   container.add(new BoxRenderable(renderer, { flexGrow: 2 }));
+  container.add(new TextRenderable(renderer, { content: `v${VERSION}`, fg: theme.textMuted, alignSelf: "flex-end" }));
 
   const stopAnimations = options.playIntro
     ? [dissolveIn(logo, consts.logoBloody), chunkyFadeIn(menuPanel, { delayMs: 500 })]

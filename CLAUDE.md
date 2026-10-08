@@ -35,9 +35,12 @@ bun test
 
 # Run a single test file
 bun test tests/chat.test.ts
+
+# Build a standalone binary for this machine into dist/
+bun run build
 ```
 
-There is no lint, formatter, or CI configured.
+There is no lint or formatter. CI runs the type check and tests on every push and PR; pushing a `v*` tag builds release binaries into a draft GitHub Release (see "Releasing" in `AGENTS.md`).
 
 ## TypeScript / Bun specifics
 
@@ -48,6 +51,7 @@ There is no lint, formatter, or CI configured.
 
 ## Architecture overview
 
+- **`src/cli.ts`** / **`src/version.ts`** — `--help`/`--version`/non-TTY handling that runs before the UI, and the version read from `package.json`.
 - **`src/index.ts`** — entry point + screen manager. One `Screen` at a time under the renderer root (dispose → remove → destroy → add).
 - **`src/screens/`** — `main-menu.ts`, `campaign-workspace.ts` (two-pane sessions + embedded chat), `chat.ts` (the shared harness), `settings.ts`.
 - **`src/components/`** — reusable OpenTUI widgets: generic dialogs (`dialog.ts`, `action-dialog.ts`), form dialogs (`campaign-dialog.ts`, `session-dialog.ts`), the chat `prompt.ts`, the `ask_user` question widget (`ask-widget.ts`), the `/`-command and `@`-mention completion popup (`autocomplete.ts`).
