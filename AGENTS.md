@@ -29,7 +29,7 @@ Locked design decisions (don't revisit without asking):
 - **Runtime**: Bun (`bun` v1.3+).
 - **Entry point**: `src/index.ts`.
 - **Only dependencies**: `@opentui/core` (TUI component library) and `unpdf` (PDF text extraction — imported by `src/store/sources.ts` and nowhere else).
-- **Tests**: `bun:test` in `tests/`. No lint, formatter, or CI yet. Headless UI tests share `tests/helpers/renderer.ts` (`setupRenderer` + `wait`); destructure it in `beforeEach` so tests keep referring to bare `renderer`/`keys`/`captureCharFrame`/`renderOnce`.
+- **Tests**: `bun:test` in `tests/`. No lint or formatter. CI (`.github/workflows/ci.yml`) runs the type check and tests on every push and PR. Headless UI tests share `tests/helpers/renderer.ts` (`setupRenderer` + `wait`); destructure it in `beforeEach` so tests keep referring to bare `renderer`/`keys`/`captureCharFrame`/`renderOnce`.
 
 ## Common commands
 
@@ -48,7 +48,18 @@ bunx tsc --noEmit
 
 # Run tests (store unit tests + headless UI flow test)
 bun test
+
+# Build a standalone binary for this machine into dist/
+bun run build
 ```
+
+## Releasing
+
+Releases are standalone binaries built with `bun build --compile`. To cut one: bump `version` in `package.json`, add the matching `## <version>` entry to `CHANGELOG.md`, merge, then push a `v<version>` tag. `.github/workflows/release.yml` re-runs the checks, builds every platform, and opens a **draft** GitHub Release with the changelog entry as notes; publishing the draft is a manual step. The workflow fails if the tag and `package.json` disagree or the changelog entry is missing.
+
+- OpenTUI's native library lives in a per-platform optional package (`@opentui/core-<os>-<cpu>`). Cross-compiling needs the *target's* package installed (`bun install --os=<os> --cpu=<cpu>`), which is why each build job installs separately.
+- `bun build --compile` embeds the native library, the tree-sitter worker, and the grammar assets on its own — no extra entrypoints or `OTUI_*` defines are needed as of `@opentui/core` 0.5.1. If highlighting ever breaks only in the binary, that is the first thing to recheck.
+- Always test a binary from **outside** the repo, or it can quietly resolve files from `node_modules`.
 
 ## TypeScript / Bun specifics
 
@@ -58,6 +69,7 @@ bun test
 
 ## Entrypoints and architecture
 
+- `src/cli.ts`: `cliExit(args, isTTY)` — the pure pre-UI decision for `--help`, `--version`, unknown options, and non-terminals. `src/index.ts` calls it before creating the renderer. `src/version.ts` exports `VERSION` from `package.json` (inlined at compile time); `package.json` is the single source of the version.
 - `src/index.ts`: entry point + screen manager. One `Screen` at a time under the renderer root (dispose → remove → destroy → add). Also owns the campaign-create dialog and app-level wiring.
 - `src/screens/screen.ts`: `Screen` interface (`node` + optional `focus()`/`dispose()`).
 - `src/screens/main-menu.ts`: two-stage main menu — app destinations at the root, then create / campaign list (loaded from disk), plus the intro animation on first show. Escape mirrors Back in the campaign stage.
@@ -118,7 +130,7 @@ bun test
 
 ## Gotchas
 
-- The app is an interactive TUI. Running it in a non-TTY or automated context may fail or hang.
+- The app is an interactive TUI. In a non-TTY context it prints a message and exits 1 (`src/cli.ts`) rather than hanging.
 - `bun run` without a script name is not configured; use `bun run src/index.ts` or `bun src/index.ts`.
 - Key names: the main Enter key reports `key.name === "return"`; the keypad Enter is `"kpenter"` (not `"enter"`, which OpenTUI never emits as a `key.name`). Anything that acts on Enter must accept **both**. Escape is `"escape"`, Tab is `"tab"` (check `key.shift` for Shift+Tab).
 - Headless testing: use `createTestRenderer` + `createMockKeys` from `@opentui/core/testing`. The test script MUST live inside the project — if run from outside, Bun resolves a second copy of `@opentui/core` from its global cache and rendering silently breaks (boxes draw, text never paints).

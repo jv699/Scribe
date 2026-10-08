@@ -19,6 +19,14 @@ import { loadChatLog, saveChatLog } from "./store/chat-log.ts";
 import { indexSources } from "./store/sources.ts";
 import { campaignCompletions, oneshotCompletions } from "./completions.ts";
 import { oneshotCommands } from "./commands.ts";
+import { cliExit } from "./cli.ts";
+
+// Answer --help/--version and refuse non-terminals before taking over the screen.
+const exit = cliExit(Bun.argv.slice(2), process.stdout.isTTY === true && process.stdin.isTTY === true);
+if (exit) {
+  (exit.exitCode === 0 ? console.log : console.error)(exit.output);
+  process.exit(exit.exitCode);
+}
 
 const renderer = await createCliRenderer({
   // Chat requires a second Ctrl+C to quit; other screens quit immediately.

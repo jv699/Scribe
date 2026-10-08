@@ -13,6 +13,8 @@ export interface OpenAIProviderOptions {
   baseUrl: string;
   model: string;
   apiKey: string;
+  /** Name of the env var the key came from, used only to explain failures. */
+  apiKeyEnv?: string;
 }
 
 export const DEFAULT_BASE_URL = "https://api.openai.com/v1";
@@ -92,6 +94,17 @@ async function* streamSSE(response: Response): AsyncGenerator<ChatEvent> {
   }
 }
 
+/** Explain an auth rejection in terms of what the user can change in Settings. */
+function authHint(options: OpenAIProviderOptions): string {
+  if (!options.apiKeyEnv) {
+    return "No API key is configured. Open Settings and set the API key environment variable.";
+  }
+  if (options.apiKey === "") {
+    return `The environment variable ${options.apiKeyEnv} is not set. Export it before starting Scribe, or change it in Settings.`;
+  }
+  return `The provider rejected the API key from ${options.apiKeyEnv}. Check the key, or change it in Settings.`;
+}
+
 export function createOpenAIProvider(options: OpenAIProviderOptions): ChatProvider {
   const baseUrl = options.baseUrl.replace(/\/+$/, "");
 
@@ -106,18 +119,29 @@ export function createOpenAIProvider(options: OpenAIProviderOptions): ChatProvid
       };
       if (chatOptions?.tools?.length) body["tools"] = chatOptions.tools;
 
-      const response = await fetch(`${baseUrl}/chat/completions`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${options.apiKey}`,
-        },
-        body: JSON.stringify(body),
-      });
+      let response: Response;
+      try {
+        response = await fetch(`${baseUrl}/chat/completions`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${options.apiKey}`,
+          },
+          body: JSON.stringify(body),
+        });
+      } catch {
+        throw new Error(
+          `Couldn't reach ${baseUrl}. Check the base URL in Settings and that the provider is running.`,
+        );
+      }
 
       if (!response.ok) {
         const detail = await response.text().catch(() => "");
-        throw new Error(`Chat request failed (${response.status}): ${detail.slice(0, 200)}`);
+        const failure = `Chat request failed (${response.status}): ${detail.slice(0, 200)}`;
+        if (response.status === 401 || response.status === 403) {
+          throw new Error(`${authHint(options)} ${failure}`);
+        }
+        throw new Error(failure);
       }
 
       if (response.headers.get("content-type")?.includes("text/event-stream")) {
@@ -200,5 +224,6 @@ export function createProviderFromSettings(settings: Settings): ChatProvider {
     baseUrl: settings.baseUrl ?? DEFAULT_BASE_URL,
     model: settings.model ?? DEFAULT_MODEL,
     apiKey,
+    ...(settings.apiKeyEnv ? { apiKeyEnv: settings.apiKeyEnv } : {}),
   });
 }

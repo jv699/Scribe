@@ -1,11 +1,10 @@
 # Scribe
 
-A bring-your-own-model TTRPG campaign builder and organizer. Scribe is an
-interactive terminal UI (Bun + TypeScript + OpenTUI): you create campaigns for
-any system, plan sessions with an LLM agent in a chat harness, export the
-session notes as markdown to run at the table, then report what happened so
-the agent appends to a running campaign summary — its memory for planning the
-next session.
+A bring-your-own-model TTRPG campaign builder and organizer for the terminal.
+You create campaigns for any system, plan sessions with an LLM agent in a chat,
+export the session notes as markdown to run at the table, then report what
+happened so the agent appends to a running campaign summary — its memory for
+planning the next session.
 
 The core loop:
 
@@ -13,38 +12,106 @@ The core loop:
 plan → export → play (offline, at the table) → report → summary grows → plan next
 ```
 
-## Install and run
+Everything Scribe writes is a plain markdown file in a folder you own. There is
+no database and no account.
+
+## Install
+
+Download the archive for your platform from the
+[latest release](https://github.com/jv699/Scribe/releases/latest), unpack it,
+and put `scribe` somewhere on your `PATH`.
+
+| Platform              | File                         |
+| --------------------- | ---------------------------- |
+| macOS (Apple Silicon) | `scribe-darwin-arm64.tar.gz` |
+| macOS (Intel)         | `scribe-darwin-x64.tar.gz`   |
+| Linux (x64)           | `scribe-linux-x64.tar.gz`    |
+| Linux (arm64)         | `scribe-linux-arm64.tar.gz`  |
+| Windows (x64)         | `scribe-windows-x64.zip`     |
 
 ```bash
-# Install dependencies
-bun install
-
-# Run the app (interactive terminal UI)
-bun start
-
-# Watch mode during dev
-bun run dev
+tar -xzf scribe-darwin-arm64.tar.gz
+./scribe
 ```
 
-Requires Bun v1.3+. Scribe is an interactive TUI — run it in a real terminal,
-not a non-TTY or automated context. Other useful commands: `bunx tsc --noEmit`
-(type check) and `bun test` (run all tests).
+The binaries are not signed or notarized. On macOS, a downloaded binary is
+quarantined and Gatekeeper will refuse to open it until you clear the flag:
 
-## Configuring model access
+```bash
+xattr -d com.apple.quarantine ./scribe
+```
 
-Scribe talks to any OpenAI-compatible chat API (OpenAI, OpenRouter, Ollama,
-LM Studio, vLLM, …) via a configurable base URL and model, set from the
-in-app Settings screen (which also offers a "Browse..." picker that lists
-models from the configured provider). API keys are never stored — you point
-Scribe at the *name* of an environment variable holding the key, and it reads
-that env var at request time. App settings live in
-`~/.config/scribe/config.json`.
+Each release includes a `SHA256SUMS` file if you want to verify a download.
+The macOS Apple Silicon build is the one tested by hand; the others are built
+and published but have had less use — please open an issue if one misbehaves.
 
-## On-disk layout
+Scribe is an interactive app and needs a real terminal. `scribe --help` and
+`scribe --version` are the only command-line options.
 
-Campaign data is markdown-first: plain files with flat `key: value`
-frontmatter, in a user-visible folder (default `~/Scribe`) that you can open
-in any editor — no database.
+### From source
+
+Requires [Bun](https://bun.sh) v1.3+.
+
+```bash
+git clone https://github.com/jv699/Scribe.git
+cd Scribe
+bun install
+bun start
+```
+
+## Quick start
+
+### 1. Point Scribe at a model
+
+Scribe talks to any OpenAI-compatible chat API. Open **Settings** from the main
+menu and fill in the base URL, the model, and the *name* of the environment
+variable that holds your API key. Scribe never stores the key itself — it reads
+that variable each time it makes a request, so export it in the shell you
+launch Scribe from.
+
+| Provider   | Base URL                       | Example model       | API key env var      |
+| ---------- | ------------------------------ | ------------------- | -------------------- |
+| OpenAI     | `https://api.openai.com/v1`    | `gpt-4o-mini`       | `OPENAI_API_KEY`     |
+| OpenRouter | `https://openrouter.ai/api/v1` | any model it lists  | `OPENROUTER_API_KEY` |
+| Ollama     | `http://localhost:11434/v1`    | a model you pulled  | leave blank          |
+| LM Studio  | `http://localhost:1234/v1`     | the loaded model    | leave blank          |
+
+The model field lists what your provider offers once the base URL and key are
+set. The env var name is yours to choose; the ones above are just conventions.
+
+```bash
+export OPENAI_API_KEY=sk-...
+scribe
+```
+
+### 2. Run a campaign
+
+1. **Campaigns → create a campaign.** Give it a name and a system.
+2. **+ New Session**, then chat with the agent to plan it. The agent drafts
+   the session notes into a markdown file in the campaign folder.
+3. Run the session at the table from that file — open it in any editor, print
+   it, or put it on a tablet.
+4. Come back and tell the agent what happened. It appends to the campaign's
+   **Story So Far**, which it reads when you plan the next session.
+
+In the chat, type `/` for commands and `@` to mention a session or source.
+
+### One-shots
+
+The **Drafting Table** plans a standalone session with no campaign behind it.
+`/save` saves the plan to your one-shots folder and `/map` draws a full-page
+ASCII map of it. Saved drafts can be reopened and continued.
+
+## Rulebooks as sources
+
+Put PDFs in `~/Scribe/Sources/<System>/`, one folder per system, where the
+folder name matches the campaign's **System** field. Scribe extracts the text
+on launch and the agent can search and cite pages while planning.
+
+Extraction reads the PDF's text layer only. A scanned, image-only PDF indexes
+as empty; there is no OCR.
+
+## Where your data lives
 
 ```
 ~/Scribe/
@@ -62,10 +129,31 @@ in any editor — no database.
       extracted/          # cached extracted text, visible
 ```
 
-## Learn more
+All three folders can be moved from the Settings screen. App settings live in
+`~/.config/scribe/config.json`; set `SCRIBE_CONFIG_DIR` to keep them somewhere
+else.
 
-- `AGENTS.md` — the authoritative, actively-maintained map of the codebase:
-  per-module notes, invariants, and gotchas.
-- `PLAN.md` — product design, domain model, and roadmap.
-- `CLAUDE.md` — condensed entry point for AI coding agents working in this
-  repo.
+## Known limitations
+
+- This is a 0.x release: the on-disk layout and config format may change
+  between versions. See [CHANGELOG.md](CHANGELOG.md).
+- Only OpenAI-compatible APIs are supported.
+- A long-running campaign's summary is not yet compressed, so it can outgrow a
+  small model's context window.
+- Edits you make to campaign files while Scribe is open are not picked up
+  until you reopen that screen.
+- Maps are available in the Drafting Table only, not in campaign sessions.
+
+## Contributing
+
+`bun test` runs the tests, `bun run typecheck` type-checks, and `bun run build`
+produces a standalone binary in `dist/`.
+
+- [AGENTS.md](AGENTS.md) — the authoritative map of the codebase: per-module
+  notes, invariants, gotchas, and how releases are cut.
+- [PLAN.md](PLAN.md) — product design, domain model, and roadmap.
+- [CLAUDE.md](CLAUDE.md) — condensed entry point for AI coding agents.
+
+## License
+
+[GPL-3.0](LICENSE).

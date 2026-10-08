@@ -250,6 +250,36 @@ describe("provider client", () => {
     await expect(collect(provider)).rejects.toThrow(/401/);
   });
 
+  test("an auth failure with no key configured points at Settings", async () => {
+    const baseUrl = await startServer("error");
+    const provider = createOpenAIProvider({ baseUrl, model: "m", apiKey: "" });
+    await expect(collect(provider)).rejects.toThrow(/No API key is configured.*Settings.*401/);
+  });
+
+  test("an auth failure names the unset env var", async () => {
+    const baseUrl = await startServer("error");
+    const provider = createProviderFromSettings({
+      campaignsDir: "/tmp/x",
+      oneshotsDir: "/tmp/o",
+      sourcesDir: "/tmp/s",
+      baseUrl,
+      apiKeyEnv: "SCRIBE_TEST_KEY",
+    });
+    await expect(collect(provider)).rejects.toThrow(/SCRIBE_TEST_KEY is not set/);
+  });
+
+  test("an auth failure with a key set blames the key", async () => {
+    const baseUrl = await startServer("error");
+    const provider = createOpenAIProvider({ baseUrl, model: "m", apiKey: "k", apiKeyEnv: "SCRIBE_TEST_KEY" });
+    await expect(collect(provider)).rejects.toThrow(/rejected the API key from SCRIBE_TEST_KEY/);
+  });
+
+  test("an unreachable provider names the base URL", async () => {
+    // Port 1 is reserved and never listening.
+    const provider = createOpenAIProvider({ baseUrl: "http://127.0.0.1:1/v1", model: "m", apiKey: "k" });
+    await expect(collect(provider)).rejects.toThrow(/Couldn't reach http:\/\/127\.0\.0\.1:1\/v1.*Settings/);
+  });
+
   test("createProviderFromSettings resolves the key from its env var", async () => {
     const baseUrl = await startServer("stream");
     process.env["SCRIBE_TEST_KEY"] = "secret-value";
