@@ -4,7 +4,7 @@ All notable changes to Scribe are recorded here. Versions follow
 [Semantic Versioning](https://semver.org/); while Scribe is 0.x, the on-disk
 layout and config format may still change between minor versions.
 
-## 0.1.0 — unreleased
+## 0.1.0 — 10/08/2026
 
 The first release.
 
