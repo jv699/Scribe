@@ -149,10 +149,10 @@ else.
 `bun test` runs the tests, `bun run typecheck` type-checks, and `bun run build`
 produces a standalone binary in `dist/`.
 
-- [AGENTS.md](AGENTS.md) — the authoritative map of the codebase: per-module
-  notes, invariants, gotchas, and how releases are cut.
+- [CLAUDE.md](CLAUDE.md) — the authoritative map of the codebase, also read by
+  AI coding agents: per-module notes, invariants, gotchas, and how releases
+  are cut.
 - [PLAN.md](PLAN.md) — product design, domain model, and roadmap.
-- [CLAUDE.md](CLAUDE.md) — condensed entry point for AI coding agents.
 
 ## License
 

@@ -68,6 +68,8 @@ export function makeButton(ctx: RenderContext, options: ButtonOptions): BoxRende
 
   const button = new BoxRenderable(ctx, {
     borderColor: colors.idle,
+    // Without this OpenTUI paints its own default blue while focused.
+    focusedBorderColor: colors.active,
     paddingLeft: 2,
     paddingRight: 2,
     border: true,
