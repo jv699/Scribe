@@ -105,7 +105,7 @@ tools.**
   (one-shot only; a full-page map of a saved plan with a `## Map` schematic),
   and the source-document tools `list_sources` / `search_sources` /
   `read_source_pages` (granted to planning and one-shot, not report). See
-  `AGENTS.md` for the full current tool list and per-agent grants.
+  `CLAUDE.md` for the full current tool list and per-agent grants.
 - **Asking the user** — `ask_user(question, options)` blocks the turn on a
   multiple-choice question shown where the prompt box was, so the agent
   resolves a genuine fork by asking rather than guessing. Granted to every

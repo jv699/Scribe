@@ -2,7 +2,7 @@
  * Shared headless-renderer scaffolding for the UI tests.
  *
  * Must live inside the project so `@opentui/core` resolves to a single module
- * instance (see the AGENTS.md gotchas) — the same reason the tests themselves
+ * instance (see the CLAUDE.md gotchas) — the same reason the tests themselves
  * can't sit outside the repo.
  *
  * Destructure it in `beforeEach` so existing tests keep referring to bare

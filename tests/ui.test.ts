@@ -1,12 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { createMockMouse, type createMockKeys, type TestRenderer } from "@opentui/core/testing";
 import { setupRenderer, wait } from "./helpers/renderer.ts";
-import { TextareaRenderable, type KeyEvent } from "@opentui/core";
+import { RGBA, TextareaRenderable, type KeyEvent } from "@opentui/core";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { makeButton } from "../src/components/ui.ts";
+import { theme } from "../src/theme.ts";
 import { makeCampaignDialog } from "../src/components/campaign-dialog.ts";
 import { makeMainMenuScreen, type MainMenuView } from "../src/screens/main-menu.ts";
 import { makeCampaignWorkspaceScreen } from "../src/screens/campaign-workspace.ts";
@@ -21,7 +22,7 @@ import { resolveTools } from "../src/agent/tools/index.ts";
 
 /**
  * End-to-end UI flow test — must live inside the project so @opentui/core
- * resolves to a single module instance (see AGENTS.md gotchas).
+ * resolves to a single module instance (see CLAUDE.md gotchas).
  */
 
 let campaignsDir: string;
@@ -821,6 +822,17 @@ describe("makeButton", () => {
     button.focus();
 
     expect(() => button.destroyRecursively()).not.toThrow();
+  });
+
+  // OpenTUI's own focused border is blue; a tabbed-to button must match hover.
+  test("keyboard focus uses the hover color for the border", () => {
+    const button = makeButton(renderer, { label: "Back" });
+    renderer.root.add(button);
+    button.focus();
+
+    const hover = RGBA.fromHex(theme.flameCore);
+    expect(button.focusedBorderColor.equals(hover)).toBe(true);
+    expect(button.borderColor.equals(hover)).toBe(true);
   });
 
   // Numpad Enter is a distinct key name from Return; every other Enter-sensitive
