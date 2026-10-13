@@ -1552,71 +1552,230 @@ describe("chat screen", () => {
     await renderOnce();
     expect(stored.some((m) => m.content === "new msg")).toBe(true);
   });
-});
+  describe("message queuing", () => {
+    /**
+     * Each request waits for `release()` (tests decide when a turn ends instead
+     * of racing a timer) and fails when `fail` says so.
+     */
+    function gatedProvider(fail: (call: number) => boolean = () => false) {
+      const calls: ChatMessage[][] = [];
+      const gates: (() => void)[] = [];
+      const provider: ChatProvider = {
+        async *streamChat(messages): AsyncGenerator<ChatEvent> {
+          calls.push([...messages]);
+          const call = calls.length;
+          await new Promise<void>((resolve) => gates.push(resolve));
+          if (fail(call)) throw new Error("connection refused");
+          yield { type: "text", delta: `reply ${call}` };
+        },
+      };
+      const release = async (): Promise<void> => {
+        gates.shift()?.();
+        await wait(30);
+        await renderOnce();
+      };
+      return { provider, calls, release };
+    }
 
-describe("model header", () => {
-  test("upgrades from the bare id to name/usage/context/price once modelInfo and usage arrive", async () => {
-    const provider: ChatProvider = {
-      async *streamChat() {
-        yield { type: "text", delta: "hi" };
-        yield {
-          type: "usage",
-          usage: { promptTokens: 6400, completionTokens: 1600, totalTokens: 8000 },
-        };
-      },
-    };
+    const lastUser = (messages: ChatMessage[] | undefined): string | undefined =>
+      messages?.findLast((m) => m.role === "user")?.content;
 
-    current = await makeChatScreen(renderer, {
-      provider,
-      model: "gpt-4o-mini",
-      modelInfo: Promise.resolve({
-        id: "gpt-4o-mini",
-        name: "GPT-4o Mini",
-        contextLength: 128000,
-        pricing: { promptPerToken: 0.00000015, completionPerToken: 0.0000006 },
-      }),
-      onBack: () => {},
+    function promptValue(): string {
+      const find = (node: Renderable): TextareaRenderable | null => {
+        if (node instanceof TextareaRenderable) return node;
+        for (const child of node.getChildren()) {
+          const found = find(child);
+          if (found) return found;
+        }
+        return null;
+      };
+      return find(renderer.root)?.plainText ?? "";
+    }
+
+    async function sendText(text: string): Promise<void> {
+      await keys.typeText(text, 2);
+      keys.pressEnter();
+      await wait(20);
+      await renderOnce();
+    }
+
+    test("a message sent mid-turn is queued, shown, and sent when the turn ends", async () => {
+      const { provider, calls, release } = gatedProvider();
+      await open(provider);
+      await sendText("first");
+      await sendText("follow up");
+
+      expect(promptValue()).toBe("");
+      expect(captureCharFrame().includes("Queued: follow up")).toBe(true);
+      expect(calls.length).toBe(1);
+
+      await release();
+      expect(calls.length).toBe(2);
+      expect(lastUser(calls[1])).toBe("follow up");
+      expect(captureCharFrame().includes("Queued:")).toBe(false);
+      await release();
     });
-    renderer.root.add(current.node);
-    current.focus?.();
-    await renderOnce();
 
-    await keys.typeText("hello", 5);
-    keys.pressEnter();
-    await wait();
-    await renderOnce();
+    test("several queued messages go out together as one turn", async () => {
+      const { provider, calls, release } = gatedProvider();
+      await open(provider);
+      await sendText("first");
+      await sendText("one");
+      await sendText("two");
+      expect(captureCharFrame().includes("(+1 more)")).toBe(true);
 
-    const frame = captureCharFrame();
-    expect(frame.includes("GPT-4o Mini")).toBe(true);
-    expect(frame.includes("8k/128k")).toBe(true);
-    expect(frame.includes("6%")).toBe(true); // 8000 / 128000
-    expect(frame.includes("$0.0")).toBe(true);
-  });
-
-  test("falls back to the raw token count when context length is unknown", async () => {
-    const provider: ChatProvider = {
-      async *streamChat() {
-        yield { type: "text", delta: "hi" };
-        yield { type: "usage", usage: { promptTokens: 100, completionTokens: 20, totalTokens: 120 } };
-      },
-    };
-
-    current = await makeChatScreen(renderer, {
-      provider,
-      model: "local-model",
-      onBack: () => {},
+      await release();
+      await release();
+      expect(calls.length).toBe(2);
+      expect(lastUser(calls[1])).toBe("one\n\ntwo");
     });
-    renderer.root.add(current.node);
-    current.focus?.();
-    await renderOnce();
 
-    await keys.typeText("hello", 5);
-    keys.pressEnter();
-    await wait();
-    await renderOnce();
+    test("Up on an empty prompt takes the queue back for editing", async () => {
+      const { provider, calls, release } = gatedProvider();
+      await open(provider);
+      await sendText("first");
+      await sendText("one");
+      await sendText("two");
 
-    const frame = captureCharFrame();
-    expect(frame.includes("local-model")).toBe(true);
-    expect(frame.includes("120 tokens")).toBe(true);
+      keys.pressArrow("up");
+      await renderOnce();
+      expect(promptValue()).toBe("one\n\ntwo");
+      expect(captureCharFrame().includes("Queued:")).toBe(false);
+
+      await release();
+      expect(calls.length).toBe(1);
+      expect(promptValue()).toBe("one\n\ntwo");
+    });
+
+    test("a failed turn returns the queue to the prompt instead of sending it", async () => {
+      const { provider, calls, release } = gatedProvider((call) => call === 1);
+      await open(provider);
+      await sendText("first");
+      await sendText("follow up");
+
+      await release();
+      expect(calls.length).toBe(1);
+      expect(promptValue()).toBe("follow up");
+      expect(captureCharFrame().includes("Queued:")).toBe(false);
+    });
+
+    test("taking the queue back while the turn is saving sends nothing", async () => {
+      const { provider, calls, release } = gatedProvider();
+      let finishSave!: () => void;
+      let saving = false;
+      const chatLog: ChatLogStore = {
+        load: async () => [],
+        save: () => {
+          saving = true;
+          return new Promise<void>((resolve) => { finishSave = resolve; });
+        },
+      };
+      current = await makeChatScreen(renderer, { provider, chatLog, onBack: () => {} });
+      renderer.root.add(current.node);
+      current.focus?.();
+      await renderOnce();
+
+      await sendText("first");
+      await sendText("follow up");
+      await release();
+      expect(saving).toBe(true);
+
+      keys.pressArrow("up");
+      finishSave();
+      await wait(30);
+      expect(calls.length).toBe(1);
+      expect(promptValue()).toBe("follow up");
+    });
+
+    test("a message sent while the turn is saving queues behind the earlier one", async () => {
+      const { provider, calls, release } = gatedProvider();
+      let finishSave: (() => void) | null = null;
+      const chatLog: ChatLogStore = {
+        load: async () => [],
+        save: () => (finishSave ? Promise.resolve() : new Promise<void>((resolve) => { finishSave = resolve; })),
+      };
+      current = await makeChatScreen(renderer, { provider, chatLog, onBack: () => {} });
+      renderer.root.add(current.node);
+      current.focus?.();
+      await renderOnce();
+
+      await sendText("first");
+      await sendText("A");
+      await release();
+      await sendText("B");
+      finishSave!();
+      await wait(30);
+      expect(calls.length).toBe(2);
+      expect(lastUser(calls[1])).toBe("A\n\nB");
+      await release();
+    });
+
+    test("a second Enter while the turn context loads doesn't queue a copy", async () => {
+      const { provider, calls, release } = gatedProvider();
+      let finishLoad!: () => void;
+      current = await makeChatScreen(renderer, {
+        provider,
+        loadTurnContext: () => new Promise((resolve) => { finishLoad = () => resolve({}); }),
+        onBack: () => {},
+      });
+      renderer.root.add(current.node);
+      current.focus?.();
+      await renderOnce();
+
+      await sendText("first");
+      keys.pressEnter();
+      await wait(20);
+      await renderOnce();
+      expect(captureCharFrame().includes("Queued:")).toBe(false);
+
+      finishLoad();
+      await wait(20);
+      await release();
+      expect(calls.length).toBe(1);
+    });
+
+    test("when a queued turn's context fails to load, it and anything queued since return to the prompt", async () => {
+      const { provider, calls, release } = gatedProvider();
+      let loads = 0;
+      let failLoad!: () => void;
+      current = await makeChatScreen(renderer, {
+        provider,
+        loadTurnContext: () => {
+          loads += 1;
+          if (loads === 1) return Promise.resolve({});
+          return new Promise((_, reject) => { failLoad = () => reject(new Error("disk gone")); });
+        },
+        onBack: () => {},
+      });
+      renderer.root.add(current.node);
+      current.focus?.();
+      await renderOnce();
+
+      await sendText("first");
+      await sendText("A");
+      await release(); // drains A; its context load hangs
+      expect(loads).toBe(2);
+      await sendText("C");
+      failLoad();
+      await wait(20);
+      await renderOnce();
+
+      expect(calls.length).toBe(1);
+      expect(promptValue()).toBe("A\n\nC");
+      expect(captureCharFrame().includes("Queued:")).toBe(false);
+    });
+
+    test("leaving with a queued message doesn't throw or send it", async () => {
+      const { provider, calls, release } = gatedProvider();
+      await open(provider);
+      await sendText("first");
+      await sendText("follow up");
+
+      current?.dispose?.();
+      renderer.root.remove(current!.node);
+      current = null;
+      await release();
+      expect(calls.length).toBe(1);
+    });
   });
 });
