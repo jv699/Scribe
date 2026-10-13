@@ -11,13 +11,15 @@ export interface PromptOptions {
 export interface Prompt {
   node: BoxRenderable;
   input: TextareaRenderable;
-  /** Omitting `hint` restores the initial value. */
+  /** Omitting `hint` restores the default, shortened to fit a narrow prompt. */
   setHint(hint?: string): void;
 }
 
 export function makePrompt(ctx: RenderContext, options: PromptOptions): Prompt {
   const { node: promptBox, panel } = makeAccentPanel(ctx);
-  const initialHint = options.hint ?? "Enter to send · Shift+Enter for a new line · Esc twice to go back";
+  const fullHint = options.hint ?? "Enter to send · Shift+Enter for a new line · Esc twice to go back";
+  // What a narrow prompt (the campaign workspace at 80 columns) shows instead of wrapping.
+  const shortHint = options.hint ?? "Enter to send · Esc twice to go back";
 
   const input = new TextareaRenderable(ctx, {
     placeholder: options.placeholder ?? "Type a message…",
@@ -56,17 +58,25 @@ export function makePrompt(ctx: RenderContext, options: PromptOptions): Prompt {
     paddingTop: 1,
   });
   const hintText = new TextRenderable(ctx, {
-    content: initialHint,
+    content: fullHint,
     fg: theme.textMuted,
   });
   footer.add(hintText);
   panel.add(footer);
 
+  let override: string | undefined;
+  function showHint(): void {
+    if (hintText.isDestroyed) return;
+    hintText.content = override ?? (footer.width >= fullHint.length ? fullHint : shortHint);
+  }
+  footer.onSizeChange = showHint;
+
   return {
     node: promptBox,
     input,
     setHint: (hint) => {
-      hintText.content = hint ?? initialHint;
+      override = hint;
+      showHint();
     },
   };
 }

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { createMockKeys, type TestRenderer } from "@opentui/core/testing";
 import { setupRenderer, wait } from "./helpers/renderer.ts";
 import { BoxRenderable, MarkdownRenderable, TextareaRenderable, type Renderable } from "@opentui/core";
-import { makeChatScreen, type ChatLogStore } from "../src/screens/chat.ts";
+import { makeChatScreen, type ChatLogStore, type ChatScreen } from "../src/screens/chat.ts";
 import type { Screen } from "../src/screens/screen.ts";
 import type { ChatEvent, ChatMessage, ChatProvider } from "../src/provider/types.ts";
 import type { AgentTool } from "../src/agent/loop.ts";
@@ -55,6 +55,30 @@ async function open(provider: ChatProvider): Promise<void> {
 }
 
 describe("chat screen", () => {
+  test("the header gives the title its room and drops a model it can only show as a stub", async () => {
+    const longTitle = "Session 002 — The Drowned Bell Tower and Its Many Secrets Below · ready";
+    current = await makeChatScreen(renderer, {
+      provider: okProvider,
+      title: longTitle,
+      model: "openrouter/anthropic/claude-sonnet-4",
+      onBack: () => {},
+    });
+    renderer.root.add(current.node);
+    await renderOnce();
+    await renderOnce();
+    let header = captureCharFrame().split("\n")[1]!;
+    expect(header).toContain("Session 002");
+    expect(header).toContain("· ready");
+    expect(header).not.toContain("openrouter");
+
+    // With a short title there is room for both, kept apart.
+    (current as ChatScreen).setTitle("Drafting Table");
+    await renderOnce();
+    await renderOnce();
+    header = captureCharFrame().split("\n")[1]!;
+    expect(header).toMatch(/Drafting Table {2,}openrouter\/anthropic\/claude-sonnet-4/);
+  });
+
   test.each(["resolve", "reject"])("leaving while turn context loads safely handles a later %s", async (outcome) => {
     let release!: () => void;
     const pending = new Promise<void>((resolve) => { release = resolve; });

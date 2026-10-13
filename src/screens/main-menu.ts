@@ -3,6 +3,7 @@ import {
   SelectRenderable,
   SelectRenderableEvents,
   TextRenderable,
+  CliRenderEvents,
   type CliRenderer,
   type KeyEvent,
   type SelectOption,
@@ -11,6 +12,7 @@ import { enableSelectMouse } from "../components/ui.ts";
 import * as consts from "../consts.ts";
 import { chunkyFadeIn, dissolveIn } from "../intro.ts";
 import { theme } from "../theme.ts";
+import { truncate } from "../format.ts";
 import { VERSION } from "../version.ts";
 import type { Campaign } from "../store/campaigns.ts";
 import type { Screen } from "./screen.ts";
@@ -41,6 +43,10 @@ enum MenuOptions {
   QUIT,
 }
 
+const MIN_MENU_WIDTH = 30;
+/** The row's left inset and selection marker, plus a column for the scroll indicator. */
+const MENU_ROW_INSET = 4;
+
 export function makeMainMenuScreen(renderer: CliRenderer, options: MainMenuOptions): Screen {
   const rootOptions: SelectOption[] = [
     { name: "Campaigns", description: "", value: MenuOptions.CAMPAIGNS },
@@ -48,6 +54,7 @@ export function makeMainMenuScreen(renderer: CliRenderer, options: MainMenuOptio
     { name: "Settings", description: "", value: MenuOptions.SETTINGS },
     { name: "Quit", description: "", value: MenuOptions.QUIT },
   ];
+  // Names are cut to the menu's width in fit(); keep the originals to cut from.
   const campaignOptions: SelectOption[] = [
     ...options.campaigns.map((c) => ({ name: c.name, description: c.system, value: MenuOptions.SHOW_CAMPAIGN })),
     { name: "Create Campaign", description: "", value: MenuOptions.CREATE },
@@ -58,8 +65,9 @@ export function makeMainMenuScreen(renderer: CliRenderer, options: MainMenuOptio
   const rootSelectedIndex = 0;
 
   const mainMenu = new SelectRenderable(renderer, {
-    width: 30,
+    width: MIN_MENU_WIDTH,
     height: initialOptions.length,
+    showScrollIndicator: true,
     showDescription: false,
     options: initialOptions,
     selectedIndex: view === "root" ? rootSelectedIndex : 0,
@@ -76,8 +84,8 @@ export function makeMainMenuScreen(renderer: CliRenderer, options: MainMenuOptio
     view = nextView;
     const nextOptions = view === "campaigns" ? campaignOptions : rootOptions;
     mainMenu.options = nextOptions;
-    mainMenu.height = nextOptions.length;
     mainMenu.setSelectedIndex(view === "root" ? rootSelectedIndex : 0);
+    fit();
   }
 
   mainMenu.on(SelectRenderableEvents.ITEM_SELECTED, (index: number, option: SelectOption) => {
@@ -110,6 +118,28 @@ export function makeMainMenuScreen(renderer: CliRenderer, options: MainMenuOptio
   renderer.keyInput.on("keypress", onScreenKeypress);
 
   const logo = new TextRenderable(renderer, { content: consts.logoBloody, fg: theme.text });
+  const logoHeight = consts.logoBloody.split("\n").length;
+
+  /**
+   * Size the menu to the terminal: as wide as its longest row allows, and as
+   * tall as its rows, until that would push past the screen. Then the logo
+   * steps aside first, and only after that does the list scroll.
+   */
+  function fit(): void {
+    const source = view === "campaigns" ? campaignOptions : rootOptions;
+    const longest = Math.max(...source.map((option) => option.name.length));
+    const width = Math.max(MIN_MENU_WIDTH, Math.min(longest + MENU_ROW_INSET, renderer.width - 4));
+    mainMenu.width = width;
+    const selected = mainMenu.getSelectedIndex();
+    mainMenu.options = source.map((option) => ({ ...option, name: truncate(option.name, width - MENU_ROW_INSET) }));
+    mainMenu.setSelectedIndex(selected);
+
+    // Container padding, the version line, and the error with its margin.
+    const errorLines = options.error ? Math.ceil(options.error.length / Math.max(1, renderer.width - 2)) + 1 : 0;
+    const room = renderer.height - 3 - errorLines;
+    logo.visible = room >= logoHeight + source.length;
+    mainMenu.height = Math.max(1, Math.min(source.length, room - (logo.visible ? logoHeight : 0)));
+  }
 
   const container = new BoxRenderable(renderer, {
     width: "100%",
@@ -127,6 +157,9 @@ export function makeMainMenuScreen(renderer: CliRenderer, options: MainMenuOptio
   container.add(new BoxRenderable(renderer, { flexGrow: 2 }));
   container.add(new TextRenderable(renderer, { content: `v${VERSION}`, fg: theme.textMuted, alignSelf: "flex-end" }));
 
+  fit();
+  renderer.on(CliRenderEvents.RESIZE, fit);
+
   const stopAnimations = options.playIntro
     ? [dissolveIn(logo, consts.logoBloody), chunkyFadeIn(menuPanel, { delayMs: 500 })]
     : [];
@@ -136,6 +169,7 @@ export function makeMainMenuScreen(renderer: CliRenderer, options: MainMenuOptio
     focus: () => mainMenu.focus(),
     dispose: () => {
       renderer.keyInput.off("keypress", onScreenKeypress);
+      renderer.off(CliRenderEvents.RESIZE, fit);
       for (const stop of stopAnimations) stop();
     },
   };

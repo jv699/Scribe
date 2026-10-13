@@ -20,7 +20,7 @@ import { createCampaign, listCampaigns, loadCampaign, type Campaign } from "../s
 import { createSession, setSessionStatus } from "../src/store/sessions.ts";
 import { listCharacters } from "../src/store/characters.ts";
 import { showConfirmDialog } from "../src/components/confirm-dialog.ts";
-import { SelectRenderable, type Renderable } from "@opentui/core";
+import { BoxRenderable, SelectRenderable, type Renderable } from "@opentui/core";
 import { makeAskChannel } from "../src/agent/ask.ts";
 import { resolveTools } from "../src/agent/tools/index.ts";
 
@@ -858,6 +858,43 @@ describe("select mouse support", () => {
 });
 
 describe("two-stage main menu", () => {
+  test("a long campaign list fits the screen: the logo steps aside and long names end in an ellipsis", async () => {
+    const campaigns = Array.from({ length: 14 }, (_, i) => ({
+      name: i === 0 ? `The ${"Very ".repeat(30)}Long Campaign` : `Campaign ${i + 1}`,
+      system: "",
+    })) as unknown as Campaign[];
+    showScreen(
+      makeMainMenuScreen(renderer, {
+        campaigns,
+        initialView: "campaigns",
+        playIntro: false,
+        onCreateCampaign: () => {},
+        onSelectCampaign: () => {},
+        onSettings: () => {},
+        onOneshotPlanner: () => {},
+        onQuit: () => {},
+      }),
+    );
+    await renderOnce();
+    await renderOnce();
+    const frame = captureCharFrame();
+    expect(frame).not.toContain("▄████▄");
+    expect(frame).toContain("Campaign 14");
+    expect(frame).toContain("← Back");
+    const lines = frame.split("\n");
+    expect(lines.find((line) => line.includes("The Very"))!.trimEnd().endsWith("…")).toBe(true);
+    // The whole list sits above the version in the corner.
+    expect(lines.findIndex((line) => line.includes("← Back"))).toBeLessThan(
+      lines.findIndex((line) => line.includes("v0.")),
+    );
+  });
+
+  test("a short campaign list keeps the logo", async () => {
+    await showMainMenu("campaigns");
+    await renderOnce();
+    expect(captureCharFrame()).toContain("▄████▄");
+  });
+
   test("campaign rows select their matching campaigns before Create and Back", async () => {
     const first = await createCampaign(campaignsDir, { name: "First Campaign", system: "5e", description: "" });
     const second = await createCampaign(campaignsDir, { name: "Second Campaign", system: "5e", description: "" });
@@ -980,6 +1017,36 @@ describe("makeButton", () => {
 
     button.onKeyDown?.({ name: "a" } as KeyEvent);
     expect(clicks).toBe(2);
+  });
+});
+
+describe("prompt hint", () => {
+  test("a prompt too narrow for the full hint shows the short one instead of wrapping", async () => {
+    const narrow = new BoxRenderable(renderer, { width: 44 });
+    const prompt = makePrompt(renderer, { onSubmit: () => {} });
+    narrow.add(prompt.node);
+    renderer.root.add(narrow);
+    await renderOnce();
+    await renderOnce();
+    let frame = captureCharFrame();
+    expect(frame).toContain("Enter to send · Esc twice to go back");
+    expect(frame).not.toContain("Shift+Enter");
+
+    prompt.setHint("Press Escape again to go back");
+    await renderOnce();
+    expect(captureCharFrame()).toContain("Press Escape again to go back");
+    prompt.setHint();
+    await renderOnce();
+    frame = captureCharFrame();
+    expect(frame).toContain("Enter to send · Esc twice to go back");
+  });
+
+  test("a wide prompt shows the full hint", async () => {
+    const prompt = makePrompt(renderer, { onSubmit: () => {} });
+    renderer.root.add(prompt.node);
+    await renderOnce();
+    await renderOnce();
+    expect(captureCharFrame()).toContain("Shift+Enter for a new line");
   });
 });
 
