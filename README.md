@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="src/scribe-logo.gif" alt="The Scribe logo dissolving into view" width="800">
+</p>
+
 # Scribe
 
 A bring-your-own-model TTRPG campaign builder and organizer for the terminal.
