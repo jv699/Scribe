@@ -81,6 +81,7 @@ export function makeCombobox(ctx: RenderContext, options: ComboboxOptions): Comb
     backgroundColor: theme.surfaceRaised,
     focusedBackgroundColor: theme.surfaceActive,
     keyBindings: TEXT_FIELD_KEYS,
+    placeholderColor: theme.textMuted,
   });
   node.add(input);
 

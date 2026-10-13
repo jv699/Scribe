@@ -55,6 +55,25 @@ async function open(provider: ChatProvider): Promise<void> {
 }
 
 describe("chat screen", () => {
+  test("an empty conversation shows its hint until the first message", async () => {
+    current = await makeChatScreen(renderer, {
+      provider: okProvider,
+      emptyHint: "Describe a one-shot to get started.",
+      onBack: () => {},
+    });
+    renderer.root.add(current.node);
+    current.focus?.();
+    await renderOnce();
+    expect(captureCharFrame()).toContain("Describe a one-shot to get started.");
+
+    await keys.typeText("hi", 2);
+    keys.pressEnter();
+    await wait();
+    await renderOnce();
+    expect(captureCharFrame()).not.toContain("Describe a one-shot");
+    expect(captureCharFrame()).toContain("Hello world");
+  });
+
   test("the header gives the title its room and drops a model it can only show as a stub", async () => {
     const longTitle = "Session 002 — The Drowned Bell Tower and Its Many Secrets Below · ready";
     current = await makeChatScreen(renderer, {

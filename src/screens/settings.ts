@@ -94,6 +94,7 @@ export async function makeSettingsScreen(
       backgroundColor: theme.surfaceRaised,
       focusedBackgroundColor: theme.surfaceActive,
       keyBindings: TEXT_FIELD_KEYS,
+      placeholderColor: theme.textMuted,
       marginBottom: 1,
     });
   const addField = (label: string, value: string, placeholder: string, help: string): InputRenderable => {
@@ -194,8 +195,10 @@ export async function makeSettingsScreen(
 
   const inputs = [baseUrlInput, keyInput, modelInput, dirInput, oneshotsInput, sourcesInput];
   const focusChain: Renderable[] = [...inputs, saveButton, testButton, backButton];
-  const initialValues = inputs.map((input) => input.value);
-  const isDirty = (): boolean => inputs.some((input, index) => input.value !== initialValues[index]);
+  // What is on disk: the baseline for "unsaved", and what a save builds on.
+  let saved = options.settings;
+  let savedValues = inputs.map((input) => input.value);
+  const isDirty = (): boolean => inputs.some((input, index) => input.value !== savedValues[index]);
 
   function reject(input: InputRenderable, message: string): void {
     setStatus(message);
@@ -295,7 +298,7 @@ export async function makeSettingsScreen(
     if (oneshotsDir === null) return;
     const sourcesDir = readDir(sourcesInput, "Sources");
     if (sourcesDir === null) return;
-    const next: Settings = { ...options.settings, campaignsDir, oneshotsDir, sourcesDir };
+    const next: Settings = { ...saved, campaignsDir, oneshotsDir, sourcesDir };
     if (baseUrl !== "") next.baseUrl = baseUrl;
     else delete next.baseUrl;
     const model = modelInput.value.trim();
@@ -308,6 +311,10 @@ export async function makeSettingsScreen(
     setStatus("Saving...", "info");
     try {
       await options.onSaved(next);
+      // Stay, so the saved values can be tested straight away.
+      saved = next;
+      savedValues = inputs.map((input) => input.value);
+      setStatus("Saved.", "info");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Failed to save settings");
     } finally {

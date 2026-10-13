@@ -144,6 +144,25 @@ describe("settings screen", () => {
     expect(saved?.oneshotPromptOverride).toBe("/tmp/oneshot-core.md");
   });
 
+  test("saving stays on the screen, says so, and leaves nothing unsaved", async () => {
+    await open({ campaignsDir: "/tmp/x", oneshotsDir: "/tmp/o", sourcesDir: "/tmp/s" });
+    await keys.typeText("http://localhost:11434/v1", 5); // base URL
+    await keys.pressKeys(["TAB", "TAB", "TAB", "TAB", "TAB", "TAB"], 20); // -> Save
+    keys.pressEnter();
+    await wait();
+    await renderOnce();
+    expect(saved?.baseUrl).toBe("http://localhost:11434/v1");
+    expect(wentBack).toBe(false);
+    expect(captureCharFrame()).toContain("Saved.");
+
+    // Saved values are the new baseline: leaving asks nothing.
+    keys.pressKey("ESCAPE");
+    await wait(20);
+    await renderOnce();
+    expect(captureCharFrame()).not.toContain("Discard changes");
+    expect(wentBack).toBe(true);
+  });
+
   test("reports asynchronous save failures and allows retry", async () => {
     let attempts = 0;
     await open(

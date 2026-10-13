@@ -82,6 +82,7 @@ function input(renderer: CliRenderer, value: string, placeholder: string): Input
     backgroundColor: theme.surfaceRaised,
     focusedBackgroundColor: theme.surfaceActive,
     keyBindings: TEXT_FIELD_KEYS,
+    placeholderColor: theme.textMuted,
     marginBottom: 1,
   });
 }
@@ -100,6 +101,7 @@ function textarea(
     backgroundColor: theme.surfaceRaised,
     focusedBackgroundColor: theme.surfaceActive,
     keyBindings: TEXT_FIELD_KEYS,
+    placeholderColor: theme.textMuted,
     focusedTextColor: theme.text,
     marginBottom: 1,
   });

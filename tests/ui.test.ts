@@ -889,6 +889,44 @@ describe("two-stage main menu", () => {
     );
   });
 
+  test("an empty campaign list says so, and campaign rows show their system", async () => {
+    await showMainMenu("campaigns");
+    await renderOnce();
+    expect(captureCharFrame()).toContain("No campaigns yet");
+
+    await createCampaign(campaignsDir, { name: "Curse of Strahd", system: "D&D 5e", description: "" });
+    await createCampaign(campaignsDir, { name: "Dolmenwood", system: "", description: "" });
+    await showMainMenu("campaigns");
+    await renderOnce();
+    const frame = captureCharFrame();
+    expect(frame).not.toContain("No campaigns yet");
+    expect(frame).toMatch(/Curse of Strahd {2,}D&D 5e/);
+    expect(frame).toContain("Dolmenwood");
+  });
+
+  test("Enter in the new campaign form moves to the next field instead of creating", async () => {
+    await showMainMenu("campaigns");
+    keys.pressEnter(); // Create Campaign
+    await wait(60);
+    await keys.typeText("Strahd", 3);
+    keys.pressEnter();
+    await wait(20);
+    await keys.typeText("5e", 3);
+    keys.pressEnter();
+    await wait(40);
+    expect(await listCampaigns(campaignsDir)).toEqual([]);
+    await renderOnce();
+    const frame = captureCharFrame();
+    expect(frame).toContain("Game system");
+    expect(frame).toMatch(/Name\s/);
+    // Tab from the background reaches Create.
+    await keys.pressKeys(["TAB"], 20);
+    keys.pressEnter();
+    await wait(100);
+    const created = await listCampaigns(campaignsDir);
+    expect(created.map((campaign) => [campaign.name, campaign.system])).toEqual([["Strahd", "5e"]]);
+  });
+
   test("a short campaign list keeps the logo", async () => {
     await showMainMenu("campaigns");
     await renderOnce();

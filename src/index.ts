@@ -114,7 +114,6 @@ async function showSettingsScreen(): Promise<void> {
       onSaved: async (next) => {
         await saveSettings(next);
         settings = next;
-        navigate(showMainMenu);
       },
       onBack: () => navigate(showMainMenu),
     }),
@@ -149,6 +148,9 @@ async function showOneshotPlanner(): Promise<void> {
   const screen = await makeChatScreen(renderer, {
     ...makeChatOptions(),
     title: "Drafting Table",
+    emptyHint:
+      "Plan a one-shot or brainstorm an idea: describe what you have in mind and Scribe will help shape it.\n\n" +
+      "Type / for commands (/save keeps the plan, /map draws it) and @ to bring in a saved one-shot or a source.",
     systemPrompt: await buildOneshotSystemPrompt(settings),
     tools: toolsFor("oneshot", {
       oneshotsDir: settings.oneshotsDir,
@@ -186,6 +188,9 @@ async function makeCampaignSessionChat(
   return makeChatScreen(renderer, {
     ...makeChatOptions(),
     title: sessionChatTitle(session),
+    emptyHint:
+      "Plan this session with Scribe: describe what you want to happen and it will draft the notes.\n\n" +
+      "Type @ to bring in a past session, the story so far, or a source, and / for commands.",
     loadTurnContext: async () => {
       const fresh = (await loadCampaign(campaign.dir)) ?? campaign;
       return {

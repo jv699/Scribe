@@ -68,6 +68,8 @@ export interface ChatScreenOptions {
   modelInfo?: Promise<ModelInfo | undefined>;
   /** Left of the title bar. Defaults to "Drafting Table". */
   title?: string;
+  /** Shown in place of the transcript while the conversation is empty. */
+  emptyHint?: string;
   systemPrompt?: string;
   /** Non-empty tools enable the agent loop; otherwise use plain streaming. */
   tools?: AgentTool[];
@@ -188,6 +190,16 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
     stickyStart: "bottom",
   });
   const transcript = makeTranscript(renderer, { syntaxStyle });
+  // UI-only, like a notice: it never reaches the model or the log.
+  const emptyHint = new TextRenderable(renderer, {
+    content: options.emptyHint ?? "",
+    fg: theme.textMuted,
+    wrapMode: "word",
+    marginTop: 1,
+    marginBottom: 1,
+  });
+  emptyHint.visible = options.emptyHint !== undefined;
+  scrollBox.content.add(emptyHint);
   scrollBox.content.add(transcript.node);
   container.add(scrollBox);
 
@@ -224,6 +236,7 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
 
   function render(): void {
     if (disposed) return;
+    emptyHint.visible = options.emptyHint !== undefined && messages.length === 0;
     transcript.sync(messages);
   }
 
