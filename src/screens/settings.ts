@@ -10,7 +10,7 @@ import {
 } from "@opentui/core";
 import { isAbsolute } from "node:path";
 import { makeCombobox } from "../components/combobox.ts";
-import { showConfirmDialog } from "../components/confirm-dialog.ts";
+import { makeQuitGuard, showConfirmDialog } from "../components/confirm-dialog.ts";
 import { makeModelCombobox } from "../components/model-combobox.ts";
 import { makeButton, tabWalk, TEXT_FIELD_KEYS } from "../components/ui.ts";
 import { theme } from "../theme.ts";
@@ -359,6 +359,20 @@ export async function makeSettingsScreen(
     });
   }
 
+  let quitReturnTo: Renderable | null = null;
+  const handleInterrupt = makeQuitGuard(renderer, {
+    isDirty,
+    isBlocked: () => modalOpen,
+    onOpen: () => {
+      quitReturnTo = renderer.currentFocusedRenderable;
+      modalOpen = true;
+    },
+    onClose: () => {
+      modalOpen = false;
+      if (!disposed) (quitReturnTo ?? baseUrlInput).focus();
+    },
+  });
+
   const advance = (from: Renderable): void => {
     const index = focusChain.indexOf(from);
     focusChain[index + 1]?.focus();
@@ -371,5 +385,5 @@ export async function makeSettingsScreen(
   renderer.keyInput.on("keypress", onKeypress);
   baseUrlInput.focus();
 
-  return { node: container, focus: () => baseUrlInput.focus(), dispose };
+  return { node: container, focus: () => baseUrlInput.focus(), handleInterrupt, dispose };
 }

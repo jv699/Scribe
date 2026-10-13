@@ -36,12 +36,18 @@ export interface CampaignPane {
   node: BoxRenderable;
   focus(): void;
   requestLeave(next: () => void): void;
+  /** Unsaved edits that leaving would discard. */
+  isDirty(): boolean;
+  /** A dialog or save owns the pane right now. */
+  readonly blocked: boolean;
   dispose(): void;
 }
 
 interface PaneOptions {
   campaign: Campaign;
   isActive: () => boolean;
+  /** No workspace dialog is up, so a click may act even while the sidebar has focus. */
+  isInteractive: () => boolean;
   onBack: () => void;
   onInputFocus: () => void;
   onCampaignChange?: () => void;
@@ -112,6 +118,8 @@ interface EditorLifecycleOptions {
   isActive: () => boolean;
   onBack: () => void;
   isDirty: () => boolean;
+  /** Escape's action; defaults to leaving the pane for the sidebar. */
+  onEscape?: () => void;
   resetDraft: () => void;
   discardTitle: string;
   focus: () => void;
@@ -152,7 +160,8 @@ function makeEditorLifecycle(renderer: CliRenderer, options: EditorLifecycleOpti
     if (disposed || !options.isActive() || modalOpen) return;
     if (key.name === "escape") {
       key.preventDefault();
-      requestLeave(options.onBack);
+      if (options.onEscape) options.onEscape();
+      else requestLeave(options.onBack);
       return;
     }
     tabWalk(renderer, options.focusChain(), key);
@@ -263,7 +272,7 @@ export async function makeCharactersPane(
       selectedBackgroundColor: theme.accent,
       selectedTextColor: theme.text,
     });
-    enableSelectMouse(menu, () => options.isActive() && !lifecycle.blocked);
+    enableSelectMouse(menu, () => options.isInteractive() && !lifecycle.blocked);
     box.add(menu);
 
     const details = new TextRenderable(renderer, {
@@ -399,6 +408,8 @@ export async function makeCharactersPane(
     isActive: options.isActive,
     onBack: options.onBack,
     isDirty: dirty,
+    // An open editor backs out to the list; the list backs out to the sidebar.
+    onEscape: () => (editing === undefined ? requestLeave(options.onBack) : requestList()),
     resetDraft: () => {
       if (!baseline) return;
       if (nameInput) nameInput.value = baseline.name;
@@ -416,6 +427,10 @@ export async function makeCharactersPane(
     node: root,
     focus,
     requestLeave,
+    isDirty: dirty,
+    get blocked() {
+      return lifecycle.blocked;
+    },
     dispose: lifecycle.dispose,
   };
 }
@@ -511,6 +526,8 @@ export function makeStoryPane(renderer: CliRenderer, options: PaneOptions): Camp
     isActive: options.isActive,
     onBack: options.onBack,
     isDirty: dirty,
+    // The editor backs out to the reading view; that view backs out to the sidebar.
+    onEscape: () => requestLeave(editor ? renderStory : options.onBack),
     resetDraft: () => editor?.setText(baseline),
     discardTitle: "Discard story changes?",
     focus,
@@ -523,6 +540,10 @@ export function makeStoryPane(renderer: CliRenderer, options: PaneOptions): Camp
     node: root,
     focus,
     requestLeave,
+    isDirty: dirty,
+    get blocked() {
+      return lifecycle.blocked;
+    },
     dispose: () => {
       if (lifecycle.disposed) return;
       lifecycle.dispose();
@@ -651,6 +672,10 @@ export function makeCampaignSettingsPane(renderer: CliRenderer, options: PaneOpt
     node: root,
     focus,
     requestLeave,
+    isDirty: dirty,
+    get blocked() {
+      return lifecycle.blocked;
+    },
     dispose: lifecycle.dispose,
   };
 }

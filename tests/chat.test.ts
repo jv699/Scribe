@@ -924,11 +924,11 @@ describe("chat screen", () => {
 
     test("Ctrl+C arms quit without dismissing an active question", async () => {
       await ask(ONE_OF_TWO);
-      expect(current?.handleInterrupt?.()).toBe("handled");
+      expect(current?.handleInterrupt?.(() => {})).toBe("handled");
       await renderOnce();
       expect(captureCharFrame().includes("Which hook drives session 2?")).toBe(true);
 
-      expect(current?.handleInterrupt?.()).toBe("quit");
+      expect(current?.handleInterrupt?.(() => {})).toBe("quit");
       await renderOnce();
       expect(captureCharFrame().includes("Which hook drives session 2?")).toBe(true);
     });
@@ -993,7 +993,7 @@ describe("chat screen", () => {
         await renderOnce();
         expect(captureCharFrame().includes("@session-1")).toBe(true);
 
-        expect(current?.handleInterrupt?.()).toBe("handled");
+        expect(current?.handleInterrupt?.(() => {})).toBe("handled");
         await wait(60);
         await renderOnce();
         let frame = captureCharFrame();
@@ -1011,29 +1011,29 @@ describe("chat screen", () => {
 
       test("second press inside the window requests quit", async () => {
         await openWithCompletions();
-        expect(current?.handleInterrupt?.()).toBe("handled");
-        expect(current?.handleInterrupt?.()).toBe("quit");
+        expect(current?.handleInterrupt?.(() => {})).toBe("handled");
+        expect(current?.handleInterrupt?.(() => {})).toBe("quit");
         await renderOnce();
         expect(captureCharFrame().includes(PROMPT_HINT)).toBe(true);
       });
 
       test("another key cancels the pending exit", async () => {
         await openWithCompletions();
-        expect(current?.handleInterrupt?.()).toBe("handled");
+        expect(current?.handleInterrupt?.(() => {})).toBe("handled");
         keys.pressKey("x");
         await wait(30);
 
         // This is a new first press: it clears the intervening input rather
         // than returning the app-level quit request.
-        expect(current?.handleInterrupt?.()).toBe("handled");
+        expect(current?.handleInterrupt?.(() => {})).toBe("handled");
         expect(promptText()).toBe("");
       });
 
       test("a press after the window starts a fresh sequence", async () => {
         await openWithCompletions();
-        expect(current?.handleInterrupt?.()).toBe("handled");
+        expect(current?.handleInterrupt?.(() => {})).toBe("handled");
         await wait(780);
-        expect(current?.handleInterrupt?.()).toBe("handled");
+        expect(current?.handleInterrupt?.(() => {})).toBe("handled");
       });
     });
 
@@ -1517,10 +1517,10 @@ describe("chat screen", () => {
         await wait(100);
         await renderOnce();
 
-        expect(current?.handleInterrupt?.()).toBe("handled");
+        expect(current?.handleInterrupt?.(() => {})).toBe("handled");
         await renderOnce();
         expect(captureCharFrame().includes("Clear this conversation?")).toBe(true);
-        expect(current?.handleInterrupt?.()).toBe("quit");
+        expect(current?.handleInterrupt?.(() => {})).toBe("quit");
       });
     });
   });

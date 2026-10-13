@@ -9,7 +9,9 @@ import {
   type SelectOption,
 } from "@opentui/core";
 import { makeSessionDialog } from "../components/session-dialog.ts";
-import { enableSelectMouse } from "../components/ui.ts";
+import { makeQuitGuard } from "../components/confirm-dialog.ts";
+import { enableSelectMouse, styleSelectFocus } from "../components/ui.ts";
+import { truncate } from "../format.ts";
 import { createSession, listSessions, type Session } from "../store/sessions.ts";
 import type { Campaign } from "../store/campaigns.ts";
 import { theme } from "../theme.ts";
@@ -23,6 +25,8 @@ import {
 import type { Screen } from "./screen.ts";
 
 const SIDEBAR_WIDTH = 32;
+/** Row text width: the sidebar minus its padding, border, inset, and scroll indicator. */
+const SESSION_ROW_WIDTH = SIDEBAR_WIDTH - 6;
 
 export interface SessionChatHost {
   onBack: () => void;
@@ -48,13 +52,20 @@ function sessionOptions(
     ...sessions.map((session) => {
       const state = session.number === activeSessionNumber ? activeChatState : "idle";
       const activity = state === "working" ? "… " : state === "awaiting-answer" ? "? " : "";
+      // The status lives in the chat header, where there is room for it.
       return {
-        name: `${activity}${String(session.number).padStart(3, "0")} ${session.title} [${session.status}]`,
+        name: truncate(`${activity}${String(session.number).padStart(3, "0")} ${session.title}`, SESSION_ROW_WIDTH),
         description: "",
       };
     }),
     { name: "+ New Session", description: "" },
   ];
+}
+
+/** The chat header for a session; it carries the status the sidebar has no room for. */
+export function sessionChatTitle(session: Session): string {
+  const title = `Session ${String(session.number).padStart(3, "0")} — ${session.title}`;
+  return session.status === "planning" ? title : `${title} · ${session.status}`;
 }
 
 const destinationOptions: SelectOption[] = [
@@ -81,6 +92,8 @@ export async function makeCampaignWorkspaceScreen(
   let activeChat: ChatScreen | null = null;
   let activeView: CampaignPane | null = null;
   let activeDestination: Destination | null = null;
+  /** What the right pane shows, set as soon as it is asked for (before it loads). */
+  let openDestination: Destination | null = null;
   let auxiliaryChild: Renderable | null = null;
 
   const container = new BoxRenderable(renderer, {
@@ -143,6 +156,28 @@ export async function makeCampaignWorkspaceScreen(
   enableSelectMouse(destinationMenu, () => !modalOpen && !creating);
   sidebar.add(destinationMenu);
 
+  // Only the focused list wears the accent; an unfocused one points at what is open, if anything.
+  const restyleSessionMenu = styleSelectFocus(sessionMenu, {
+    keepWhenBlurred: () => activeSessionNumber !== null && openDestination === null,
+    onBlur: () => {
+      const index = sessions.findIndex((session) => session.number === activeSessionNumber);
+      if (index >= 0) sessionMenu.setSelectedIndex(index);
+    },
+  });
+  const restyleDestinationMenu = styleSelectFocus(destinationMenu, {
+    keepWhenBlurred: () => openDestination !== null,
+    onBlur: () => {
+      const index = destinationOptions.findIndex((option) => option.value === openDestination);
+      if (index >= 0) destinationMenu.setSelectedIndex(index);
+    },
+  });
+
+  function setOpenDestination(destination: Destination | null): void {
+    openDestination = destination;
+    restyleSessionMenu();
+    restyleDestinationMenu();
+  }
+
   const rightPane = new BoxRenderable(renderer, {
     height: "100%",
     flexGrow: 1,
@@ -189,6 +224,7 @@ export async function makeCampaignWorkspaceScreen(
     const view = activeView;
     activeView = null;
     activeDestination = null;
+    if (!disposed) setOpenDestination(null);
     view.dispose();
     if (auxiliaryChild === view.node) auxiliaryChild = null;
     rightPane.remove(view.node);
@@ -220,7 +256,28 @@ export async function makeCampaignWorkspaceScreen(
     const selected = sessionMenu.getSelectedIndex();
     sessionMenu.options = sessionOptions(sessions, activeSessionNumber, activeChatState);
     sessionMenu.setSelectedIndex(Math.min(selected, sessions.length));
+    // Which session is open may have changed under an unfocused list.
+    restyleSessionMenu();
   }
+
+  function focusCurrent(): void {
+    if (disposed) return;
+    if (pane === "chat" && activeChat) activeChat.focus?.();
+    else if (pane === "view" && activeView) activeView.focus();
+    else (sidebarFocus === "sessions" ? sessionMenu : destinationMenu).focus();
+  }
+
+  const interruptView = makeQuitGuard(renderer, {
+    isDirty: () => activeView?.isDirty() ?? false,
+    isBlocked: () => modalOpen || (activeView?.blocked ?? false),
+    onOpen: () => {
+      modalOpen = true;
+    },
+    onClose: () => {
+      modalOpen = false;
+      focusCurrent();
+    },
+  });
 
   function clearPendingChat(sessionNumber: number, generation: number): void {
     if (generation !== chatGeneration || activeSessionNumber !== sessionNumber) return;
@@ -254,6 +311,7 @@ export async function makeCampaignWorkspaceScreen(
     const index = sessions.findIndex((candidate) => candidate.number === session.number);
     if (index >= 0) sessionMenu.setSelectedIndex(index);
     sidebarFocus = "sessions";
+    setOpenDestination(null);
 
     if (activeChat && activeSessionNumber === session.number) {
       showChat();
@@ -317,6 +375,7 @@ export async function makeCampaignWorkspaceScreen(
     if (disposed) return;
     const request = ++activation;
     disposeActiveView();
+    setOpenDestination(destination);
     clearAuxiliary();
     if (activeChat) activeChat.node.visible = false;
     else disposeActiveChat();
@@ -327,6 +386,7 @@ export async function makeCampaignWorkspaceScreen(
     const paneOptions = {
       campaign,
       isActive: () => !disposed && pane === "view" && !modalOpen,
+      isInteractive: () => !disposed && !modalOpen,
       onBack: () => focusSidebar("destinations"),
       onInputFocus: () => {
         if (!disposed && !modalOpen && activeView) pane = "view";
@@ -468,13 +528,12 @@ export async function makeCampaignWorkspaceScreen(
 
   return {
     node: container,
-    focus: () => {
-      if (pane === "chat" && activeChat) activeChat.focus?.();
-      else if (pane === "view" && activeView) activeView.focus();
-      else (sidebarFocus === "sessions" ? sessionMenu : destinationMenu).focus();
+    focus: focusCurrent,
+    handleInterrupt: (quit) => {
+      // Unsaved campaign edits are asked about even while the sidebar has focus.
+      if (activeView && interruptView(quit) === "handled") return "handled";
+      return pane === "chat" && activeChat ? (activeChat.handleInterrupt?.(quit) ?? "quit") : "quit";
     },
-    handleInterrupt: () =>
-      pane === "chat" && activeChat ? (activeChat.handleInterrupt?.() ?? "quit") : "quit",
     dispose: () => {
       if (disposed) return;
       disposed = true;

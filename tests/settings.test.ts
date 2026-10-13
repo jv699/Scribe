@@ -66,6 +66,35 @@ async function confirmDiscard(ms = 300): Promise<void> {
 }
 
 describe("settings screen", () => {
+  test("Ctrl+C with unsaved edits asks first; Quit, or a second Ctrl+C, quits", async () => {
+    await open({ campaignsDir: "/tmp/x", oneshotsDir: "/tmp/o", sourcesDir: "/tmp/s" });
+    const quit = (): void => {
+      quits++;
+    };
+    let quits = 0;
+    expect(current?.handleInterrupt?.(quit)).toBe("quit");
+
+    await keys.typeText("x");
+    expect(current?.handleInterrupt?.(quit)).toBe("handled");
+    await renderOnce();
+    expect(captureCharFrame()).toContain("Quit without saving?");
+
+    // Escape answers the question, not the screen behind it.
+    keys.pressKey("ESCAPE");
+    await wait(20);
+    await renderOnce();
+    expect(captureCharFrame()).not.toContain("Quit without saving?");
+    expect(wentBack).toBe(false);
+    expect(settingsInputs()[0]?.focused).toBe(true);
+
+    current?.handleInterrupt?.(quit);
+    keys.pressTab(); // Cancel -> Quit
+    keys.pressEnter();
+    expect(quits).toBe(1);
+    expect(current?.handleInterrupt?.(quit)).toBe("handled");
+    expect(current?.handleInterrupt?.(quit)).toBe("quit");
+  });
+
   test("renders fields prefilled from settings and accepts typing", async () => {
     await open({
       campaignsDir: "/tmp/x",

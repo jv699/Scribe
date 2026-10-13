@@ -2,7 +2,7 @@ import { createCliRenderer, type KeyEvent } from "@opentui/core";
 import { theme } from "./theme.ts";
 import { makeCampaignDialog } from "./components/campaign-dialog.ts";
 import { makeMainMenuScreen, type MainMenuView } from "./screens/main-menu.ts";
-import { makeCampaignWorkspaceScreen, type SessionChatHost } from "./screens/campaign-workspace.ts";
+import { makeCampaignWorkspaceScreen, sessionChatTitle, type SessionChatHost } from "./screens/campaign-workspace.ts";
 import { makeSettingsScreen } from "./screens/settings.ts";
 import { makeChatScreen, type ChatLogStore } from "./screens/chat.ts";
 import type { Screen } from "./screens/screen.ts";
@@ -58,7 +58,7 @@ const onAppKeypress = (key: KeyEvent): void => {
   key.stopPropagation();
   if (key.eventType === "repeat" || key.repeated) return;
 
-  if (currentScreen?.handleInterrupt?.() === "handled") return;
+  if (currentScreen?.handleInterrupt?.(quitApp) === "handled") return;
   quitApp();
 };
 renderer.keyInput.on("keypress", onAppKeypress);
@@ -185,7 +185,7 @@ async function makeCampaignSessionChat(
   const ask = makeAskChannel();
   return makeChatScreen(renderer, {
     ...makeChatOptions(),
-    title: `Session ${String(session.number).padStart(3, "0")} — ${session.title}`,
+    title: sessionChatTitle(session),
     loadTurnContext: async () => {
       const fresh = (await loadCampaign(campaign.dir)) ?? campaign;
       return {

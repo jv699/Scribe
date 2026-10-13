@@ -112,6 +112,6 @@ test("a mounted chat keeps updating its state while hidden behind a campaign vie
 
   chatHost.onStateChange("idle");
   await renderOnce();
-  expect(captureCharFrame()).toContain("001 Open Road [planning]");
+  expect(captureCharFrame()).toContain("001 Open Road");
   expect(captureCharFrame()).not.toContain("? 001 Open Road");
 });

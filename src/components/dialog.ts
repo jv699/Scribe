@@ -17,6 +17,10 @@ export function makeDialog(ctx: RenderContext, options: DialogOptions): Dialog {
   const content = new BoxRenderable(ctx, {
     width: options.width,
     backgroundColor: options.backgroundColor ?? theme.surface,
+    // The border and the scrim behind it keep the screen underneath from
+    // reading as part of the dialog.
+    border: true,
+    borderColor: theme.accent,
     padding: 1,
     flexDirection: "column",
   });
@@ -30,6 +34,7 @@ export function makeDialog(ctx: RenderContext, options: DialogOptions): Dialog {
     justifyContent: "center",
     alignItems: "center",
     zIndex: 100,
+    backgroundColor: theme.scrim,
     visible: false,
   });
   layer.add(content);

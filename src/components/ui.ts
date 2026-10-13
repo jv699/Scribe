@@ -114,6 +114,48 @@ export function makeButton(ctx: RenderContext, options: ButtonOptions): BoxRende
   return button;
 }
 
+export interface SelectFocusStyleOptions {
+  /**
+   * Whether the selection still means something while the list is unfocused
+   * (it marks what is open). It then keeps a quiet bar; otherwise none.
+   */
+  keepWhenBlurred?: () => boolean;
+  /** Runs before restyling on blur, e.g. to move the selection back to what is open. */
+  onBlur?: () => void;
+}
+
+/**
+ * Only the focused list gets the accent bar, so two lists side by side never
+ * both look selected. The `▶` marker is turned off for good, because toggling
+ * it would shift every row sideways; the bar alone carries the selection.
+ * Returns a function that restyles after `keepWhenBlurred`'s answer changes.
+ */
+export function styleSelectFocus(select: SelectRenderable, options: SelectFocusStyleOptions = {}): () => void {
+  select.showSelectionIndicator = false;
+  function restyle(): void {
+    if (select.isDestroyed) return;
+    if (select.focused) {
+      select.selectedBackgroundColor = theme.accent;
+      select.selectedTextColor = theme.text;
+    } else if (options.keepWhenBlurred?.()) {
+      select.selectedBackgroundColor = theme.surfaceActive;
+      select.selectedTextColor = theme.text;
+    } else {
+      // Indistinguishable from its neighbours.
+      select.selectedBackgroundColor = "transparent";
+      select.selectedTextColor = theme.text;
+    }
+  }
+  select.on(RenderableEvents.FOCUSED, restyle);
+  select.on(RenderableEvents.BLURRED, () => {
+    if (select.isDestroyed) return;
+    options.onBlur?.();
+    restyle();
+  });
+  restyle();
+  return restyle;
+}
+
 // Select rows share one frame buffer; these internal fields enable mouse hit-testing.
 interface SelectRowLayout {
   scrollOffset: number;

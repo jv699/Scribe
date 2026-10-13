@@ -1,4 +1,4 @@
-import { BoxRenderable, TextRenderable, TextareaRenderable, type RenderContext } from "@opentui/core";
+import { BoxRenderable, RenderableEvents, TextRenderable, TextareaRenderable, type RenderContext } from "@opentui/core";
 import { theme } from "../theme.ts";
 import { makeAccentPanel, TEXT_FIELD_KEYS } from "./ui.ts";
 
@@ -39,6 +39,15 @@ export function makePrompt(ctx: RenderContext, options: PromptOptions): Prompt {
     onSubmit: options.onSubmit,
   });
   panel.add(input);
+
+  // The accent strip marks where typing goes; it dims while focus is elsewhere
+  // (a sidebar, a dialog), so the two never both look active.
+  const setStrip = (focused: boolean): void => {
+    if (!promptBox.isDestroyed) promptBox.borderColor = focused ? theme.accent : theme.textMuted;
+  };
+  input.on(RenderableEvents.FOCUSED, () => setStrip(true));
+  input.on(RenderableEvents.BLURRED, () => setStrip(false));
+  setStrip(false);
 
   const footer = new BoxRenderable(ctx, {
     width: "100%",
