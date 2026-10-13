@@ -1552,6 +1552,112 @@ describe("chat screen", () => {
     await renderOnce();
     expect(stored.some((m) => m.content === "new msg")).toBe(true);
   });
+  describe("message queuing", () => {
+    /** Records every request; each reply waits `delay` ms, failing when `fail` says so. */
+    function recordingProvider(delay: number, fail: (call: number) => boolean = () => false) {
+      const calls: ChatMessage[][] = [];
+      const provider: ChatProvider = {
+        async *streamChat(messages): AsyncGenerator<ChatEvent> {
+          calls.push([...messages]);
+          const call = calls.length;
+          await wait(delay);
+          if (fail(call)) throw new Error("connection refused");
+          yield { type: "text", delta: `reply ${call}` };
+        },
+      };
+      return { provider, calls };
+    }
+
+    function promptValue(): string {
+      const find = (node: Renderable): TextareaRenderable | null => {
+        if (node instanceof TextareaRenderable) return node;
+        for (const child of node.getChildren()) {
+          const found = find(child);
+          if (found) return found;
+        }
+        return null;
+      };
+      return find(renderer.root)?.plainText ?? "";
+    }
+
+    async function sendWhileWorking(...texts: string[]): Promise<void> {
+      await keys.typeText("first", 5);
+      keys.pressEnter();
+      await wait(60);
+      for (const text of texts) {
+        await keys.typeText(text, 5);
+        keys.pressEnter();
+        await wait(30);
+      }
+      await renderOnce();
+    }
+
+    test("a message sent mid-turn is queued, shown, and sent when the turn ends", async () => {
+      const { provider, calls } = recordingProvider(300);
+      await open(provider);
+      await sendWhileWorking("follow up");
+
+      expect(promptValue()).toBe("");
+      expect(captureCharFrame().includes("Queued: follow up")).toBe(true);
+      expect(calls.length).toBe(1);
+
+      await wait(800);
+      await renderOnce();
+      expect(calls.length).toBe(2);
+      expect(calls[1]!.findLast((m) => m.role === "user")?.content).toBe("follow up");
+      expect(captureCharFrame().includes("Queued:")).toBe(false);
+    });
+
+    test("several queued messages go out together as one turn", async () => {
+      const { provider, calls } = recordingProvider(300);
+      await open(provider);
+      await sendWhileWorking("one", "two");
+      expect(captureCharFrame().includes("(+1 more)")).toBe(true);
+
+      await wait(1000);
+      expect(calls.length).toBe(2);
+      expect(calls[1]!.findLast((m) => m.role === "user")?.content).toBe("one\n\ntwo");
+    });
+
+    test("Up on an empty prompt takes the queue back for editing", async () => {
+      const { provider, calls } = recordingProvider(300);
+      await open(provider);
+      await sendWhileWorking("one", "two");
+
+      keys.pressArrow("up");
+      await renderOnce();
+      expect(promptValue()).toBe("one\n\ntwo");
+      expect(captureCharFrame().includes("Queued:")).toBe(false);
+
+      await wait(600);
+      expect(calls.length).toBe(1);
+      expect(promptValue()).toBe("one\n\ntwo");
+    });
+
+    test("a failed turn returns the queue to the prompt instead of sending it", async () => {
+      const { provider, calls } = recordingProvider(300, (call) => call === 1);
+      await open(provider);
+      await sendWhileWorking("follow up");
+
+      await wait(600);
+      await renderOnce();
+      expect(calls.length).toBe(1);
+      expect(promptValue()).toBe("follow up");
+      expect(captureCharFrame().includes("Queued:")).toBe(false);
+    });
+
+    test("leaving with a queued message doesn't throw or send it", async () => {
+      const { provider, calls } = recordingProvider(200);
+      await open(provider);
+      await sendWhileWorking("follow up");
+
+      current?.dispose?.();
+      renderer.root.remove(current!.node);
+      current = null;
+      await wait(500);
+      expect(calls.length).toBe(1);
+    });
+  });
 });
 
 describe("model header", () => {

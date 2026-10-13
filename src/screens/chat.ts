@@ -165,10 +165,15 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
   if (options.onInputFocus) {
     prompt.input.on(RenderableEvents.FOCUSED, options.onInputFocus);
   }
+  // Messages sent mid-turn wait here, then go out together when the turn ends.
+  const queueText = new TextRenderable(renderer, { content: "", fg: theme.textMuted, flexShrink: 0 });
+  queueText.visible = false;
+  container.add(queueText);
   container.add(prompt.node);
 
   const messages: ChatMessage[] = [];
   let busy = false;
+  let queued: string[] = [];
   // Turns can outlive the screen; guard access to destroyed renderables/styles.
   let disposed = false;
 
@@ -193,6 +198,27 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
   if (options.chatLog) {
     messages.push(...(await options.chatLog.load()));
     render();
+  }
+
+  function updateQueueStrip(): void {
+    if (disposed) return;
+    queueText.visible = queued.length > 0;
+    if (queued.length === 0) return;
+    const first = (queued[0] ?? "").split("\n")[0] ?? "";
+    const more = queued.length > 1 ? ` (+${queued.length - 1} more)` : "";
+    queueText.content = `Queued: ${first}${more} · ↑ to edit`;
+  }
+
+  /** Hand queued text back to the prompt, ahead of any draft typed since. */
+  function restoreToPrompt(text: string): void {
+    queued = [];
+    updateQueueStrip();
+    if (disposed) return;
+    const draft = prompt.input.plainText.trim();
+    const restored = draft === "" ? text : `${text}\n\n${draft}`;
+    prompt.input.setText(restored);
+    prompt.input.cursorOffset = restored.length;
+    if (!options.isInputActive || options.isInputActive()) prompt.input.focus();
   }
 
   let live: TranscriptActivity | null = null;
@@ -358,7 +384,7 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
       // An async command can finish after the user has left.
       if (disposed) return;
       if (busy) refuseBusy("send that");
-      else void submit(text, false);
+      else void submit(text, "command");
     },
     notice: (text, tone) => {
       if (!disposed) transcript.addNotice(text, tone);
@@ -417,12 +443,21 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
 
   async function send(): Promise<void> {
     const text = prompt.input.plainText.trim();
-    if (text === "" || busy) return;
-    await submit(text, true);
+    if (text === "") return;
+    if (busy) {
+      queued.push(text);
+      prompt.input.clear();
+      updateQueueStrip();
+      return;
+    }
+    await submit(text, "prompt");
   }
 
-  /** `fromPrompt` turns clear the prompt once the turn starts; command turns leave any draft alone. */
-  async function submit(text: string, fromPrompt: boolean): Promise<void> {
+  /**
+   * Prompt turns clear the prompt once the turn starts; command and queue turns
+   * leave any draft alone. A queue turn that can't start goes back to the prompt.
+   */
+  async function submit(text: string, origin: "prompt" | "command" | "queue"): Promise<void> {
     busy = true;
     setState("working");
     let turnContext: ChatTurnContext = {};
@@ -432,6 +467,7 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
       busy = false;
       if (disposed) return;
       setState("idle");
+      if (origin === "queue") restoreToPrompt(text);
       transcript.addNotice(
         `Couldn't prepare this turn: ${err instanceof Error ? err.message : String(err)}`,
         "danger",
@@ -440,7 +476,7 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
       return;
     }
     if (disposed) return;
-    if (fromPrompt) prompt.input.clear();
+    if (origin === "prompt") prompt.input.clear();
     messages.push({ role: "user", content: text });
     const configuredTools = turnContext.tools ?? options.tools;
     const systemPrompt = turnContext.systemPrompt ?? options.systemPrompt;
@@ -449,6 +485,7 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
     if (!agentTools) messages.push({ role: "assistant", content: "" });
     render();
 
+    let failed = false;
     try {
       if (agentTools) {
         const result = await runAgent(
@@ -494,6 +531,7 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
         }
       }
     } catch (err) {
+      failed = true;
       dropUnfinishedAssistant();
       if (disposed) return;
       endActivity();
@@ -501,7 +539,9 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
     } finally {
       busy = false;
       if (!disposed) {
-        setState("idle");
+        // Going straight into a queued turn stays "working" rather than flickering idle.
+        const draining = queued.length > 0 && !failed;
+        if (!draining) setState("idle");
         endActivity();
         render();
         if (options.chatLog) {
@@ -510,6 +550,14 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
           } catch {
             // Persisting history must not break the turn.
           }
+        }
+        // A provider that just failed would likely fail again; let the user resend.
+        if (failed && queued.length > 0) restoreToPrompt(queued.join("\n\n"));
+        else if (draining && !disposed && !busy) {
+          const next = queued.join("\n\n");
+          queued = [];
+          updateQueueStrip();
+          void submit(next, "queue");
         }
       }
     }
@@ -534,6 +582,14 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
     // The popup gets Enter/Escape before submission or navigation.
     if (autocomplete.handleKey(key)) {
       disarmShortcut();
+      return;
+    }
+
+    // Up on an empty prompt takes queued messages back for editing.
+    if (key.name === "up" && queued.length > 0 && prompt.input.plainText === "") {
+      key.preventDefault();
+      disarmShortcut();
+      restoreToPrompt(queued.join("\n\n"));
       return;
     }
 
