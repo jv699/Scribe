@@ -3,12 +3,20 @@ import {
   RenderableEvents,
   TextRenderable,
   type CliRenderer,
+  type KeyBinding,
   type KeyEvent,
   type Renderable,
   type RenderContext,
   type SelectRenderable,
 } from "@opentui/core";
 import { theme } from "../theme.ts";
+
+/**
+ * Key bindings every text field shares. OpenTUI binds select-all to Cmd+A,
+ * which terminals rarely pass through, so Ctrl+A takes it over from its
+ * default "start of line" (Home still does that).
+ */
+export const TEXT_FIELD_KEYS: KeyBinding[] = [{ name: "a", ctrl: true, action: "select-all" }];
 
 export interface AccentPanelOptions {
   marginTop?: number;

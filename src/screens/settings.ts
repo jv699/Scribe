@@ -12,7 +12,7 @@ import { isAbsolute } from "node:path";
 import { makeCombobox } from "../components/combobox.ts";
 import { showConfirmDialog } from "../components/confirm-dialog.ts";
 import { makeModelCombobox } from "../components/model-combobox.ts";
-import { makeButton, tabWalk } from "../components/ui.ts";
+import { makeButton, tabWalk, TEXT_FIELD_KEYS } from "../components/ui.ts";
 import { theme } from "../theme.ts";
 import { abbreviateHome, defaultConfigDir, expandHome, type Settings } from "../store/settings.ts";
 import { DEFAULT_BASE_URL, DEFAULT_MODEL, listModelInfos, testConnection } from "../provider/openai.ts";
@@ -93,6 +93,7 @@ export async function makeSettingsScreen(
       width: "100%",
       backgroundColor: theme.surfaceRaised,
       focusedBackgroundColor: theme.surfaceActive,
+      keyBindings: TEXT_FIELD_KEYS,
       marginBottom: 1,
     });
   const addField = (label: string, value: string, placeholder: string, help: string): InputRenderable => {

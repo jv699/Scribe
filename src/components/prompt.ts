@@ -1,6 +1,6 @@
 import { BoxRenderable, TextRenderable, TextareaRenderable, type RenderContext } from "@opentui/core";
 import { theme } from "../theme.ts";
-import { makeAccentPanel } from "./ui.ts";
+import { makeAccentPanel, TEXT_FIELD_KEYS } from "./ui.ts";
 
 export interface PromptOptions {
   placeholder?: string;
@@ -31,6 +31,7 @@ export function makePrompt(ctx: RenderContext, options: PromptOptions): Prompt {
     focusedTextColor: theme.text,
     cursorColor: theme.accent,
     keyBindings: [
+      ...TEXT_FIELD_KEYS,
       { name: "return", action: "submit" },
       { name: "return", shift: true, action: "newline" },
       { name: "kpenter", action: "submit" },

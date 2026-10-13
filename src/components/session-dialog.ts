@@ -8,7 +8,7 @@ import {
 } from "@opentui/core";
 import { theme } from "../theme.ts";
 import { makeFormDialog } from "./form-dialog.ts";
-import { makeButton } from "./ui.ts";
+import { makeButton, TEXT_FIELD_KEYS } from "./ui.ts";
 
 export interface SessionDialogOptions {
   onSubmit: (title: string) => void;
@@ -36,6 +36,7 @@ export function makeSessionDialog(renderer: CliRenderer, options: SessionDialogO
     width: "100%",
     backgroundColor: theme.surfaceRaised,
     focusedBackgroundColor: theme.surfaceActive,
+    keyBindings: TEXT_FIELD_KEYS,
     marginBottom: 1,
   });
 

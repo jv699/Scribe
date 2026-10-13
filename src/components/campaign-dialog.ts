@@ -9,7 +9,7 @@ import {
 } from "@opentui/core";
 import { theme } from "../theme.ts";
 import { makeFormDialog } from "./form-dialog.ts";
-import { makeButton } from "./ui.ts";
+import { makeButton, TEXT_FIELD_KEYS } from "./ui.ts";
 import type { NewCampaign } from "../store/campaigns.ts";
 
 export interface CampaignDialogOptions {
@@ -42,6 +42,7 @@ export function makeCampaignDialog(renderer: CliRenderer, options: CampaignDialo
     width: "100%",
     backgroundColor: theme.surfaceRaised,
     focusedBackgroundColor: theme.surfaceActive,
+    keyBindings: TEXT_FIELD_KEYS,
     marginBottom: 1,
   });
 
@@ -51,6 +52,7 @@ export function makeCampaignDialog(renderer: CliRenderer, options: CampaignDialo
     width: "100%",
     backgroundColor: theme.surfaceRaised,
     focusedBackgroundColor: theme.surfaceActive,
+    keyBindings: TEXT_FIELD_KEYS,
     marginBottom: 1,
   });
 
@@ -60,6 +62,7 @@ export function makeCampaignDialog(renderer: CliRenderer, options: CampaignDialo
     height: 4,
     backgroundColor: theme.surfaceRaised,
     focusedBackgroundColor: theme.surfaceActive,
+    keyBindings: TEXT_FIELD_KEYS,
     marginBottom: 1,
   });
 
