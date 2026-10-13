@@ -174,6 +174,8 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
   const messages: ChatMessage[] = [];
   let busy = false;
   let queued: string[] = [];
+  /** A prompt turn whose text is still in the prompt while its context loads. */
+  let preparingPrompt = false;
   // Turns can outlive the screen; guard access to destroyed renderables/styles.
   let disposed = false;
 
@@ -206,16 +208,27 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
     if (queued.length === 0) return;
     const first = (queued[0] ?? "").split("\n")[0] ?? "";
     const more = queued.length > 1 ? ` (+${queued.length - 1} more)` : "";
-    queueText.content = `Queued: ${first}${more} · ↑ to edit`;
+    // Up belongs to an open question, so only offer it when the prompt is showing.
+    queueText.content = `Queued: ${first}${more}${askWidget ? "" : " · ↑ to edit"}`;
   }
 
-  /** Hand queued text back to the prompt, ahead of any draft typed since. */
-  function restoreToPrompt(text: string): void {
+  /** Empty the queue, returning its messages merged into one, or null if it was empty. */
+  function takeQueue(): string | null {
+    if (queued.length === 0) return null;
+    const text = queued.join("\n\n");
     queued = [];
     updateQueueStrip();
+    return text;
+  }
+
+  /**
+   * Hand text back to the prompt alongside any draft there: ahead of it by
+   * default (queued text was typed first), after it when the draft is older.
+   */
+  function restoreToPrompt(text: string, draftFirst = false): void {
     if (disposed) return;
     const draft = prompt.input.plainText.trim();
-    const restored = draft === "" ? text : `${text}\n\n${draft}`;
+    const restored = draft === "" ? text : draftFirst ? `${draft}\n\n${text}` : `${text}\n\n${draft}`;
     prompt.input.setText(restored);
     prompt.input.cursorOffset = restored.length;
     if (!options.isInputActive || options.isInputActive()) prompt.input.focus();
@@ -271,6 +284,7 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
         onCancel: () => finish(null),
       });
       askWidget = widget;
+      updateQueueStrip();
 
       setState("awaiting-answer");
 
@@ -293,6 +307,7 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
     widget.node.destroyRecursively();
     prompt.node.visible = true;
     if (disposed) return;
+    updateQueueStrip();
     setState(busy ? "working" : "idle");
     if (!options.isInputActive || options.isInputActive()) prompt.input.focus();
   }
@@ -444,6 +459,8 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
   async function send(): Promise<void> {
     const text = prompt.input.plainText.trim();
     if (text === "") return;
+    // That text is already on its way; a second Enter must not queue a copy.
+    if (preparingPrompt) return;
     if (busy) {
       queued.push(text);
       prompt.input.clear();
@@ -459,15 +476,21 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
    */
   async function submit(text: string, origin: "prompt" | "command" | "queue"): Promise<void> {
     busy = true;
+    preparingPrompt = origin === "prompt";
     setState("working");
     let turnContext: ChatTurnContext = {};
     try {
       turnContext = (await options.loadTurnContext?.()) ?? {};
     } catch (err) {
       busy = false;
+      preparingPrompt = false;
       if (disposed) return;
       setState("idle");
-      if (origin === "queue") restoreToPrompt(text);
+      // Context that just failed to load would fail again, so nothing queued is sent;
+      // it goes back to the prompt in the order it was typed. A prompt turn's text never left.
+      const rest = takeQueue();
+      if (origin === "queue") restoreToPrompt(rest === null ? text : `${text}\n\n${rest}`);
+      else if (rest !== null) restoreToPrompt(rest, origin === "prompt");
       transcript.addNotice(
         `Couldn't prepare this turn: ${err instanceof Error ? err.message : String(err)}`,
         "danger",
@@ -475,6 +498,7 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
       if (!options.isInputActive || options.isInputActive()) prompt.input.focus();
       return;
     }
+    preparingPrompt = false;
     if (disposed) return;
     if (origin === "prompt") prompt.input.clear();
     messages.push({ role: "user", content: text });
@@ -537,13 +561,11 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
       endActivity();
       transcript.addNotice(`Error: ${err instanceof Error ? err.message : String(err)}`, "danger");
     } finally {
-      busy = false;
       if (!disposed) {
-        // Going straight into a queued turn stays "working" rather than flickering idle.
-        const draining = queued.length > 0 && !failed;
-        if (!draining) setState("idle");
         endActivity();
         render();
+        // Stay busy through the save, so anything sent meanwhile queues behind
+        // what is already queued instead of jumping ahead of it.
         if (options.chatLog) {
           try {
             await options.chatLog.save(messages);
@@ -551,14 +573,16 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
             // Persisting history must not break the turn.
           }
         }
+      }
+      busy = false;
+      if (!disposed) {
+        // Read the queue only now: Up may have emptied it during the save.
+        const next = takeQueue();
         // A provider that just failed would likely fail again; let the user resend.
-        if (failed && queued.length > 0) restoreToPrompt(queued.join("\n\n"));
-        else if (draining && !disposed && !busy) {
-          const next = queued.join("\n\n");
-          queued = [];
-          updateQueueStrip();
-          void submit(next, "queue");
-        }
+        if (next !== null && failed) restoreToPrompt(next);
+        // Going straight into the queued turn stays "working" rather than flickering idle.
+        if (next !== null && !failed) void submit(next, "queue");
+        else setState("idle");
       }
     }
   }
@@ -589,7 +613,8 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
     if (key.name === "up" && queued.length > 0 && prompt.input.plainText === "") {
       key.preventDefault();
       disarmShortcut();
-      restoreToPrompt(queued.join("\n\n"));
+      const text = takeQueue();
+      if (text !== null) restoreToPrompt(text);
       return;
     }
 
