@@ -1,14 +1,7 @@
-import {
-  BoxRenderable,
-  InputRenderable,
-  RenderableEvents,
-  TextRenderable,
-  type KeyEvent,
-  type RenderContext,
-} from "@opentui/core";
+import type { RenderContext } from "@opentui/core";
 import { formatTokenCount } from "../format.ts";
 import type { ModelInfo } from "../provider/types.ts";
-import { theme } from "../theme.ts";
+import { makeCombobox, type Combobox } from "./combobox.ts";
 
 export interface ModelComboboxOptions {
   value?: string;
@@ -18,21 +11,7 @@ export interface ModelComboboxOptions {
   maxRows?: number;
 }
 
-export interface ModelCombobox {
-  node: BoxRenderable;
-  input: InputRenderable;
-  readonly visible: boolean;
-  handleKey(key: KeyEvent): boolean;
-  close(): void;
-  invalidate(): void;
-  dispose(): void;
-}
-
-interface Row {
-  node: BoxRenderable;
-  label: TextRenderable;
-  description: TextRenderable;
-}
+export type ModelCombobox = Combobox;
 
 function describe(model: ModelInfo): string {
   const parts: string[] = [];
@@ -42,256 +21,21 @@ function describe(model: ModelInfo): string {
 }
 
 export function makeModelCombobox(ctx: RenderContext, options: ModelComboboxOptions): ModelCombobox {
-  const maxRows = Math.max(1, options.maxRows ?? 8);
-  const node = new BoxRenderable(ctx, {
-    width: "100%",
-    height: 1,
-    marginBottom: 1,
-    // The dropdown extends beyond this one-row anchor. Raising the anchor's
-    // stacking context keeps later Settings fields from painting over it.
-    zIndex: 100,
-  });
-  const input = new InputRenderable(ctx, {
-    value: options.value ?? "",
-    placeholder: options.placeholder ?? "",
-    width: "100%",
-    backgroundColor: theme.surfaceRaised,
-    focusedBackgroundColor: theme.surfaceActive,
-  });
-  node.add(input);
-
-  const popup = new BoxRenderable(ctx, {
-    position: "absolute",
-    top: "100%",
-    left: 0,
-    width: "100%",
-    zIndex: 100,
-    flexDirection: "column",
-    backgroundColor: theme.surfaceRaised,
-    border: ["left"],
-    borderColor: theme.accent,
-    visible: false,
-  });
-  node.add(popup);
-
-  const message = new TextRenderable(ctx, {
-    content: "",
-    fg: theme.textMuted,
-    paddingLeft: 1,
-    paddingRight: 1,
-  });
-  popup.add(message);
-
-  const rows: Row[] = [];
-  for (let i = 0; i < maxRows; i++) {
-    const rowNode = new BoxRenderable(ctx, {
-      width: "100%",
-      flexDirection: "row",
-      paddingLeft: 1,
-      paddingRight: 1,
-      backgroundColor: theme.surfaceRaised,
-    });
-    const label = new TextRenderable(ctx, { content: "", fg: theme.textDim });
-    const description = new TextRenderable(ctx, { content: "", fg: theme.textMuted });
-    rowNode.add(label);
-    rowNode.add(description);
-    popup.add(rowNode);
-    rows.push({ node: rowNode, label, description });
-  }
-
-  let models: ModelInfo[] | null = null;
-  let filtered: ModelInfo[] = [];
-  let selected = 0;
-  let offset = 0;
-  let open = false;
-  let loading = false;
-  let retryAfter = 0;
-  let generation = 0;
-  let substituting = false;
-  let disposed = false;
-
-  function paintRows(): void {
-    message.visible = false;
-    const shown = Math.min(maxRows, filtered.length);
-    popup.height = shown;
-
-    if (selected < offset) offset = selected;
-    else if (selected >= offset + maxRows) offset = selected - maxRows + 1;
-
-    const labelWidth = filtered.reduce((width, model) => Math.max(width, model.id.length), 0);
-    for (const [i, row] of rows.entries()) {
-      const model = i < shown ? filtered[offset + i] : undefined;
-      if (!model) {
-        row.node.visible = false;
-        continue;
-      }
-      const active = offset + i === selected;
-      const detail = describe(model);
-      row.node.visible = true;
-      row.node.backgroundColor = active ? theme.accent : theme.surfaceRaised;
-      row.label.content = detail ? model.id.padEnd(labelWidth) : model.id;
-      row.label.fg = active ? theme.text : theme.textDim;
-      row.description.content = detail ? `  ${detail}` : "";
-      row.description.fg = active ? theme.text : theme.textMuted;
-    }
-  }
-
-  function showMessage(text: string): void {
-    filtered = [];
-    selected = 0;
-    offset = 0;
-    message.content = text;
-    message.visible = true;
-    for (const row of rows) row.node.visible = false;
-    popup.height = 1;
-    open = true;
-    popup.visible = true;
-  }
-
-  function applyFilter(): void {
-    if (!models || disposed || !input.focused) return;
-    const query = input.value.trim().toLowerCase();
-    filtered =
-      query === ""
-        ? models
-        : models.filter(
-            (model) => model.id.toLowerCase().includes(query) || (model.name ?? "").toLowerCase().includes(query),
-          );
-    selected = 0;
-    offset = 0;
-    open = true;
-    popup.visible = true;
-    if (filtered.length === 0) showMessage(models.length === 0 ? "No models returned by provider" : "No matching models");
-    else paintRows();
-  }
-
-  async function refresh(): Promise<void> {
-    if (disposed || substituting || !input.focused) return;
-    if (models) {
-      applyFilter();
-      return;
-    }
-    if (loading) return;
-    // Avoid one failed request per keystroke while still allowing a quick retry.
-    if (Date.now() < retryAfter) return;
-
-    loading = true;
-    options.onError?.("");
-    showMessage("Loading models…");
-    const mine = ++generation;
-    try {
-      const loaded = await options.loadModels();
-      if (disposed || mine !== generation || !input.focused) return;
-      models = loaded;
-      applyFilter();
-    } catch (error) {
-      if (disposed || mine !== generation) return;
-      hide();
-      retryAfter = Date.now() + 500;
-      options.onError?.(error instanceof Error ? error.message : "Failed to load models");
-    } finally {
-      if (mine === generation) loading = false;
-    }
-  }
-
-  function hide(): void {
-    open = false;
-    filtered = [];
-    popup.visible = false;
-  }
-
-  function close(): void {
-    generation++;
-    loading = false;
-    hide();
-  }
-
-  function invalidate(): void {
-    models = null;
-    retryAfter = 0;
-    close();
-    options.onError?.("");
-  }
-
-  function move(delta: number): void {
-    if (filtered.length === 0) return;
-    selected = (selected + delta + filtered.length) % filtered.length;
-    paintRows();
-  }
-
-  function pick(): void {
-    const model = filtered[selected];
-    if (!model) return;
-    close();
-    substituting = true;
-    try {
-      input.value = model.id;
-      input.cursorOffset = model.id.length;
-    } finally {
-      substituting = false;
-    }
-  }
-
-  input.onContentChange = () => void refresh();
-  const onBlur = (): void => close();
-  input.on(RenderableEvents.BLURRED, onBlur);
-
-  return {
-    node,
-    input,
-    get visible() {
-      return open;
+  return makeCombobox(ctx, {
+    ...(options.value !== undefined ? { value: options.value } : {}),
+    ...(options.placeholder !== undefined ? { placeholder: options.placeholder } : {}),
+    ...(options.onError ? { onError: options.onError } : {}),
+    ...(options.maxRows !== undefined ? { maxRows: options.maxRows } : {}),
+    messages: {
+      loading: "Loading models…",
+      empty: "No models returned by provider",
+      noMatch: "No matching models",
     },
-    handleKey: (key) => {
-      if (!open) return false;
-      switch (key.name) {
-        case "up":
-          if (filtered.length === 0) return false;
-          key.preventDefault();
-          move(-1);
-          return true;
-        case "down":
-          if (filtered.length === 0) return false;
-          key.preventDefault();
-          move(1);
-          return true;
-        case "return":
-        case "kpenter":
-          if (filtered.length === 0) {
-            close();
-            return false;
-          }
-          // Let the input's Enter handler advance focus after selection.
-          pick();
-          return false;
-        case "tab":
-          if (key.shift) return false;
-          if (filtered.length === 0) {
-            close();
-            return false;
-          }
-          // Tab completes without moving focus.
-          key.preventDefault();
-          pick();
-          return true;
-        case "escape":
-          key.preventDefault();
-          close();
-          return true;
-        default:
-          return false;
-      }
-    },
-    close,
-    invalidate,
-    dispose: () => {
-      if (disposed) return;
-      disposed = true;
-      close();
-      input.onContentChange = undefined;
-      input.off(RenderableEvents.BLURRED, onBlur);
-      node.remove(popup);
-      popup.destroyRecursively();
-    },
-  };
+    loadItems: async () =>
+      (await options.loadModels()).map((model) => ({
+        value: model.id,
+        description: describe(model),
+        ...(model.name ? { keywords: model.name } : {}),
+      })),
+  });
 }

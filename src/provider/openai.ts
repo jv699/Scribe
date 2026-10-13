@@ -57,41 +57,66 @@ async function* streamSSE(response: Response): AsyncGenerator<ChatEvent> {
   const decoder = new TextDecoder();
   let buffer = "";
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
 
-    const events = buffer.split(/\r?\n\r?\n/);
-    buffer = events.pop() ?? "";
+      const events = buffer.split(/\r?\n\r?\n/);
+      buffer = events.pop() ?? "";
 
-    for (const event of events) {
-      for (const line of event.split(/\r?\n/)) {
-        const trimmed = line.trim();
-        if (!trimmed.startsWith("data:")) continue;
-        const payload = trimmed.slice(5).trim();
-        if (payload === "[DONE]") return;
-        try {
-          const json = JSON.parse(payload) as { choices?: StreamChoice[]; usage?: RawUsage };
-          const delta = json.choices?.[0]?.delta;
-          if (delta?.content) yield { type: "text", delta: delta.content };
-          for (const tc of delta?.tool_calls ?? []) {
-            const toolCall: ToolCallDelta = {
-              index: tc.index ?? 0,
-              ...(tc.id !== undefined ? { id: tc.id } : {}),
-              ...(tc.function?.name !== undefined ? { name: tc.function.name } : {}),
-              ...(tc.function?.arguments !== undefined ? { arguments: tc.function.arguments } : {}),
-            };
-            yield { type: "tool_call", toolCall };
+      for (const event of events) {
+        for (const line of event.split(/\r?\n/)) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith("data:")) continue;
+          const payload = trimmed.slice(5).trim();
+          if (payload === "[DONE]") return;
+          try {
+            const json = JSON.parse(payload) as { choices?: StreamChoice[]; usage?: RawUsage };
+            const delta = json.choices?.[0]?.delta;
+            if (delta?.content) yield { type: "text", delta: delta.content };
+            for (const tc of delta?.tool_calls ?? []) {
+              const toolCall: ToolCallDelta = {
+                index: tc.index ?? 0,
+                ...(tc.id !== undefined ? { id: tc.id } : {}),
+                ...(tc.function?.name !== undefined ? { name: tc.function.name } : {}),
+                ...(tc.function?.arguments !== undefined ? { arguments: tc.function.arguments } : {}),
+              };
+              yield { type: "tool_call", toolCall };
+            }
+            // Providers may report usage on a final chunk without choices.
+            if (json.usage) yield { type: "usage", usage: toUsageInfo(json.usage) };
+          } catch {
+            // Ignore malformed keep-alives and partial lines.
           }
-          // Providers may report usage on a final chunk without choices.
-          if (json.usage) yield { type: "usage", usage: toUsageInfo(json.usage) };
-        } catch {
-          // Ignore malformed keep-alives and partial lines.
         }
       }
     }
+  } finally {
+    // A consumer that stops early must not leave the response streaming.
+    await reader.cancel().catch(() => {});
   }
+}
+
+/**
+ * The provider's own words for a failed request: the `message` out of an
+ * OpenAI-style error body, or the start of the body when it isn't one.
+ */
+async function errorDetail(response: Response): Promise<string> {
+  const text = (await response.text().catch(() => "")).trim();
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    // Some compatibility layers wrap the error object in an array.
+    const body = (Array.isArray(parsed) ? parsed[0] : parsed) as { error?: unknown; message?: unknown } | null;
+    const error = body?.error;
+    if (typeof error === "string" && error !== "") return error;
+    const message = (error as { message?: unknown } | null | undefined)?.message ?? body?.message;
+    if (typeof message === "string" && message !== "") return message;
+  } catch {
+    // Not JSON: fall through to the raw body.
+  }
+  return text.slice(0, 200);
 }
 
 /** Explain an auth rejection in terms of what the user can change in Settings. */
@@ -136,8 +161,7 @@ export function createOpenAIProvider(options: OpenAIProviderOptions): ChatProvid
       }
 
       if (!response.ok) {
-        const detail = await response.text().catch(() => "");
-        const failure = `Chat request failed (${response.status}): ${detail.slice(0, 200)}`;
+        const failure = `Chat request failed (${response.status}): ${await errorDetail(response)}`;
         if (response.status === 401 || response.status === 403) {
           throw new Error(`${authHint(options)} ${failure}`);
         }
@@ -169,6 +193,16 @@ export function createOpenAIProvider(options: OpenAIProviderOptions): ChatProvid
   };
 }
 
+/**
+ * Prove a base URL, key, and model work together by making the request a chat
+ * would and stopping at the first event of the reply. Rejects with the same
+ * messages a failed chat shows.
+ */
+export async function testConnection(options: OpenAIProviderOptions): Promise<void> {
+  const reply = createOpenAIProvider(options).streamChat([{ role: "user", content: "Reply with OK." }]);
+  for await (const _ of reply) break;
+}
+
 interface RawModel {
   id?: string;
   name?: string;
@@ -189,8 +223,7 @@ export async function listModelInfos(options: { baseUrl: string; apiKey: string 
   });
 
   if (!response.ok) {
-    const detail = await response.text().catch(() => "");
-    throw new Error(`Failed to list models (${response.status}): ${detail.slice(0, 200)}`);
+    throw new Error(`Failed to list models (${response.status}): ${await errorDetail(response)}`);
   }
 
   const json = (await response.json()) as { data?: RawModel[] };

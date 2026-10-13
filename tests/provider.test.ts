@@ -250,6 +250,33 @@ describe("provider client", () => {
     await expect(collect(provider)).rejects.toThrow(/401/);
   });
 
+  test("a failure quotes the provider's message rather than its raw JSON", async () => {
+    const bodies = [
+      JSON.stringify({ error: { message: "The model `m` does not exist.", code: "model_not_found" } }),
+      JSON.stringify([{ error: { message: "The model `m` does not exist." } }]),
+      JSON.stringify({ error: "The model `m` does not exist." }),
+    ];
+    for (const body of bodies) {
+      const server = Bun.serve({ port: 0, fetch: () => new Response(body, { status: 404 }) });
+      try {
+        const provider = createOpenAIProvider({ baseUrl: `http://localhost:${server.port}/v1`, model: "m", apiKey: "k" });
+        await expect(collect(provider)).rejects.toThrow("Chat request failed (404): The model `m` does not exist.");
+      } finally {
+        server.stop();
+      }
+    }
+  });
+
+  test("a failure that isn't JSON keeps the start of the body", async () => {
+    const server = Bun.serve({ port: 0, fetch: () => new Response("<html>Bad gateway</html>", { status: 502 }) });
+    try {
+      const provider = createOpenAIProvider({ baseUrl: `http://localhost:${server.port}/v1`, model: "m", apiKey: "k" });
+      await expect(collect(provider)).rejects.toThrow("Chat request failed (502): <html>Bad gateway</html>");
+    } finally {
+      server.stop();
+    }
+  });
+
   test("an auth failure with no key configured points at Settings", async () => {
     const baseUrl = await startServer("error");
     const provider = createOpenAIProvider({ baseUrl, model: "m", apiKey: "" });
