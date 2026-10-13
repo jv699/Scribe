@@ -7,6 +7,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { makeButton } from "../src/components/ui.ts";
+import { makeCombobox } from "../src/components/combobox.ts";
+import { makePrompt } from "../src/components/prompt.ts";
 import { theme } from "../src/theme.ts";
 import { makeCampaignDialog } from "../src/components/campaign-dialog.ts";
 import { makeMainMenuScreen, type MainMenuView } from "../src/screens/main-menu.ts";
@@ -850,5 +852,37 @@ describe("makeButton", () => {
 
     button.onKeyDown?.({ name: "a" } as KeyEvent);
     expect(clicks).toBe(2);
+  });
+});
+
+describe("select all", () => {
+  test("Ctrl+A in a single-line field selects the text so one key replaces it", () => {
+    const combobox = makeCombobox(renderer, { value: "https://api.openai.com/v1", loadItems: () => [] });
+    renderer.root.add(combobox.node);
+    combobox.input.focus();
+
+    keys.pressKey("a", { ctrl: true });
+    expect(combobox.input.getSelectedText()).toBe("https://api.openai.com/v1");
+
+    keys.pressBackspace();
+    expect(combobox.input.value).toBe("");
+  });
+
+  test("Ctrl+A in the prompt selects every line and leaves Enter submitting", async () => {
+    const sent: string[] = [];
+    const prompt = makePrompt(renderer, { onSubmit: () => sent.push(prompt.input.plainText) });
+    renderer.root.add(prompt.node);
+    prompt.input.setText("first line\nsecond line");
+    prompt.input.focus();
+    await renderOnce();
+
+    keys.pressKey("a", { ctrl: true });
+    expect(prompt.input.getSelectedText()).toBe("first line\nsecond line");
+
+    keys.pressKey("x");
+    expect(prompt.input.plainText).toBe("x");
+
+    keys.pressEnter();
+    expect(sent).toEqual(["x"]);
   });
 });

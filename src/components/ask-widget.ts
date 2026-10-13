@@ -11,7 +11,7 @@ import {
   type RenderContext,
 } from "@opentui/core";
 import { theme } from "../theme.ts";
-import { makeAccentPanel } from "./ui.ts";
+import { makeAccentPanel, TEXT_FIELD_KEYS } from "./ui.ts";
 import type { AskAnswer, AskQuestion } from "../agent/ask.ts";
 
 export interface AskWidgetOptions {
@@ -138,6 +138,7 @@ export function makeAskWidget(ctx: RenderContext, options: AskWidgetOptions): As
     cursorColor: theme.accent,
     visible: false,
     keyBindings: [
+      ...TEXT_FIELD_KEYS,
       { name: "return", action: "submit" },
       { name: "return", shift: true, action: "newline" },
       { name: "kpenter", action: "submit" },

@@ -14,7 +14,7 @@ import {
   type Renderable,
 } from "@opentui/core";
 import { showConfirmDialog } from "../components/confirm-dialog.ts";
-import { enableSelectMouse, makeButton, tabWalk } from "../components/ui.ts";
+import { enableSelectMouse, makeButton, tabWalk, TEXT_FIELD_KEYS } from "../components/ui.ts";
 import { createMarkdownSyntaxStyle } from "../markdown-style.ts";
 import {
   type Campaign,
@@ -75,6 +75,7 @@ function input(renderer: CliRenderer, value: string, placeholder: string): Input
     width: "100%",
     backgroundColor: theme.surfaceRaised,
     focusedBackgroundColor: theme.surfaceActive,
+    keyBindings: TEXT_FIELD_KEYS,
     marginBottom: 1,
   });
 }
@@ -92,6 +93,7 @@ function textarea(
     height,
     backgroundColor: theme.surfaceRaised,
     focusedBackgroundColor: theme.surfaceActive,
+    keyBindings: TEXT_FIELD_KEYS,
     focusedTextColor: theme.text,
     marginBottom: 1,
   });

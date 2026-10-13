@@ -7,6 +7,7 @@ import {
   type RenderContext,
 } from "@opentui/core";
 import { theme } from "../theme.ts";
+import { TEXT_FIELD_KEYS } from "./ui.ts";
 
 export interface ComboboxItem {
   /** Written into the field when the row is picked. */
@@ -79,6 +80,7 @@ export function makeCombobox(ctx: RenderContext, options: ComboboxOptions): Comb
     width: "100%",
     backgroundColor: theme.surfaceRaised,
     focusedBackgroundColor: theme.surfaceActive,
+    keyBindings: TEXT_FIELD_KEYS,
   });
   node.add(input);
 
