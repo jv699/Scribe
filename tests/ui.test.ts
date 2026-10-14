@@ -12,13 +12,15 @@ import { makePrompt } from "../src/components/prompt.ts";
 import { theme } from "../src/theme.ts";
 import { makeCampaignDialog } from "../src/components/campaign-dialog.ts";
 import { makeMainMenuScreen, type MainMenuView } from "../src/screens/main-menu.ts";
-import { makeCampaignWorkspaceScreen } from "../src/screens/campaign-workspace.ts";
+import { makeCampaignWorkspaceScreen, sessionChatTitle } from "../src/screens/campaign-workspace.ts";
 import { makeChatScreen } from "../src/screens/chat.ts";
 import type { Screen } from "../src/screens/screen.ts";
 import type { ChatProvider } from "../src/provider/types.ts";
 import { createCampaign, listCampaigns, loadCampaign, type Campaign } from "../src/store/campaigns.ts";
 import { createSession, setSessionStatus } from "../src/store/sessions.ts";
 import { listCharacters } from "../src/store/characters.ts";
+import { showConfirmDialog } from "../src/components/confirm-dialog.ts";
+import { BoxRenderable, SelectRenderable, type Renderable } from "@opentui/core";
 import { makeAskChannel } from "../src/agent/ask.ts";
 import { resolveTools } from "../src/agent/tools/index.ts";
 
@@ -31,6 +33,7 @@ let campaignsDir: string;
 let renderer: TestRenderer;
 let keys: ReturnType<typeof createMockKeys>;
 let captureCharFrame: () => string;
+let captureSpans: Awaited<ReturnType<typeof setupRenderer>>["captureSpans"];
 let renderOnce: () => Promise<void>;
 let currentScreen: Screen | null = null;
 let campaignDialog: { layer: Parameters<TestRenderer["root"]["add"]>[0]; open: () => void };
@@ -92,7 +95,7 @@ beforeEach(async () => {
   // ask the new renderer to remove a node belonging to the previous one.
   currentScreen = null;
   campaignsDir = await mkdtemp(join(tmpdir(), "scribe-ui-test-"));
-  ({ renderer, keys, captureCharFrame, renderOnce } = await setupRenderer({ width: 100, height: 30 }));
+  ({ renderer, keys, captureCharFrame, captureSpans, renderOnce } = await setupRenderer({ width: 100, height: 30 }));
 
   campaignDialog = makeCampaignDialog(renderer, {
     onSubmit: (input) => {
@@ -130,6 +133,31 @@ describe("campaign workspace flow", () => {
     }
     await renderOnce();
     const editor = renderer.currentFocusedRenderable!;
+    if (destination !== "Settings") {
+      // Escape backs the editor out to its list or reading view, then to the sidebar.
+      keys.pressKey("ESCAPE");
+      await wait(20);
+      expect(editor.isDestroyed).toBe(true);
+      keys.pressKey("ESCAPE");
+      await wait(20);
+      await renderOnce();
+      expect(renderer.currentFocusedRenderable?.constructor.name).toBe("SelectRenderable");
+      // Clicking the pane's add control reopens an editor with keyboard navigation.
+      const label = destination === "Characters" ? "+ Add Character" : "Add campaign history";
+      const frame = captureCharFrame().split("\n");
+      const addY = frame.findIndex((line) => line.includes(label));
+      await mouse.click(frame[addY]!.indexOf(label), addY);
+      await wait(20);
+      const reopened = renderer.currentFocusedRenderable!;
+      expect(reopened.constructor.name).not.toBe("SelectRenderable");
+      await keys.pressKeys(["TAB"], 20);
+      expect(renderer.currentFocusedRenderable === reopened).toBe(false);
+      expect(renderer.currentFocusedRenderable?.constructor.name).not.toBe("SelectRenderable");
+      keys.pressTab({ shift: true });
+      await wait(20);
+      expect(renderer.currentFocusedRenderable === reopened).toBe(true);
+      return;
+    }
     keys.pressKey("ESCAPE");
     await wait(20);
     await renderOnce();
@@ -250,7 +278,7 @@ describe("campaign workspace flow", () => {
       await createMockMouse(renderer).click(lines[y]!.indexOf("001 First"), y);
       await wait(40);
       await renderOnce();
-      expect(captureCharFrame()).toContain("002 Second [planning]");
+      expect(captureCharFrame()).toContain("002 Second");
       expect(captureCharFrame()).not.toContain(`${indicator} 002 Second`);
       release();
       await wait(40);
@@ -301,7 +329,7 @@ describe("campaign workspace flow", () => {
     await wait();
     await renderOnce();
     frame = captureCharFrame();
-    expect(frame.includes("001 Death House [planning]")).toBe(true);
+    expect(frame.includes("001 Death House")).toBe(true);
     expect(frame.includes("Session 001 — Death House")).toBe(true);
     expect(frame.includes("Mark Ready")).toBe(false);
     expect(frame.includes("Report outcome")).toBe(false);
@@ -357,7 +385,7 @@ describe("campaign workspace flow", () => {
           opened.push(session.number);
           return makeChatScreen(renderer, {
             provider,
-            title: `Session ${String(session.number).padStart(3, "0")} — ${session.title}`,
+            title: sessionChatTitle(session),
             chatLog: {
               load: async () => [{ role: "assistant", content: `History for ${session.title}` }],
               save: async () => {},
@@ -373,9 +401,10 @@ describe("campaign workspace flow", () => {
 
     let frame = captureCharFrame();
     expect(opened).toEqual([2]);
-    expect(frame).toContain("001 The Gate [ready]");
-    expect(frame).toContain("002 The Keep [played]");
-    expect(frame).toContain("Session 002 — The Keep");
+    // Statuses move out of the narrow sidebar into the open session's header.
+    expect(frame).toContain("001 The Gate");
+    expect(frame).not.toContain("[ready]");
+    expect(frame).toContain("Session 002 — The Keep · played");
     expect(frame).toContain("History for The Keep");
     expect(frame).not.toContain("Report outcome");
 
@@ -390,7 +419,7 @@ describe("campaign workspace flow", () => {
     await renderOnce();
     frame = captureCharFrame();
     expect(opened).toEqual([2, 1]);
-    expect(frame).toContain("Session 001 — The Gate");
+    expect(frame).toContain("Session 001 — The Gate · ready");
     expect(frame).toContain("History for The Gate");
   });
 
@@ -622,6 +651,105 @@ describe("campaign workspace flow", () => {
   });
 });
 
+describe("campaign workspace focus and quitting", () => {
+  /** The background color of the cell where `text` starts on screen. */
+  function bgAt(text: string): RGBA {
+    const lines = captureCharFrame().split("\n");
+    const y = lines.findIndex((line) => line.includes(text));
+    const x = lines[y]!.indexOf(text);
+    let column = 0;
+    for (const span of captureSpans().lines[y]!.spans) {
+      if (x < column + span.width) return span.bg;
+      column += span.width;
+    }
+    throw new Error(`no span at ${x},${y}`);
+  }
+
+  function selects(): SelectRenderable[] {
+    const found: SelectRenderable[] = [];
+    const visit = (node: Renderable): void => {
+      if (node instanceof SelectRenderable) found.push(node);
+      for (const child of node.getChildren()) visit(child as Renderable);
+    };
+    if (currentScreen) visit(currentScreen.node as Renderable);
+    return found;
+  }
+
+  test("only the focused sidebar list wears the accent, and a left list points back at what is open", async () => {
+    const campaign = await createCampaign(campaignsDir, { name: "Bars", system: "", description: "" });
+    await createSession(campaign, "First");
+    await createSession(campaign, "Second");
+    await showCampaignWorkspace(campaign);
+    keys.pressKey("ESCAPE");
+    await wait(30);
+    keys.pressKey("ESCAPE");
+    await wait(30);
+    await renderOnce();
+    const accent = RGBA.fromHex(theme.accent);
+    expect(bgAt("002 Second").equals(accent)).toBe(true);
+    expect(bgAt("Characters").equals(accent)).toBe(false);
+
+    // Arrow past "+ New Session" into the destinations.
+    await keys.pressKeys(["ARROW_DOWN", "ARROW_DOWN"], 20);
+    await renderOnce();
+    expect(bgAt("Characters").equals(accent)).toBe(true);
+    expect(bgAt("+ New Session").equals(accent)).toBe(false);
+    // The session list now quietly marks the open session, not the row last passed over.
+    expect(selects()[0]!.getSelectedIndex()).toBe(1);
+    expect(bgAt("002 Second").equals(RGBA.fromHex(theme.surfaceActive))).toBe(true);
+  });
+
+  test("Ctrl+C with an unsaved character asks first; a second Ctrl+C quits", async () => {
+    const campaign = await createCampaign(campaignsDir, { name: "Quitter", system: "", description: "" });
+    await showCampaignWorkspace(campaign);
+    keys.pressKey("ARROW_DOWN");
+    keys.pressEnter();
+    await wait(60);
+    keys.pressEnter();
+    await keys.typeText("Unsaved Hero", 2);
+    let quits = 0;
+    const quit = (): void => {
+      quits++;
+    };
+    expect(currentScreen?.handleInterrupt?.(quit)).toBe("handled");
+    await renderOnce();
+    expect(captureCharFrame()).toContain("Quit without saving?");
+
+    // Escape cancels the question and leaves the draft where it was.
+    keys.pressKey("ESCAPE");
+    await wait(30);
+    await renderOnce();
+    expect(captureCharFrame()).not.toContain("Quit without saving?");
+    expect(captureCharFrame()).toContain("Unsaved Hero");
+    expect(quits).toBe(0);
+
+    expect(currentScreen?.handleInterrupt?.(quit)).toBe("handled");
+    expect(currentScreen?.handleInterrupt?.(quit)).toBe("quit");
+  });
+
+  test("Ctrl+C with nothing unsaved in a campaign view quits at once", async () => {
+    const campaign = await createCampaign(campaignsDir, { name: "Clean", system: "", description: "" });
+    await showCampaignWorkspace(campaign);
+    keys.pressKey("ARROW_DOWN");
+    keys.pressEnter();
+    await wait(60);
+    expect(currentScreen?.handleInterrupt?.(() => {})).toBe("quit");
+  });
+});
+
+describe("dialogs", () => {
+  test("a dialog is framed so the screen behind it can't run into its text", async () => {
+    showConfirmDialog(renderer, { title: "Discard changes?", confirmLabel: "Discard", onConfirm: () => {} });
+    await renderOnce();
+    const lines = captureCharFrame().split("\n");
+    const y = lines.findIndex((line) => line.includes("Discard changes?"));
+    const x = lines[y]!.indexOf("Discard changes?");
+    // A border column sits between the title and anything to its left.
+    expect(lines[y]!.slice(0, x).trimEnd().endsWith("│")).toBe(true);
+    expect(lines.some((line) => line.includes("┌"))).toBe(true);
+  });
+});
+
 describe("campaign workspace failures", () => {
   test("a failed session creation returns focus to the session menu", async () => {
     const campaign = await createCampaign(campaignsDir, {
@@ -730,6 +858,81 @@ describe("select mouse support", () => {
 });
 
 describe("two-stage main menu", () => {
+  test("a long campaign list fits the screen: the logo steps aside and long names end in an ellipsis", async () => {
+    const campaigns = Array.from({ length: 14 }, (_, i) => ({
+      name: i === 0 ? `The ${"Very ".repeat(30)}Long Campaign` : `Campaign ${i + 1}`,
+      system: "",
+    })) as unknown as Campaign[];
+    showScreen(
+      makeMainMenuScreen(renderer, {
+        campaigns,
+        initialView: "campaigns",
+        playIntro: false,
+        onCreateCampaign: () => {},
+        onSelectCampaign: () => {},
+        onSettings: () => {},
+        onOneshotPlanner: () => {},
+        onQuit: () => {},
+      }),
+    );
+    await renderOnce();
+    await renderOnce();
+    const frame = captureCharFrame();
+    expect(frame).not.toContain("▄████▄");
+    expect(frame).toContain("Campaign 14");
+    expect(frame).toContain("← Back");
+    const lines = frame.split("\n");
+    expect(lines.find((line) => line.includes("The Very"))!.trimEnd().endsWith("…")).toBe(true);
+    // The whole list sits above the version in the corner.
+    expect(lines.findIndex((line) => line.includes("← Back"))).toBeLessThan(
+      lines.findIndex((line) => line.includes("v0.")),
+    );
+  });
+
+  test("an empty campaign list says so, and campaign rows show their system", async () => {
+    await showMainMenu("campaigns");
+    await renderOnce();
+    expect(captureCharFrame()).toContain("No campaigns yet");
+
+    await createCampaign(campaignsDir, { name: "Curse of Strahd", system: "D&D 5e", description: "" });
+    await createCampaign(campaignsDir, { name: "Dolmenwood", system: "", description: "" });
+    await showMainMenu("campaigns");
+    await renderOnce();
+    const frame = captureCharFrame();
+    expect(frame).not.toContain("No campaigns yet");
+    expect(frame).toMatch(/Curse of Strahd {2,}D&D 5e/);
+    expect(frame).toContain("Dolmenwood");
+  });
+
+  test("Enter in the new campaign form moves to the next field instead of creating", async () => {
+    await showMainMenu("campaigns");
+    keys.pressEnter(); // Create Campaign
+    await wait(60);
+    await keys.typeText("Strahd", 3);
+    keys.pressEnter();
+    await wait(20);
+    await keys.typeText("5e", 3);
+    keys.pressEnter();
+    await wait(40);
+    expect(await listCampaigns(campaignsDir)).toEqual([]);
+    await renderOnce();
+    const frame = captureCharFrame();
+    expect(frame).toContain("Game system");
+    expect(frame).toMatch(/Name\s/);
+    // Tab from the background reaches Create.
+    await keys.pressKeys(["TAB"], 20);
+    keys.pressEnter();
+    await wait(100);
+    const created = await listCampaigns(campaignsDir);
+    expect(created.map((campaign) => [campaign.name, campaign.system])).toEqual([["Strahd", "5e"]]);
+  });
+
+  test("a short campaign list keeps the logo", async () => {
+    await showMainMenu("campaigns");
+    await renderOnce();
+    expect(captureCharFrame()).toContain("▄████▄");
+  });
+
   test("campaign rows select their matching campaigns before Create and Back", async () => {
     const first = await createCampaign(campaignsDir, { name: "First Campaign", system: "5e", description: "" });
     const second = await createCampaign(campaignsDir, { name: "Second Campaign", system: "5e", description: "" });
@@ -852,6 +1055,36 @@ describe("makeButton", () => {
 
     button.onKeyDown?.({ name: "a" } as KeyEvent);
     expect(clicks).toBe(2);
+  });
+});
+
+describe("prompt hint", () => {
+  test("a prompt too narrow for the full hint shows the short one instead of wrapping", async () => {
+    const narrow = new BoxRenderable(renderer, { width: 44 });
+    const prompt = makePrompt(renderer, { onSubmit: () => {} });
+    narrow.add(prompt.node);
+    renderer.root.add(narrow);
+    await renderOnce();
+    await renderOnce();
+    let frame = captureCharFrame();
+    expect(frame).toContain("Enter to send · Esc twice to go back");
+    expect(frame).not.toContain("Shift+Enter");
+
+    prompt.setHint("Press Escape again to go back");
+    await renderOnce();
+    expect(captureCharFrame()).toContain("Press Escape again to go back");
+    prompt.setHint();
+    await renderOnce();
+    frame = captureCharFrame();
+    expect(frame).toContain("Enter to send · Esc twice to go back");
+  });
+
+  test("a wide prompt shows the full hint", async () => {
+    const prompt = makePrompt(renderer, { onSubmit: () => {} });
+    renderer.root.add(prompt.node);
+    await renderOnce();
+    await renderOnce();
+    expect(captureCharFrame()).toContain("Shift+Enter for a new line");
   });
 });
 

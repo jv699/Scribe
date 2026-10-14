@@ -37,32 +37,35 @@ export function makeCampaignDialog(renderer: CliRenderer, options: CampaignDialo
   });
 
   const nameInput = new InputRenderable(renderer, {
-    placeholder: "Campaign name",
+    placeholder: "The Sunken Crown",
     maxLength: 40,
     width: "100%",
     backgroundColor: theme.surfaceRaised,
     focusedBackgroundColor: theme.surfaceActive,
     keyBindings: TEXT_FIELD_KEYS,
+    placeholderColor: theme.textMuted,
     marginBottom: 1,
   });
 
   const systemInput = new InputRenderable(renderer, {
-    placeholder: "System (e.g. D&D 5e, Shadowdark, Mothership)",
+    placeholder: "D&D 5e, Shadowdark, Mothership…",
     maxLength: 40,
     width: "100%",
     backgroundColor: theme.surfaceRaised,
     focusedBackgroundColor: theme.surfaceActive,
     keyBindings: TEXT_FIELD_KEYS,
+    placeholderColor: theme.textMuted,
     marginBottom: 1,
   });
 
   const descInput = new TextareaRenderable(renderer, {
-    placeholder: "Campaign background (optional)",
+    placeholder: "Setting, premise, and starting situation",
     width: "100%",
     height: 4,
     backgroundColor: theme.surfaceRaised,
     focusedBackgroundColor: theme.surfaceActive,
     keyBindings: TEXT_FIELD_KEYS,
+    placeholderColor: theme.textMuted,
     marginBottom: 1,
   });
 
@@ -76,9 +79,14 @@ export function makeCampaignDialog(renderer: CliRenderer, options: CampaignDialo
   buttonRow.add(new BoxRenderable(renderer, { width: 2 }));
   buttonRow.add(cancelButton);
 
+  // Labels stay put once typing hides the placeholders.
+  const label = (content: string): TextRenderable => new TextRenderable(renderer, { content, fg: theme.textMuted });
   dialog.content.add(title);
+  dialog.content.add(label("Name"));
   dialog.content.add(nameInput);
+  dialog.content.add(label("Game system"));
   dialog.content.add(systemInput);
+  dialog.content.add(label("Background (optional)"));
   dialog.content.add(descInput);
   dialog.content.add(hint);
   dialog.content.add(buttonRow);
@@ -114,8 +122,9 @@ export function makeCampaignDialog(renderer: CliRenderer, options: CampaignDialo
     nameInput.focus();
   }
 
-  nameInput.on(InputRenderableEvents.ENTER, () => submit());
-  systemInput.on(InputRenderableEvents.ENTER, () => submit());
+  // Enter moves on, like every other form; Create (or Enter on it) submits.
+  nameInput.on(InputRenderableEvents.ENTER, () => systemInput.focus());
+  systemInput.on(InputRenderableEvents.ENTER, () => descInput.focus());
 
   return { layer: dialog.layer, open, close: dialog.close };
 }

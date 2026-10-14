@@ -47,3 +47,42 @@ export function showConfirmDialog(renderer: CliRenderer, options: ConfirmDialogO
     addConfirm();
   }
 }
+
+export interface QuitGuardOptions {
+  isDirty: () => boolean;
+  /** Another dialog owns the keyboard; Ctrl+C then does nothing. */
+  isBlocked?: () => boolean;
+  /** The screen should stand its keys down while the dialog is up. */
+  onOpen?: () => void;
+  onClose?: () => void;
+}
+
+/**
+ * Ctrl+C on a screen holding unsaved edits asks before quitting, rather than
+ * dropping them. A second Ctrl+C while it asks is the confirmation, the same
+ * double press the chat uses.
+ */
+export function makeQuitGuard(
+  renderer: CliRenderer,
+  options: QuitGuardOptions,
+): (quit: () => void) => "handled" | "quit" {
+  let asking = false;
+  return (quit) => {
+    if (asking) return "quit";
+    if (!options.isDirty()) return "quit";
+    if (options.isBlocked?.()) return "handled";
+    asking = true;
+    options.onOpen?.();
+    showConfirmDialog(renderer, {
+      title: "Quit without saving?",
+      body: "Your unsaved changes will be lost.\nPress Ctrl+C again to quit.",
+      confirmLabel: "Quit",
+      onConfirm: quit,
+      onClose: () => {
+        asking = false;
+        options.onClose?.();
+      },
+    });
+    return "handled";
+  };
+}

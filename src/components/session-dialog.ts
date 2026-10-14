@@ -31,12 +31,13 @@ export function makeSessionDialog(renderer: CliRenderer, options: SessionDialogO
   const title = new TextRenderable(renderer, { content: "New Session", fg: theme.accent, marginBottom: 1 });
 
   const titleInput = new InputRenderable(renderer, {
-    placeholder: "Session title",
+    placeholder: "Arrival at Saltmarsh",
     maxLength: 60,
     width: "100%",
     backgroundColor: theme.surfaceRaised,
     focusedBackgroundColor: theme.surfaceActive,
     keyBindings: TEXT_FIELD_KEYS,
+    placeholderColor: theme.textMuted,
     marginBottom: 1,
   });
 
@@ -51,6 +52,7 @@ export function makeSessionDialog(renderer: CliRenderer, options: SessionDialogO
   buttonRow.add(cancelButton);
 
   dialog.content.add(title);
+  dialog.content.add(new TextRenderable(renderer, { content: "Title", fg: theme.textMuted }));
   dialog.content.add(titleInput);
   dialog.content.add(hint);
   dialog.content.add(buttonRow);

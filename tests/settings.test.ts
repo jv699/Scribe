@@ -66,6 +66,35 @@ async function confirmDiscard(ms = 300): Promise<void> {
 }
 
 describe("settings screen", () => {
+  test("Ctrl+C with unsaved edits asks first; Quit, or a second Ctrl+C, quits", async () => {
+    await open({ campaignsDir: "/tmp/x", oneshotsDir: "/tmp/o", sourcesDir: "/tmp/s" });
+    const quit = (): void => {
+      quits++;
+    };
+    let quits = 0;
+    expect(current?.handleInterrupt?.(quit)).toBe("quit");
+
+    await keys.typeText("x");
+    expect(current?.handleInterrupt?.(quit)).toBe("handled");
+    await renderOnce();
+    expect(captureCharFrame()).toContain("Quit without saving?");
+
+    // Escape answers the question, not the screen behind it.
+    keys.pressKey("ESCAPE");
+    await wait(20);
+    await renderOnce();
+    expect(captureCharFrame()).not.toContain("Quit without saving?");
+    expect(wentBack).toBe(false);
+    expect(settingsInputs()[0]?.focused).toBe(true);
+
+    current?.handleInterrupt?.(quit);
+    keys.pressTab(); // Cancel -> Quit
+    keys.pressEnter();
+    expect(quits).toBe(1);
+    expect(current?.handleInterrupt?.(quit)).toBe("handled");
+    expect(current?.handleInterrupt?.(quit)).toBe("quit");
+  });
+
   test("renders fields prefilled from settings and accepts typing", async () => {
     await open({
       campaignsDir: "/tmp/x",
@@ -113,6 +142,25 @@ describe("settings screen", () => {
     expect(saved?.sourcesDir).toBe("/tmp/s"); // untouched field preserved
     expect(saved?.systemPromptOverride).toBe("/tmp/campaign-core.md");
     expect(saved?.oneshotPromptOverride).toBe("/tmp/oneshot-core.md");
+  });
+
+  test("saving stays on the screen, says so, and leaves nothing unsaved", async () => {
+    await open({ campaignsDir: "/tmp/x", oneshotsDir: "/tmp/o", sourcesDir: "/tmp/s" });
+    await keys.typeText("http://localhost:11434/v1", 5); // base URL
+    await keys.pressKeys(["TAB", "TAB", "TAB", "TAB", "TAB", "TAB"], 20); // -> Save
+    keys.pressEnter();
+    await wait();
+    await renderOnce();
+    expect(saved?.baseUrl).toBe("http://localhost:11434/v1");
+    expect(wentBack).toBe(false);
+    expect(captureCharFrame()).toContain("Saved.");
+
+    // Saved values are the new baseline: leaving asks nothing.
+    keys.pressKey("ESCAPE");
+    await wait(20);
+    await renderOnce();
+    expect(captureCharFrame()).not.toContain("Discard changes");
+    expect(wentBack).toBe(true);
   });
 
   test("reports asynchronous save failures and allows retry", async () => {

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { formatDollars, formatDuration, formatTokenCount } from "../src/format.ts";
+import { formatDollars, formatDuration, formatTokenCount, truncate } from "../src/format.ts";
 
 describe("formatTokenCount", () => {
   test("leaves counts under 1000 alone", () => {
@@ -64,5 +64,13 @@ describe("formatDollars", () => {
     expect(formatDollars(0.01)).toBe("$0.01");
     expect(formatDollars(0.025)).toBe("$0.03");
     expect(formatDollars(12.5)).toBe("$12.50");
+  });
+});
+
+describe("truncate", () => {
+  test("leaves text that fits alone and ends cut text in an ellipsis within the limit", () => {
+    expect(truncate("Short", 10)).toBe("Short");
+    expect(truncate("The Drowned Bell Tower", 12)).toBe("The Drowned…");
+    expect(truncate("The Drowned Bell Tower", 12).length).toBeLessThanOrEqual(12);
   });
 });

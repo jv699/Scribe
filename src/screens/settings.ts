@@ -10,7 +10,7 @@ import {
 } from "@opentui/core";
 import { isAbsolute } from "node:path";
 import { makeCombobox } from "../components/combobox.ts";
-import { showConfirmDialog } from "../components/confirm-dialog.ts";
+import { makeQuitGuard, showConfirmDialog } from "../components/confirm-dialog.ts";
 import { makeModelCombobox } from "../components/model-combobox.ts";
 import { makeButton, tabWalk, TEXT_FIELD_KEYS } from "../components/ui.ts";
 import { theme } from "../theme.ts";
@@ -94,6 +94,7 @@ export async function makeSettingsScreen(
       backgroundColor: theme.surfaceRaised,
       focusedBackgroundColor: theme.surfaceActive,
       keyBindings: TEXT_FIELD_KEYS,
+      placeholderColor: theme.textMuted,
       marginBottom: 1,
     });
   const addField = (label: string, value: string, placeholder: string, help: string): InputRenderable => {
@@ -194,8 +195,10 @@ export async function makeSettingsScreen(
 
   const inputs = [baseUrlInput, keyInput, modelInput, dirInput, oneshotsInput, sourcesInput];
   const focusChain: Renderable[] = [...inputs, saveButton, testButton, backButton];
-  const initialValues = inputs.map((input) => input.value);
-  const isDirty = (): boolean => inputs.some((input, index) => input.value !== initialValues[index]);
+  // What is on disk: the baseline for "unsaved", and what a save builds on.
+  let saved = options.settings;
+  let savedValues = inputs.map((input) => input.value);
+  const isDirty = (): boolean => inputs.some((input, index) => input.value !== savedValues[index]);
 
   function reject(input: InputRenderable, message: string): void {
     setStatus(message);
@@ -295,7 +298,7 @@ export async function makeSettingsScreen(
     if (oneshotsDir === null) return;
     const sourcesDir = readDir(sourcesInput, "Sources");
     if (sourcesDir === null) return;
-    const next: Settings = { ...options.settings, campaignsDir, oneshotsDir, sourcesDir };
+    const next: Settings = { ...saved, campaignsDir, oneshotsDir, sourcesDir };
     if (baseUrl !== "") next.baseUrl = baseUrl;
     else delete next.baseUrl;
     const model = modelInput.value.trim();
@@ -308,6 +311,10 @@ export async function makeSettingsScreen(
     setStatus("Saving...", "info");
     try {
       await options.onSaved(next);
+      // Stay, so the saved values can be tested straight away.
+      saved = next;
+      savedValues = inputs.map((input) => input.value);
+      setStatus("Saved.", "info");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Failed to save settings");
     } finally {
@@ -359,6 +366,20 @@ export async function makeSettingsScreen(
     });
   }
 
+  let quitReturnTo: Renderable | null = null;
+  const handleInterrupt = makeQuitGuard(renderer, {
+    isDirty,
+    isBlocked: () => modalOpen,
+    onOpen: () => {
+      quitReturnTo = renderer.currentFocusedRenderable;
+      modalOpen = true;
+    },
+    onClose: () => {
+      modalOpen = false;
+      if (!disposed) (quitReturnTo ?? baseUrlInput).focus();
+    },
+  });
+
   const advance = (from: Renderable): void => {
     const index = focusChain.indexOf(from);
     focusChain[index + 1]?.focus();
@@ -371,5 +392,5 @@ export async function makeSettingsScreen(
   renderer.keyInput.on("keypress", onKeypress);
   baseUrlInput.focus();
 
-  return { node: container, focus: () => baseUrlInput.focus(), dispose };
+  return { node: container, focus: () => baseUrlInput.focus(), handleInterrupt, dispose };
 }

@@ -28,6 +28,8 @@ import type { Screen } from "./screen.ts";
 const DOUBLE_PRESS_MS = 750;
 const QUIT_HINT = "Press Ctrl+C again to quit";
 const BACK_HINT = "Press Escape again to go back";
+/** Narrower than this, the model name is a stub not worth showing. */
+const MIN_MODEL_WIDTH = 16;
 
 export interface ChatLogStore {
   load(): Promise<ChatMessage[]>;
@@ -66,6 +68,8 @@ export interface ChatScreenOptions {
   modelInfo?: Promise<ModelInfo | undefined>;
   /** Left of the title bar. Defaults to "Drafting Table". */
   title?: string;
+  /** Shown in place of the transcript while the conversation is empty. */
+  emptyHint?: string;
   systemPrompt?: string;
   /** Non-empty tools enable the agent loop; otherwise use plain streaming. */
   tools?: AgentTool[];
@@ -114,11 +118,37 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
     flexShrink: 0,
     zIndex: 1,
   });
-  const titleText = new TextRenderable(renderer, { content: options.title ?? "Drafting Table", fg: theme.accent });
+  // The title says where you are, so it keeps its room: the model shrinks
+  // first, and steps aside entirely once it would be cut to a stub.
+  let titleContent = options.title ?? "Drafting Table";
+  let modelContent = options.model ?? "";
+  const titleText = new TextRenderable(renderer, {
+    content: titleContent,
+    fg: theme.accent,
+    wrapMode: "none",
+    truncate: true,
+    flexShrink: 1,
+    minWidth: 0,
+  });
   titleRow.add(titleText);
-  const modelText = new TextRenderable(renderer, { content: options.model ?? "", fg: theme.textMuted });
+  const modelText = new TextRenderable(renderer, {
+    content: modelContent,
+    fg: theme.textMuted,
+    wrapMode: "none",
+    truncate: true,
+    flexShrink: 1000,
+    minWidth: 0,
+    marginLeft: 2,
+  });
   if (options.model) titleRow.add(modelText);
   container.add(titleRow);
+
+  function fitHeader(): void {
+    if (!options.model || titleRow.isDestroyed) return;
+    const room = titleRow.width - 2;
+    modelText.visible = room >= titleContent.length + Math.min(modelContent.length, MIN_MODEL_WIDTH);
+  }
+  titleRow.onSizeChange = fitHeader;
 
   let modelInfo: ModelInfo | undefined;
   let lastUsage: UsageInfo | null = null;
@@ -136,7 +166,9 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
       );
       if (cumulativeCost > 0) parts.push(formatDollars(cumulativeCost));
     }
-    modelText.content = parts.join("  |  ");
+    modelContent = parts.join("  |  ");
+    modelText.content = modelContent;
+    fitHeader();
   }
 
   // Estimated cost excludes provider discounts for cached context.
@@ -158,6 +190,16 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
     stickyStart: "bottom",
   });
   const transcript = makeTranscript(renderer, { syntaxStyle });
+  // UI-only, like a notice: it never reaches the model or the log.
+  const emptyHint = new TextRenderable(renderer, {
+    content: options.emptyHint ?? "",
+    fg: theme.textMuted,
+    wrapMode: "word",
+    marginTop: 1,
+    marginBottom: 1,
+  });
+  emptyHint.visible = options.emptyHint !== undefined;
+  scrollBox.content.add(emptyHint);
   scrollBox.content.add(transcript.node);
   container.add(scrollBox);
 
@@ -194,6 +236,7 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
 
   function render(): void {
     if (disposed) return;
+    emptyHint.visible = options.emptyHint !== undefined && messages.length === 0;
     transcript.sync(messages);
   }
 
@@ -656,7 +699,10 @@ export async function makeChatScreen(renderer: CliRenderer, options: ChatScreenO
     handleInterrupt,
     dispose,
     setTitle: (title) => {
-      if (!disposed) titleText.content = title;
+      if (disposed) return;
+      titleContent = title;
+      titleText.content = title;
+      fitHeader();
     },
   };
 }

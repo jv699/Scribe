@@ -21,6 +21,9 @@ export const theme = {
 
   danger: "#FF5555",
 
+  /** Dims the screen behind a dialog; the alpha keeps it legible but quiet. */
+  scrim: "#000000A0",
+
   /** Markdown highlights, coolest to hottest. */
   flameEmber: "#A63B00",
   flameCore: "#FFB84D",

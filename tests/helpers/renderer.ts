@@ -18,6 +18,8 @@ export interface RendererHarness {
   renderer: TestRenderer;
   keys: ReturnType<typeof createMockKeys>;
   captureCharFrame: () => string;
+  /** Per-cell colors, for assertions a character frame can't make. */
+  captureSpans: Awaited<ReturnType<typeof createTestRenderer>>["captureSpans"];
   renderOnce: () => Promise<void>;
 }
 
@@ -32,6 +34,7 @@ export async function setupRenderer(options: SetupRendererOptions): Promise<Rend
     renderer: setup.renderer,
     keys: createMockKeys(setup.renderer),
     captureCharFrame: setup.captureCharFrame,
+    captureSpans: setup.captureSpans,
     renderOnce: setup.renderOnce,
   };
 }

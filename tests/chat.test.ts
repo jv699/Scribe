@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { createMockKeys, type TestRenderer } from "@opentui/core/testing";
 import { setupRenderer, wait } from "./helpers/renderer.ts";
 import { BoxRenderable, MarkdownRenderable, TextareaRenderable, type Renderable } from "@opentui/core";
-import { makeChatScreen, type ChatLogStore } from "../src/screens/chat.ts";
+import { makeChatScreen, type ChatLogStore, type ChatScreen } from "../src/screens/chat.ts";
 import type { Screen } from "../src/screens/screen.ts";
 import type { ChatEvent, ChatMessage, ChatProvider } from "../src/provider/types.ts";
 import type { AgentTool } from "../src/agent/loop.ts";
@@ -55,6 +55,49 @@ async function open(provider: ChatProvider): Promise<void> {
 }
 
 describe("chat screen", () => {
+  test("an empty conversation shows its hint until the first message", async () => {
+    current = await makeChatScreen(renderer, {
+      provider: okProvider,
+      emptyHint: "Describe a one-shot to get started.",
+      onBack: () => {},
+    });
+    renderer.root.add(current.node);
+    current.focus?.();
+    await renderOnce();
+    expect(captureCharFrame()).toContain("Describe a one-shot to get started.");
+
+    await keys.typeText("hi", 2);
+    keys.pressEnter();
+    await wait();
+    await renderOnce();
+    expect(captureCharFrame()).not.toContain("Describe a one-shot");
+    expect(captureCharFrame()).toContain("Hello world");
+  });
+
+  test("the header gives the title its room and drops a model it can only show as a stub", async () => {
+    const longTitle = "Session 002 — The Drowned Bell Tower and Its Many Secrets Below · ready";
+    current = await makeChatScreen(renderer, {
+      provider: okProvider,
+      title: longTitle,
+      model: "openrouter/anthropic/claude-sonnet-4",
+      onBack: () => {},
+    });
+    renderer.root.add(current.node);
+    await renderOnce();
+    await renderOnce();
+    let header = captureCharFrame().split("\n")[1]!;
+    expect(header).toContain("Session 002");
+    expect(header).toContain("· ready");
+    expect(header).not.toContain("openrouter");
+
+    // With a short title there is room for both, kept apart.
+    (current as ChatScreen).setTitle("Drafting Table");
+    await renderOnce();
+    await renderOnce();
+    header = captureCharFrame().split("\n")[1]!;
+    expect(header).toMatch(/Drafting Table {2,}openrouter\/anthropic\/claude-sonnet-4/);
+  });
+
   test.each(["resolve", "reject"])("leaving while turn context loads safely handles a later %s", async (outcome) => {
     let release!: () => void;
     const pending = new Promise<void>((resolve) => { release = resolve; });
@@ -924,11 +967,11 @@ describe("chat screen", () => {
 
     test("Ctrl+C arms quit without dismissing an active question", async () => {
       await ask(ONE_OF_TWO);
-      expect(current?.handleInterrupt?.()).toBe("handled");
+      expect(current?.handleInterrupt?.(() => {})).toBe("handled");
       await renderOnce();
       expect(captureCharFrame().includes("Which hook drives session 2?")).toBe(true);
 
-      expect(current?.handleInterrupt?.()).toBe("quit");
+      expect(current?.handleInterrupt?.(() => {})).toBe("quit");
       await renderOnce();
       expect(captureCharFrame().includes("Which hook drives session 2?")).toBe(true);
     });
@@ -993,7 +1036,7 @@ describe("chat screen", () => {
         await renderOnce();
         expect(captureCharFrame().includes("@session-1")).toBe(true);
 
-        expect(current?.handleInterrupt?.()).toBe("handled");
+        expect(current?.handleInterrupt?.(() => {})).toBe("handled");
         await wait(60);
         await renderOnce();
         let frame = captureCharFrame();
@@ -1011,29 +1054,29 @@ describe("chat screen", () => {
 
       test("second press inside the window requests quit", async () => {
         await openWithCompletions();
-        expect(current?.handleInterrupt?.()).toBe("handled");
-        expect(current?.handleInterrupt?.()).toBe("quit");
+        expect(current?.handleInterrupt?.(() => {})).toBe("handled");
+        expect(current?.handleInterrupt?.(() => {})).toBe("quit");
         await renderOnce();
         expect(captureCharFrame().includes(PROMPT_HINT)).toBe(true);
       });
 
       test("another key cancels the pending exit", async () => {
         await openWithCompletions();
-        expect(current?.handleInterrupt?.()).toBe("handled");
+        expect(current?.handleInterrupt?.(() => {})).toBe("handled");
         keys.pressKey("x");
         await wait(30);
 
         // This is a new first press: it clears the intervening input rather
         // than returning the app-level quit request.
-        expect(current?.handleInterrupt?.()).toBe("handled");
+        expect(current?.handleInterrupt?.(() => {})).toBe("handled");
         expect(promptText()).toBe("");
       });
 
       test("a press after the window starts a fresh sequence", async () => {
         await openWithCompletions();
-        expect(current?.handleInterrupt?.()).toBe("handled");
+        expect(current?.handleInterrupt?.(() => {})).toBe("handled");
         await wait(780);
-        expect(current?.handleInterrupt?.()).toBe("handled");
+        expect(current?.handleInterrupt?.(() => {})).toBe("handled");
       });
     });
 
@@ -1517,10 +1560,10 @@ describe("chat screen", () => {
         await wait(100);
         await renderOnce();
 
-        expect(current?.handleInterrupt?.()).toBe("handled");
+        expect(current?.handleInterrupt?.(() => {})).toBe("handled");
         await renderOnce();
         expect(captureCharFrame().includes("Clear this conversation?")).toBe(true);
-        expect(current?.handleInterrupt?.()).toBe("quit");
+        expect(current?.handleInterrupt?.(() => {})).toBe("quit");
       });
     });
   });

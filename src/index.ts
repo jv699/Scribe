@@ -2,7 +2,7 @@ import { createCliRenderer, type KeyEvent } from "@opentui/core";
 import { theme } from "./theme.ts";
 import { makeCampaignDialog } from "./components/campaign-dialog.ts";
 import { makeMainMenuScreen, type MainMenuView } from "./screens/main-menu.ts";
-import { makeCampaignWorkspaceScreen, type SessionChatHost } from "./screens/campaign-workspace.ts";
+import { makeCampaignWorkspaceScreen, sessionChatTitle, type SessionChatHost } from "./screens/campaign-workspace.ts";
 import { makeSettingsScreen } from "./screens/settings.ts";
 import { makeChatScreen, type ChatLogStore } from "./screens/chat.ts";
 import type { Screen } from "./screens/screen.ts";
@@ -58,7 +58,7 @@ const onAppKeypress = (key: KeyEvent): void => {
   key.stopPropagation();
   if (key.eventType === "repeat" || key.repeated) return;
 
-  if (currentScreen?.handleInterrupt?.() === "handled") return;
+  if (currentScreen?.handleInterrupt?.(quitApp) === "handled") return;
   quitApp();
 };
 renderer.keyInput.on("keypress", onAppKeypress);
@@ -114,7 +114,6 @@ async function showSettingsScreen(): Promise<void> {
       onSaved: async (next) => {
         await saveSettings(next);
         settings = next;
-        navigate(showMainMenu);
       },
       onBack: () => navigate(showMainMenu),
     }),
@@ -149,6 +148,9 @@ async function showOneshotPlanner(): Promise<void> {
   const screen = await makeChatScreen(renderer, {
     ...makeChatOptions(),
     title: "Drafting Table",
+    emptyHint:
+      "Plan a one-shot or brainstorm an idea: describe what you have in mind and Scribe will help shape it.\n\n" +
+      "Type / for commands (/save keeps the plan, /map draws it) and @ to bring in a saved one-shot or a source.",
     systemPrompt: await buildOneshotSystemPrompt(settings),
     tools: toolsFor("oneshot", {
       oneshotsDir: settings.oneshotsDir,
@@ -185,7 +187,10 @@ async function makeCampaignSessionChat(
   const ask = makeAskChannel();
   return makeChatScreen(renderer, {
     ...makeChatOptions(),
-    title: `Session ${String(session.number).padStart(3, "0")} — ${session.title}`,
+    title: sessionChatTitle(session),
+    emptyHint:
+      "Plan this session with Scribe: describe what you want to happen and it will draft the notes.\n\n" +
+      "Type @ to bring in a past session, the story so far, or a source, and / for commands.",
     loadTurnContext: async () => {
       const fresh = (await loadCampaign(campaign.dir)) ?? campaign;
       return {

@@ -17,3 +17,9 @@ export function formatDuration(ms: number): string {
 export function formatDollars(amount: number): string {
   return `$${amount < 0.01 ? amount.toFixed(4) : amount.toFixed(2)}`;
 }
+
+/** Cut `text` to at most `max` columns, ending in "…" when anything was dropped. */
+export function truncate(text: string, max: number): string {
+  if (text.length <= max) return text;
+  return max <= 1 ? "…".slice(0, max) : `${text.slice(0, max - 1).trimEnd()}…`;
+}
