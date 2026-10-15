@@ -20,6 +20,7 @@ export const theme = {
   surfaceActive: "#333333",
 
   danger: "#FF5555",
+  success: "#6BBF59",
 
   /** Dims the screen behind a dialog; the alpha keeps it legible but quiet. */
   scrim: "#000000A0",

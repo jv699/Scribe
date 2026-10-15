@@ -144,23 +144,26 @@ describe("settings screen", () => {
     expect(saved?.oneshotPromptOverride).toBe("/tmp/oneshot-core.md");
   });
 
-  test("saving stays on the screen, says so, and leaves nothing unsaved", async () => {
+  test("saving returns to the menu", async () => {
     await open({ campaignsDir: "/tmp/x", oneshotsDir: "/tmp/o", sourcesDir: "/tmp/s" });
     await keys.typeText("http://localhost:11434/v1", 5); // base URL
     await keys.pressKeys(["TAB", "TAB", "TAB", "TAB", "TAB", "TAB"], 20); // -> Save
     keys.pressEnter();
     await wait();
-    await renderOnce();
     expect(saved?.baseUrl).toBe("http://localhost:11434/v1");
-    expect(wentBack).toBe(false);
-    expect(captureCharFrame()).toContain("Saved.");
-
-    // Saved values are the new baseline: leaving asks nothing.
-    keys.pressKey("ESCAPE");
-    await wait(20);
-    await renderOnce();
-    expect(captureCharFrame()).not.toContain("Discard changes");
     expect(wentBack).toBe(true);
+  });
+
+  test("a failed save stays on the screen", async () => {
+    await open({ campaignsDir: "/tmp/x", oneshotsDir: "/tmp/o", sourcesDir: "/tmp/s" }, () => {
+      throw new Error("disk full");
+    });
+    await keys.pressKeys(Array(6).fill("TAB"), 10);
+    keys.pressEnter();
+    await wait();
+    await renderOnce();
+    expect(captureCharFrame()).toContain("disk full");
+    expect(wentBack).toBe(false);
   });
 
   test("reports asynchronous save failures and allows retry", async () => {
@@ -436,8 +439,8 @@ describe("settings screen", () => {
     const server = Bun.serve({
       port: 0,
       fetch(req) {
-        requests++;
         const path = new URL(req.url).pathname;
+        if (path.endsWith("/models")) requests++;
         if (path === "/a/models") {
           return new Response(JSON.stringify({ data: [{ id: "alpha-model" }] }), {
             headers: { "content-type": "application/json" },
@@ -613,19 +616,19 @@ describe("settings screen", () => {
     expect(saved).toBeNull();
   });
 
-  test("escape with unsaved edits asks first, and Cancel returns to the edited field", async () => {
+  test("escape with unsaved edits asks first, and Keep editing returns to the edited field", async () => {
     await open({ campaignsDir: "/tmp/x", oneshotsDir: "/tmp/o", sourcesDir: "/tmp/s" });
     await keys.typeText("zzz", 5);
     keys.pressKey("ESCAPE");
     await wait();
     await renderOnce();
-    expect(captureCharFrame()).toContain("Discard changes to settings?");
+    expect(captureCharFrame()).toContain("Save changes to settings?");
     expect(wentBack).toBe(false);
 
-    keys.pressEnter(); // Cancel holds focus
+    keys.pressEnter(); // Keep editing holds focus
     await wait();
     await renderOnce();
-    expect(captureCharFrame()).not.toContain("Discard changes to settings?");
+    expect(captureCharFrame()).not.toContain("Save changes to settings?");
     expect(wentBack).toBe(false);
 
     const [baseInput] = settingsInputs();
@@ -641,6 +644,34 @@ describe("settings screen", () => {
     await confirmDiscard();
     expect(wentBack).toBe(true);
     expect(saved).toBeNull();
+  });
+
+  test("Save in the leave dialog saves and leaves", async () => {
+    await open({ campaignsDir: "/tmp/x", oneshotsDir: "/tmp/o", sourcesDir: "/tmp/s" });
+    await keys.typeText("http://localhost:1234/v1", 5);
+    keys.pressKey("ESCAPE");
+    await wait();
+    await keys.pressKeys(["TAB", "TAB"], 20); // Keep editing -> Discard -> Save
+    keys.pressEnter();
+    await wait();
+    expect(saved?.baseUrl).toBe("http://localhost:1234/v1");
+    expect(wentBack).toBe(true);
+  });
+
+  test("Save in the leave dialog that a field refuses stays, on that field", async () => {
+    await open({ campaignsDir: "/tmp/x", oneshotsDir: "/tmp/o", sourcesDir: "/tmp/s" });
+    const dirInput = settingsInputs()[3]!;
+    dirInput.value = "relative/dir";
+    keys.pressKey("ESCAPE");
+    await wait();
+    await keys.pressKeys(["TAB", "TAB"], 20);
+    keys.pressEnter();
+    await wait();
+    await renderOnce();
+    expect(saved).toBeNull();
+    expect(wentBack).toBe(false);
+    expect(captureCharFrame()).toContain("Campaigns directory must be a full path");
+    expect(renderer.currentFocusedRenderable).toBe(dirInput);
   });
 
   test("a pasted API key is refused, never saved, and taken off the screen", async () => {
@@ -764,7 +795,7 @@ describe("settings screen", () => {
         });
         await pressTest();
 
-        expect(captureCharFrame()).toContain("Connected: llama3.1 replied.");
+        expect(captureCharFrame()).toContain("✓ connected");
         expect(seen).toEqual([{ auth: "Bearer secret-value", model: "llama3.1" }]);
         expect(saved).toBeNull(); // testing never saves
       } finally {
@@ -815,6 +846,182 @@ describe("settings screen", () => {
         expect(captureCharFrame()).toContain("SCRIBE_UNSET_KEY is not set");
         expect(requests).toBe(0);
         expect(renderer.currentFocusedRenderable).toBe(settingsInputs()[1]!);
+      } finally {
+        server.stop();
+      }
+    });
+  });
+
+  describe("automatic connection check", () => {
+    /** A provider that lists `models` and records every chat request's model. */
+    function serveProvider(models: string[], reply: (model: string) => Response | Promise<Response>) {
+      const chats: string[] = [];
+      const server = Bun.serve({
+        port: 0,
+        async fetch(req) {
+          const path = new URL(req.url).pathname;
+          if (path === "/v1/models") {
+            return Response.json({ data: models.map((id) => ({ id })) });
+          }
+          if (path === "/v1/chat/completions") {
+            const model = String(((await req.json()) as { model?: unknown }).model);
+            chats.push(model);
+            return reply(model);
+          }
+          return new Response("not found", { status: 404 });
+        },
+      });
+      return { server, chats, baseUrl: `http://localhost:${server.port}/v1` };
+    }
+    const ok = (): Response =>
+      new Response('data: {"choices":[{"delta":{"content":"OK"}}]}\n\ndata: [DONE]\n\n', {
+        headers: { "content-type": "text/event-stream" },
+      });
+
+    test("picking a model checks it, and typing alone never does", async () => {
+      const { server, chats, baseUrl } = serveProvider(["alpha-one", "beta-two"], ok);
+      try {
+        await open({ campaignsDir: "/tmp/x", oneshotsDir: "/tmp/o", sourcesDir: "/tmp/s", baseUrl });
+        await keys.pressKeys(["TAB", "TAB"], 20); // -> key -> model
+        await keys.typeText("beta", 5);
+        await wait();
+        expect(chats).toEqual([]);
+
+        keys.pressKey("TAB"); // picks in place
+        await wait();
+        await renderOnce();
+        expect(chats).toEqual(["beta-two"]);
+        expect(captureCharFrame()).toContain("✓ connected");
+        expect(renderer.currentFocusedRenderable).toBe(settingsInputs()[2]!);
+
+        // Leaving the field after the pick doesn't ask again.
+        keys.pressKey("TAB");
+        await wait();
+        expect(chats).toEqual(["beta-two"]);
+        expect(saved).toBeNull(); // checking never saves
+      } finally {
+        server.stop();
+      }
+    });
+
+    test("tabbing past an untouched model makes no request", async () => {
+      const { server, chats, baseUrl } = serveProvider(["alpha-one"], ok);
+      try {
+        await open({ campaignsDir: "/tmp/x", oneshotsDir: "/tmp/o", sourcesDir: "/tmp/s", baseUrl, model: "alpha-one" });
+        await keys.pressKeys(Array(5).fill("TAB"), 20);
+        await wait();
+        expect(chats).toEqual([]);
+      } finally {
+        server.stop();
+      }
+    });
+
+    test("leaving a typed-in model checks it", async () => {
+      const { server, chats, baseUrl } = serveProvider([], ok);
+      try {
+        await open({ campaignsDir: "/tmp/x", oneshotsDir: "/tmp/o", sourcesDir: "/tmp/s", baseUrl });
+        await keys.pressKeys(["TAB", "TAB"], 20);
+        await keys.typeText("custom-model", 5);
+        keys.pressKey("TAB");
+        await wait();
+        await renderOnce();
+        expect(chats).toEqual(["custom-model"]);
+        expect(captureCharFrame()).toContain("✓ connected");
+      } finally {
+        server.stop();
+      }
+    });
+
+    test("a failure is marked beside the model and explained below, without moving focus", async () => {
+      const { server, baseUrl } = serveProvider(["alpha-one"], () => new Response("no such model", { status: 404 }));
+      try {
+        await open({ campaignsDir: "/tmp/x", oneshotsDir: "/tmp/o", sourcesDir: "/tmp/s", baseUrl });
+        await keys.pressKeys(["TAB", "TAB"], 20);
+        await keys.typeText("alpha", 5);
+        await wait();
+        keys.pressKey("TAB");
+        await wait();
+        await renderOnce();
+        const frame = captureCharFrame();
+        expect(frame).toContain("✗ failed");
+        expect(frame).toContain("no such model");
+        expect(renderer.currentFocusedRenderable).toBe(settingsInputs()[2]!);
+      } finally {
+        server.stop();
+      }
+    });
+
+    test("editing a provider field clears the verdict", async () => {
+      const { server, baseUrl } = serveProvider(["alpha-one"], ok);
+      try {
+        await open({ campaignsDir: "/tmp/x", oneshotsDir: "/tmp/o", sourcesDir: "/tmp/s", baseUrl });
+        await keys.pressKeys(["TAB", "TAB"], 20);
+        await keys.typeText("alpha", 5);
+        await wait();
+        keys.pressKey("TAB");
+        await wait();
+        await renderOnce();
+        expect(captureCharFrame()).toContain("✓ connected");
+
+        settingsInputs()[1]!.value = "OTHER_KEY";
+        await wait();
+        await renderOnce();
+        expect(captureCharFrame()).not.toContain("✓ connected");
+      } finally {
+        server.stop();
+      }
+    });
+
+    test("a test refused before sending never leaves the mark stuck on checking", async () => {
+      const { server, baseUrl } = serveProvider(["slow-model"], async () => {
+        await Bun.sleep(150);
+        return ok();
+      });
+      try {
+        await open({ campaignsDir: "/tmp/x", oneshotsDir: "/tmp/o", sourcesDir: "/tmp/s", baseUrl });
+        await keys.pressKeys(["TAB", "TAB"], 20);
+        await keys.typeText("slow", 5);
+        await wait();
+        keys.pressKey("TAB"); // pick: a check starts
+        await wait(20);
+        settingsInputs()[0]!.value = "not a url"; // stale while in flight
+        await keys.pressKeys(Array(5).fill("TAB"), 10); // -> Test connection
+        keys.pressEnter();
+        await wait(250);
+        await renderOnce();
+        const frame = captureCharFrame();
+        expect(frame).toContain("must start with http:// or https://");
+        expect(frame).not.toContain("checking…");
+        expect(frame).not.toContain("✓ connected");
+      } finally {
+        server.stop();
+      }
+    });
+
+    test("a slow check superseded by a newer pick can't overwrite its verdict", async () => {
+      const { server, chats, baseUrl } = serveProvider(["slow-model", "fast-model"], async (model) => {
+        if (model === "slow-model") {
+          await Bun.sleep(200);
+          return new Response("slow failure", { status: 500 });
+        }
+        return ok();
+      });
+      try {
+        await open({ campaignsDir: "/tmp/x", oneshotsDir: "/tmp/o", sourcesDir: "/tmp/s", baseUrl });
+        await keys.pressKeys(["TAB", "TAB"], 20);
+        await keys.typeText("slow", 5);
+        await wait();
+        keys.pressKey("TAB"); // pick slow-model
+        await wait(30);
+        settingsInputs()[2]!.value = "fast";
+        await wait();
+        keys.pressKey("TAB"); // pick fast-model
+        await wait(300);
+        await renderOnce();
+        expect(chats).toEqual(["slow-model", "fast-model"]);
+        const frame = captureCharFrame();
+        expect(frame).toContain("✓ connected");
+        expect(frame).not.toContain("slow failure");
       } finally {
         server.stop();
       }

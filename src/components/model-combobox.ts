@@ -8,6 +8,8 @@ export interface ModelComboboxOptions {
   placeholder?: string;
   loadModels: () => Promise<ModelInfo[]>;
   onError?: (message: string) => void;
+  onChange?: () => void;
+  onPick?: () => void;
   maxRows?: number;
 }
 
@@ -25,6 +27,8 @@ export function makeModelCombobox(ctx: RenderContext, options: ModelComboboxOpti
     ...(options.value !== undefined ? { value: options.value } : {}),
     ...(options.placeholder !== undefined ? { placeholder: options.placeholder } : {}),
     ...(options.onError ? { onError: options.onError } : {}),
+    ...(options.onChange ? { onChange: options.onChange } : {}),
+    ...(options.onPick ? { onPick: options.onPick } : {}),
     ...(options.maxRows !== undefined ? { maxRows: options.maxRows } : {}),
     messages: {
       loading: "Loading models…",
