@@ -28,6 +28,8 @@ export interface ComboboxOptions {
   messages?: { loading?: string; empty?: string; noMatch?: string };
   /** The field's text changed, by typing or by picking a row. */
   onChange?: () => void;
+  /** A dropdown row was picked, after its value is in the field. */
+  onPick?: () => void;
   onError?: (message: string) => void;
   maxRows?: number;
 }
@@ -292,6 +294,7 @@ export function makeCombobox(ctx: RenderContext, options: ComboboxOptions): Comb
     } finally {
       substituting = false;
     }
+    options.onPick?.();
   }
 
   input.onContentChange = () => {

@@ -10,7 +10,8 @@ import {
 } from "@opentui/core";
 import { isAbsolute } from "node:path";
 import { makeCombobox } from "../components/combobox.ts";
-import { makeQuitGuard, showConfirmDialog } from "../components/confirm-dialog.ts";
+import { makeActionDialog } from "../components/action-dialog.ts";
+import { makeQuitGuard } from "../components/confirm-dialog.ts";
 import { makeModelCombobox } from "../components/model-combobox.ts";
 import { makeButton, tabWalk, TEXT_FIELD_KEYS } from "../components/ui.ts";
 import { theme } from "../theme.ts";
@@ -26,6 +27,7 @@ export interface SettingsScreenOptions {
 }
 
 const LABEL_WIDTH = 22;
+const CHECK_WIDTH = 13;
 const TEST_TIMEOUT_MS = 20_000;
 
 const ENV_VAR_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -46,10 +48,10 @@ export async function makeSettingsScreen(
   options: SettingsScreenOptions,
 ): Promise<Screen> {
   let saving = false;
-  let testing = false;
   let disposed = false;
   let modalOpen = false;
-  let showingModelError = false;
+  // Which part of the screen wrote the status line, so each can retract only its own message.
+  let statusOwner: "listing" | "check" | null = null;
   const container = new BoxRenderable(renderer, {
     width: "100%",
     height: "100%",
@@ -72,12 +74,19 @@ export async function makeSettingsScreen(
   // terminal. Earlier rows stack above later ones because a dropdown hangs
   // below its field, over the rows that follow.
   let rowCount = 0;
-  function addRow(label: string, control: Renderable, focusTarget: Renderable, help: string): void {
+  function addRow(
+    label: string,
+    control: Renderable,
+    focusTarget: Renderable,
+    help: string,
+    trailing?: Renderable,
+  ): void {
     const row = new BoxRenderable(renderer, { flexDirection: "row", width: "100%", zIndex: 100 - rowCount++ });
     row.add(new TextRenderable(renderer, { content: label, fg: theme.textMuted, width: LABEL_WIDTH, flexShrink: 0 }));
     const slot = new BoxRenderable(renderer, { flexGrow: 1, flexShrink: 1, flexBasis: 0 });
     slot.add(control);
     row.add(slot);
+    if (trailing) row.add(trailing);
     container.add(row);
     showHintFor(focusTarget, help);
   }
@@ -109,7 +118,10 @@ export async function makeSettingsScreen(
     maxRows: PROVIDER_PRESETS.length,
     loadItems: () =>
       PROVIDER_PRESETS.map((preset) => ({ value: preset.baseUrl, label: preset.name, description: preset.baseUrl })),
-    onChange: () => modelCombobox.invalidate(),
+    onChange: () => {
+      modelCombobox.invalidate();
+      markCheckStale();
+    },
   });
   const baseUrlInput = baseUrlCombobox.input;
   addRow(
@@ -138,15 +150,29 @@ export async function makeSettingsScreen(
       });
     },
     onError: (message) => {
-      // An empty message retracts the last listing error, and only that: it
-      // must not wipe a status line some other part of the screen wrote.
-      if (message === "" && !showingModelError) return;
-      setStatus(message);
-      showingModelError = message !== "";
+      if (message === "") retractStatus("listing");
+      else setStatus(message, "error", "listing");
     },
+    onChange: () => markCheckStale(),
+    // Picking a model is the moment to find out whether it answers.
+    onPick: () => void checkConnection("auto"),
   });
   const modelInput = modelCombobox.input;
-  addRow("Model", modelCombobox.node, modelInput, "Type to search the provider's models, or press ↓ to browse.");
+  // The connection check's verdict, beside the model it is about.
+  const checkMark = new TextRenderable(renderer, {
+    content: "",
+    fg: theme.textMuted,
+    width: CHECK_WIDTH,
+    flexShrink: 0,
+    marginLeft: 1,
+  });
+  addRow(
+    "Model",
+    modelCombobox.node,
+    modelInput,
+    "Type to search the provider's models, or ↓ to browse. Picking one tests it.",
+    checkMark,
+  );
 
   const dirInput = addField(
     "Campaigns directory",
@@ -171,33 +197,37 @@ export async function makeSettingsScreen(
   // Last on the screen, so a long provider error can wrap without moving anything.
   const status = new TextRenderable(renderer, { content: "", fg: theme.danger, wrapMode: "word" });
 
-  function setStatus(message: string, tone: "error" | "info" = "error"): void {
+  function setStatus(message: string, tone: "error" | "info" = "error", owner: typeof statusOwner = null): void {
     if (disposed) return;
-    showingModelError = false;
+    statusOwner = message === "" ? null : owner;
     status.content = message;
     status.fg = tone === "error" ? theme.danger : theme.textMuted;
   }
+  /** Clear the status line only if `owner` wrote what is on it. */
+  function retractStatus(owner: NonNullable<typeof statusOwner>): void {
+    if (statusOwner === owner) setStatus("");
+  }
 
   const saveButton = makeButton(renderer, { label: "Save", variant: "primary", onClick: () => void save() });
-  const testButton = makeButton(renderer, { label: "Test connection", onClick: () => void testProvider() });
-  const backButton = makeButton(renderer, { label: "Back", onClick: requestLeave });
+  const testButton = makeButton(renderer, { label: "Test connection", onClick: () => void checkConnection("manual") });
+  const cancelButton = makeButton(renderer, { label: "Cancel", onClick: requestLeave });
   const buttonRow = new BoxRenderable(renderer, { flexDirection: "row", flexShrink: 0 });
   buttonRow.add(saveButton);
   buttonRow.add(new BoxRenderable(renderer, { width: 2 }));
   buttonRow.add(testButton);
   buttonRow.add(new BoxRenderable(renderer, { width: 2 }));
-  buttonRow.add(backButton);
+  buttonRow.add(cancelButton);
   container.add(buttonRow);
   container.add(status);
-  showHintFor(saveButton, "");
+  showHintFor(saveButton, "Saves these settings and returns to the menu.");
   showHintFor(testButton, "Sends a one-line message to the model using the values above, saved or not.");
-  showHintFor(backButton, "");
+  showHintFor(cancelButton, "Returns to the menu without saving.");
 
   const inputs = [baseUrlInput, keyInput, modelInput, dirInput, oneshotsInput, sourcesInput];
-  const focusChain: Renderable[] = [...inputs, saveButton, testButton, backButton];
+  const focusChain: Renderable[] = [...inputs, saveButton, testButton, cancelButton];
   // What is on disk: the baseline for "unsaved", and what a save builds on.
-  let saved = options.settings;
-  let savedValues = inputs.map((input) => input.value);
+  const saved = options.settings;
+  const savedValues = inputs.map((input) => input.value);
   const isDirty = (): boolean => inputs.some((input, index) => input.value !== savedValues[index]);
 
   function reject(input: InputRenderable, message: string): void {
@@ -246,21 +276,74 @@ export async function makeSettingsScreen(
     return apiKeyEnv;
   }
 
-  // Tests what is in the fields now, saved or not, with the request a chat would make.
-  async function testProvider(): Promise<void> {
-    if (disposed || testing) return;
-    const baseUrl = readBaseUrl();
-    if (baseUrl === null) return;
-    const apiKeyEnv = readKeyVar();
-    if (apiKeyEnv === null) return;
+  // A connection check sends the request a chat would make, with what is in
+  // the fields now, saved or not. Each one is a real (if tiny) model request,
+  // so "auto" checks run only when a model is picked or an edited model field
+  // is left, never per keystroke. Any edit to the provider fields makes the
+  // last verdict stale, and a newer check supersedes an older one in flight.
+  let checkGeneration = 0;
+  // What the last check was about, so leaving the field after a pick doesn't repeat it.
+  let lastChecked = "";
+  let modelOnFocus = modelInput.value;
+  const checkSubject = (): string => [baseUrlInput.value, keyInput.value, modelInput.value].join("\n");
+
+  function setCheckMark(content: string, fg: string): void {
+    if (!disposed) {
+      checkMark.content = content;
+      checkMark.fg = fg;
+    }
+  }
+
+  function markCheckStale(): void {
+    // The edit buffer reports its starting text as a change; that edits nothing.
+    if (checkSubject() === lastChecked) return;
+    checkGeneration++;
+    setCheckMark("", theme.textMuted);
+    retractStatus("check");
+  }
+
+  async function checkConnection(mode: "auto" | "manual"): Promise<void> {
+    if (disposed) return;
+    lastChecked = checkSubject();
+    const mine = ++checkGeneration;
+    // Whatever the last verdict was, it no longer stands; a refusal below leaves no verdict at all.
+    setCheckMark("", theme.textMuted);
+    const fail = (message: string): void => {
+      setCheckMark("✗ failed", theme.danger);
+      setStatus(message, "error", "check");
+    };
+
+    let baseUrl: string | null;
+    let apiKeyEnv: string | null;
+    if (mode === "manual") {
+      // An explicit test points at whatever is in the way.
+      baseUrl = readBaseUrl();
+      if (baseUrl === null) return;
+      apiKeyEnv = readKeyVar();
+      if (apiKeyEnv === null) return;
+    } else {
+      // An automatic one never moves focus or edits a field under the user.
+      baseUrl = baseUrlInput.value.trim();
+      apiKeyEnv = keyInput.value.trim();
+      if (baseUrl !== "" && !/^https?:\/\/\S+$/i.test(baseUrl)) {
+        fail("The base URL must start with http:// or https://");
+        return;
+      }
+      if (apiKeyEnv !== "" && (looksLikeApiKey(apiKeyEnv) || !ENV_VAR_NAME.test(apiKeyEnv))) {
+        fail("The API key env var must be the name of an environment variable.");
+        return;
+      }
+    }
     const apiKey = apiKeyEnv ? process.env[apiKeyEnv] : "";
     if (apiKey === undefined) {
-      reject(keyInput, `The environment variable ${apiKeyEnv} is not set. Export it, then restart Scribe.`);
+      fail(`The environment variable ${apiKeyEnv} is not set. Export it, then restart Scribe.`);
+      if (mode === "manual") keyInput.focus();
       return;
     }
+
     const model = modelInput.value.trim() || DEFAULT_MODEL;
-    testing = true;
-    setStatus(`Asking ${model} for a reply...`, "info");
+    setCheckMark("checking…", theme.textMuted);
+    retractStatus("check");
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       await Promise.race([
@@ -270,19 +353,18 @@ export async function makeSettingsScreen(
           apiKey,
           ...(apiKeyEnv ? { apiKeyEnv } : {}),
         }),
-        new Promise<never>((_, fail) => {
+        new Promise<never>((_, reject) => {
           timer = setTimeout(
-            () => fail(new Error(`No reply after ${TEST_TIMEOUT_MS / 1000} seconds. Check the base URL.`)),
+            () => reject(new Error(`No reply after ${TEST_TIMEOUT_MS / 1000} seconds. Check the base URL.`)),
             TEST_TIMEOUT_MS,
           );
         }),
       ]);
-      setStatus(`Connected: ${model} replied.`, "info");
+      if (mine === checkGeneration) setCheckMark("✓ connected", theme.success);
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Connection test failed");
+      if (mine === checkGeneration) fail(error instanceof Error ? error.message : "Connection test failed");
     } finally {
       clearTimeout(timer);
-      testing = false;
     }
   }
 
@@ -311,15 +393,13 @@ export async function makeSettingsScreen(
     setStatus("Saving...", "info");
     try {
       await options.onSaved(next);
-      // Stay, so the saved values can be tested straight away.
-      saved = next;
-      savedValues = inputs.map((input) => input.value);
-      setStatus("Saved.", "info");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Failed to save settings");
+      return;
     } finally {
       saving = false;
     }
+    leave();
   }
 
   const onKeypress = (key: KeyEvent): void => {
@@ -340,6 +420,8 @@ export async function makeSettingsScreen(
     baseUrlCombobox.dispose();
     modelCombobox.dispose();
     keyInput.onContentChange = undefined;
+    modelInput.off(RenderableEvents.FOCUSED, onModelFocus);
+    modelInput.off(RenderableEvents.BLURRED, onModelBlur);
     renderer.keyInput.off("keypress", onKeypress);
   }
   function leave(): void {
@@ -354,15 +436,31 @@ export async function makeSettingsScreen(
     }
     const returnTo = renderer.currentFocusedRenderable;
     modalOpen = true;
-    showConfirmDialog(renderer, {
-      title: "Discard changes to settings?",
-      body: "Your unsaved changes will be lost.",
-      confirmLabel: "Discard",
-      onConfirm: leave,
+    const dialog = makeActionDialog(renderer, {
+      width: 54,
       onClose: () => {
         modalOpen = false;
         if (!disposed) (returnTo ?? baseUrlInput).focus();
       },
+    });
+    dialog.content.add(new TextRenderable(renderer, { content: "Save changes to settings?", fg: theme.text }));
+    dialog.content.add(
+      new TextRenderable(renderer, {
+        content: "Your edits haven't been saved yet.",
+        fg: theme.textMuted,
+        marginBottom: 1,
+      }),
+    );
+    // Keep editing first, so the safe choice holds focus.
+    dialog.addButton("Keep editing", "ghost", () => dialog.close());
+    dialog.addButton("Discard", "ghost", () => {
+      dialog.close();
+      leave();
+    });
+    dialog.addButton("Save", "primary", () => {
+      // Closing first hands focus back, so a refused field can take it from there.
+      dialog.close();
+      void save();
     });
   }
 
@@ -387,7 +485,20 @@ export async function makeSettingsScreen(
   for (const input of inputs) {
     input.on(InputRenderableEvents.ENTER, () => advance(input));
   }
-  keyInput.onContentChange = () => modelCombobox.invalidate();
+  keyInput.onContentChange = () => {
+    modelCombobox.invalidate();
+    markCheckStale();
+  };
+  // Leaving a model field that was typed into (rather than picked) checks it too.
+  const onModelFocus = (): void => {
+    modelOnFocus = modelInput.value;
+  };
+  const onModelBlur = (): void => {
+    if (modalOpen || modelInput.value === modelOnFocus || checkSubject() === lastChecked) return;
+    void checkConnection("auto");
+  };
+  modelInput.on(RenderableEvents.FOCUSED, onModelFocus);
+  modelInput.on(RenderableEvents.BLURRED, onModelBlur);
 
   renderer.keyInput.on("keypress", onKeypress);
   baseUrlInput.focus();
