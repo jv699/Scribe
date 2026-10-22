@@ -18,14 +18,16 @@ export interface TranscriptOptions {
 }
 
 export interface TranscriptActivity {
-  finish(): void;
+  /** `endedAt` lets a replayed activity keep its real duration. */
+  finish(endedAt?: number): void;
 }
 
 export interface Transcript {
   node: BoxRenderable;
   sync(messages: readonly ChatMessage[]): void;
   /** Groups consecutive activities until a message or notice arrives. UI-only. */
-  beginActivity(present: string, past: string): TranscriptActivity;
+  /** `startedAt` lets a replay (e.g. a ScribeBench run opened mid-way) show true durations. */
+  beginActivity(present: string, past: string, startedAt?: number): TranscriptActivity;
   addNotice(text: string, tone?: "muted" | "danger"): void;
   reset(): void;
 }
@@ -146,7 +148,7 @@ export function makeTranscript(renderer: CliRenderer, options: TranscriptOptions
     node.add(pinned);
   }
 
-  function beginActivity(present: string, past: string): TranscriptActivity {
+  function beginActivity(present: string, past: string, startedAt: number = Date.now()): TranscriptActivity {
     if (!openGroup) {
       const { node: blockNode, body } = makeQuietBlock();
       openGroup = body;
@@ -161,14 +163,13 @@ export function makeTranscript(renderer: CliRenderer, options: TranscriptOptions
     openGroup.add(shimmer.node);
     liveShimmers.add(shimmer);
 
-    const startedAt = Date.now();
     let settled = false;
     return {
-      finish(): void {
+      finish(endedAt: number = Date.now()): void {
         if (settled) return;
         settled = true;
         liveShimmers.delete(shimmer);
-        shimmer.stop(`${past} · ${formatDuration(Date.now() - startedAt)}`);
+        shimmer.stop(`${past} · ${formatDuration(endedAt - startedAt)}`);
       },
     };
   }

@@ -1,9 +1,8 @@
-import { constants } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { mkdir, readdir, type FileHandle } from "node:fs/promises";
+import { mkdir, readdir } from "node:fs/promises";
 import { parseFrontmatter, serializeFrontmatter, updateFrontmatterFile } from "./frontmatter.ts";
 import { slugify, today } from "./naming.ts";
-import { atomicReplaceRegularFile, openRegularFileNoFollow, readRegularFileNoFollow } from "./safe-files.ts";
+import { atomicReplaceRegularFile, createUniqueMarkdown, readRegularFileNoFollow } from "./safe-files.ts";
 
 /**
  * A plan's full-page map lives beside it as `<slug>.map.md`, marked by a
@@ -125,22 +124,5 @@ export async function saveOneshot(dir: string, input: OneshotInput): Promise<str
   const content = serializeFrontmatter(data, input.content);
 
   // Exclusive creation handles concurrent saves and refuses symlink targets.
-  for (let suffix = 1; ; suffix++) {
-    const fileName = suffix === 1 ? `${slug}.md` : `${slug}-${suffix}.md`;
-    const path = join(dir, fileName);
-    let file: FileHandle | undefined;
-    try {
-      file = await openRegularFileNoFollow(
-        path,
-        constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL,
-        0o666,
-      );
-      await file.writeFile(content, "utf8");
-      return path;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-    } finally {
-      await file?.close();
-    }
-  }
+  return createUniqueMarkdown(dir, slug, content);
 }

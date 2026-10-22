@@ -122,6 +122,8 @@ export interface SelectFocusStyleOptions {
   keepWhenBlurred?: () => boolean;
   /** Runs before restyling on blur, e.g. to move the selection back to what is open. */
   onBlur?: () => void;
+  /** The kept bar's colour; defaults to the quiet `surfaceActive`. */
+  blurredColor?: string;
 }
 
 /**
@@ -138,7 +140,7 @@ export function styleSelectFocus(select: SelectRenderable, options: SelectFocusS
       select.selectedBackgroundColor = theme.accent;
       select.selectedTextColor = theme.text;
     } else if (options.keepWhenBlurred?.()) {
-      select.selectedBackgroundColor = theme.surfaceActive;
+      select.selectedBackgroundColor = options.blurredColor ?? theme.surfaceActive;
       select.selectedTextColor = theme.text;
     } else {
       // Indistinguishable from its neighbours.

@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { createOpenAIProvider, createProviderFromSettings, listModelInfos, listModels } from "../src/provider/openai.ts";
+import {
+  createOpenAIProvider,
+  createProviderFromSettings,
+  listModelInfos,
+  listModels,
+  ProviderHttpError,
+} from "../src/provider/openai.ts";
+import { checkProvider } from "../src/provider/check.ts";
 import type { ChatEvent, ChatMessage } from "../src/provider/types.ts";
 import type { Settings } from "../src/store/settings.ts";
 
@@ -31,6 +38,7 @@ type MockBehavior =
   | "json"
   | "json-tools"
   | "error"
+  | "rate-limit"
   | "tools"
   | "models"
   | "models-error"
@@ -134,6 +142,9 @@ async function startServer(behavior: MockBehavior): Promise<string> {
         stream_options?: unknown;
       };
 
+      if (behavior === "rate-limit") {
+        return new Response(JSON.stringify({ error: { message: "slow down" } }), { status: 429 });
+      }
       if (behavior === "error") {
         return new Response(JSON.stringify({ error: { message: "nope" } }), { status: 401 });
       }
@@ -250,6 +261,42 @@ describe("provider client", () => {
     await expect(collect(provider)).rejects.toThrow(/401/);
   });
 
+  test("a failed request carries its HTTP status, so a rate limit is recognizable", async () => {
+    const baseUrl = await startServer("rate-limit");
+    const provider = createOpenAIProvider({ baseUrl, model: "m", apiKey: "k" });
+    const error = await collect(provider).catch((err: unknown) => err);
+    expect(error).toBeInstanceOf(ProviderHttpError);
+    expect((error as ProviderHttpError).status).toBe(429);
+    expect((error as Error).message).toContain("slow down");
+  });
+
+  test("aborting cancels a stream already under way", async () => {
+    const baseUrl = await startServer("stream");
+    const provider = createOpenAIProvider({ baseUrl, model: "m", apiKey: "k" });
+    const controller = new AbortController();
+    const chunks: string[] = [];
+    const run = (async () => {
+      for await (const event of provider.streamChat([{ role: "user", content: "hi" }], { signal: controller.signal })) {
+        if (event.type === "text") {
+          chunks.push(event.delta);
+          controller.abort();
+        }
+      }
+    })();
+    await expect(run).rejects.toThrow();
+    expect(chunks).toEqual(["Hel"]);
+  });
+
+  test("aborting before the request is sent rejects with the abort, not a reachability hint", async () => {
+    const baseUrl = await startServer("stream");
+    const provider = createOpenAIProvider({ baseUrl, model: "m", apiKey: "k" });
+    const reply = provider.streamChat([{ role: "user", content: "hi" }], { signal: AbortSignal.abort() });
+    const error = await (async () => {
+      for await (const _ of reply) break;
+    })().catch((err: unknown) => err);
+    expect((error as Error).name).toBe("AbortError");
+  });
+
   test("a failure quotes the provider's message rather than its raw JSON", async () => {
     const bodies = [
       JSON.stringify({ error: { message: "The model `m` does not exist.", code: "model_not_found" } }),
@@ -289,6 +336,7 @@ describe("provider client", () => {
       campaignsDir: "/tmp/x",
       oneshotsDir: "/tmp/o",
       sourcesDir: "/tmp/s",
+      benchDir: "/tmp/b",
       baseUrl,
       apiKeyEnv: "SCRIBE_TEST_KEY",
     });
@@ -314,6 +362,7 @@ describe("provider client", () => {
       campaignsDir: "/tmp/x",
       oneshotsDir: "/tmp/o",
       sourcesDir: "/tmp/s",
+      benchDir: "/tmp/b",
       baseUrl,
       model: "env-model",
       apiKeyEnv: "SCRIBE_TEST_KEY",
@@ -368,6 +417,45 @@ describe("provider client", () => {
     const models = await listModels({ baseUrl, apiKey: "test-key" });
     expect(models).toEqual(["gpt-4o", "gpt-4o-mini"]);
     expect(seenAuth).toBe("Bearer test-key");
+  });
+
+  test("listModelInfos treats a negative or non-numeric price as no pricing", async () => {
+    server = Bun.serve({
+      port: 0,
+      fetch: () =>
+        Response.json({
+          data: [
+            { id: "router/auto", pricing: { prompt: "-1", completion: "-1" } },
+            { id: "half-priced", pricing: { prompt: "0.000001", completion: "n/a" } },
+            { id: "free", pricing: { prompt: "0", completion: "0" } },
+          ],
+        }),
+    });
+    const infos = await listModelInfos({ baseUrl: `http://localhost:${server.port}/v1`, apiKey: "" });
+    expect(infos.find((info) => info.id === "router/auto")?.pricing).toBeUndefined();
+    expect(infos.find((info) => info.id === "half-priced")?.pricing).toEqual({ promptPerToken: 0.000001 });
+    expect(infos.find((info) => info.id === "free")?.pricing).toEqual({ promptPerToken: 0, completionPerToken: 0 });
+  });
+
+  test("a connection check that times out also ends its request", async () => {
+    let aborted = false;
+    server = Bun.serve({
+      port: 0,
+      fetch: (req) =>
+        new Promise<Response>((resolve) => {
+          req.signal.addEventListener("abort", () => {
+            aborted = true;
+            resolve(new Response(null, { status: 499 }));
+          });
+        }),
+    });
+    const verdict = await checkProvider(
+      { baseUrl: `http://localhost:${server.port}/v1`, apiKeyEnv: "", model: "m" },
+      50,
+    );
+    expect(verdict).toBe("No reply after 0.05 seconds. Check the base URL.");
+    await Bun.sleep(50);
+    expect(aborted).toBe(true);
   });
 
   test("listModels throws a readable error on non-2xx", async () => {

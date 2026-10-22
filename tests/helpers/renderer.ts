@@ -12,6 +12,7 @@
  *     ({ renderer, keys, captureCharFrame, renderOnce } = await setupRenderer({ width: 80, height: 24 }));
  *   });
  */
+import type { RGBA } from "@opentui/core";
 import { createMockKeys, createTestRenderer, type TestRenderer } from "@opentui/core/testing";
 
 export interface RendererHarness {
@@ -21,6 +22,11 @@ export interface RendererHarness {
   /** Per-cell colors, for assertions a character frame can't make. */
   captureSpans: Awaited<ReturnType<typeof createTestRenderer>>["captureSpans"];
   renderOnce: () => Promise<void>;
+  /**
+   * The colors of the cell where `text` first starts on screen, searching
+   * only the first `columns` columns of each row when given (e.g. a sidebar).
+   */
+  cellAt: (text: string, columns?: number) => { fg: RGBA; bg: RGBA };
 }
 
 export interface SetupRendererOptions {
@@ -30,7 +36,20 @@ export interface SetupRendererOptions {
 
 export async function setupRenderer(options: SetupRendererOptions): Promise<RendererHarness> {
   const setup = await createTestRenderer({ width: options.width, height: options.height });
+  const cellAt = (text: string, columns?: number): { fg: RGBA; bg: RGBA } => {
+    const lines = setup.captureCharFrame().split("\n");
+    const y = lines.findIndex((line) => line.slice(0, columns).includes(text));
+    if (y < 0) throw new Error(`"${text}" is not on screen`);
+    const x = lines[y]!.indexOf(text);
+    let column = 0;
+    for (const span of setup.captureSpans().lines[y]!.spans) {
+      if (x < column + span.width) return { fg: span.fg, bg: span.bg };
+      column += span.width;
+    }
+    throw new Error(`no span at ${x},${y}`);
+  };
   return {
+    cellAt,
     renderer: setup.renderer,
     keys: createMockKeys(setup.renderer),
     captureCharFrame: setup.captureCharFrame,

@@ -17,6 +17,17 @@ export interface OpenAIProviderOptions {
   apiKeyEnv?: string;
 }
 
+/** A provider answered with a non-2xx status; `status` lets callers spot rate limits. */
+export class ProviderHttpError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+    this.name = "ProviderHttpError";
+  }
+}
+
 export const DEFAULT_BASE_URL = "https://api.openai.com/v1";
 // Compatibility fallback for configs without a model; revisit as models change.
 export const DEFAULT_MODEL = "gpt-4o-mini";
@@ -153,8 +164,10 @@ export function createOpenAIProvider(options: OpenAIProviderOptions): ChatProvid
             Authorization: `Bearer ${options.apiKey}`,
           },
           body: JSON.stringify(body),
+          ...(chatOptions?.signal ? { signal: chatOptions.signal } : {}),
         });
-      } catch {
+      } catch (err) {
+        if (chatOptions?.signal?.aborted) throw err;
         throw new Error(
           `Couldn't reach ${baseUrl}. Check the base URL in Settings and that the provider is running.`,
         );
@@ -163,9 +176,9 @@ export function createOpenAIProvider(options: OpenAIProviderOptions): ChatProvid
       if (!response.ok) {
         const failure = `Chat request failed (${response.status}): ${await errorDetail(response)}`;
         if (response.status === 401 || response.status === 403) {
-          throw new Error(`${authHint(options)} ${failure}`);
+          throw new ProviderHttpError(`${authHint(options)} ${failure}`, response.status);
         }
-        throw new Error(failure);
+        throw new ProviderHttpError(failure, response.status);
       }
 
       if (response.headers.get("content-type")?.includes("text/event-stream")) {
@@ -198,8 +211,11 @@ export function createOpenAIProvider(options: OpenAIProviderOptions): ChatProvid
  * would and stopping at the first event of the reply. Rejects with the same
  * messages a failed chat shows.
  */
-export async function testConnection(options: OpenAIProviderOptions): Promise<void> {
-  const reply = createOpenAIProvider(options).streamChat([{ role: "user", content: "Reply with OK." }]);
+export async function testConnection(options: OpenAIProviderOptions, signal?: AbortSignal): Promise<void> {
+  const reply = createOpenAIProvider(options).streamChat(
+    [{ role: "user", content: "Reply with OK." }],
+    signal ? { signal } : undefined,
+  );
   for await (const _ of reply) break;
 }
 
@@ -208,6 +224,17 @@ interface RawModel {
   name?: string;
   context_length?: number;
   pricing?: { prompt?: string | number; completion?: string | number };
+}
+
+/**
+ * A per-token price, or undefined when there isn't a real one. OpenRouter
+ * lists routers (whose model, and so price, is picked per request) at "-1";
+ * read as a number, that bills every token at minus a dollar.
+ */
+function listedPrice(raw: string | number | undefined): number | undefined {
+  if (raw === undefined) return undefined;
+  const price = Number(raw);
+  return Number.isFinite(price) && price >= 0 ? price : undefined;
 }
 
 /**
@@ -234,11 +261,11 @@ export async function listModelInfos(options: { baseUrl: string; apiKey: string 
     if (typeof entry.name === "string" && entry.name !== "") info.name = entry.name;
     if (typeof entry.context_length === "number") info.contextLength = entry.context_length;
 
-    const promptPrice = entry.pricing?.prompt !== undefined ? Number(entry.pricing.prompt) : undefined;
-    const completionPrice = entry.pricing?.completion !== undefined ? Number(entry.pricing.completion) : undefined;
+    const promptPrice = listedPrice(entry.pricing?.prompt);
+    const completionPrice = listedPrice(entry.pricing?.completion);
     const pricing: ModelInfo["pricing"] = {
-      ...(promptPrice !== undefined && !Number.isNaN(promptPrice) ? { promptPerToken: promptPrice } : {}),
-      ...(completionPrice !== undefined && !Number.isNaN(completionPrice) ? { completionPerToken: completionPrice } : {}),
+      ...(promptPrice !== undefined ? { promptPerToken: promptPrice } : {}),
+      ...(completionPrice !== undefined ? { completionPerToken: completionPrice } : {}),
     };
     if (Object.keys(pricing).length > 0) info.pricing = pricing;
 
@@ -251,8 +278,14 @@ export async function listModels(options: { baseUrl: string; apiKey: string }): 
   return (await listModelInfos(options)).map((info) => info.id);
 }
 
+/** The key a named env var holds; no name, or an unset variable, is no key. */
+export function apiKeyFrom(apiKeyEnv: string | undefined): string {
+  const name = apiKeyEnv?.trim();
+  return name ? (process.env[name] ?? "") : "";
+}
+
 export function createProviderFromSettings(settings: Settings): ChatProvider {
-  const apiKey = settings.apiKeyEnv ? (process.env[settings.apiKeyEnv] ?? "") : "";
+  const apiKey = apiKeyFrom(settings.apiKeyEnv);
   return createOpenAIProvider({
     baseUrl: settings.baseUrl ?? DEFAULT_BASE_URL,
     model: settings.model ?? DEFAULT_MODEL,

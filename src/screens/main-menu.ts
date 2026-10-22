@@ -28,6 +28,7 @@ export interface MainMenuOptions {
   onSelectCampaign: (campaign: Campaign) => void;
   onSettings: () => void;
   onOneshotPlanner: () => void;
+  onBench: () => void;
   onQuit: () => void;
   /** Message from a failed navigation, shown under the menu. */
   error?: string | undefined;
@@ -39,6 +40,7 @@ enum MenuOptions {
   SHOW_CAMPAIGN,
   CAMPAIGNS,
   DRAFTING_TABLE,
+  BENCH,
   SETTINGS,
   QUIT,
 }
@@ -53,6 +55,7 @@ export function makeMainMenuScreen(renderer: CliRenderer, options: MainMenuOptio
   const rootOptions: SelectOption[] = [
     { name: "Campaigns", description: "", value: MenuOptions.CAMPAIGNS },
     { name: "Drafting Table", description: "one-shot and ideas planner", value: MenuOptions.DRAFTING_TABLE },
+    { name: "ScribeBench", description: "compare models on one prompt", value: MenuOptions.BENCH },
     { name: "Settings", description: "", value: MenuOptions.SETTINGS },
     { name: "Quit", description: "", value: MenuOptions.QUIT },
   ];
@@ -104,6 +107,7 @@ export function makeMainMenuScreen(renderer: CliRenderer, options: MainMenuOptio
     if (view === "root") {
       if (option.value === MenuOptions.CAMPAIGNS) showView("campaigns");
       else if (option.value === MenuOptions.DRAFTING_TABLE) options.onOneshotPlanner();
+      else if (option.value === MenuOptions.BENCH) options.onBench();
       else if (option.value === MenuOptions.SETTINGS) options.onSettings();
       else if (option.value === MenuOptions.QUIT) options.onQuit();
       return;

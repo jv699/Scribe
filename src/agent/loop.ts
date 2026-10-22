@@ -29,6 +29,8 @@ export interface AgentOptions {
    */
   onMessage?: (message: ChatMessage) => void;
   maxIterations?: number;
+  /** Aborting rejects the run: the request in flight is cancelled and no further turn or tool starts. */
+  signal?: AbortSignal;
 }
 
 export interface AgentResult {
@@ -59,6 +61,7 @@ export async function runAgent(
     // Announced before the request so a UI has somewhere to stream into, but
     // deliberately not in `messages` yet: an empty assistant turn must not be
     // sent to the provider. It is filled in and pushed once the stream ends.
+    options.signal?.throwIfAborted();
     const assistant: ChatMessage = { role: "assistant", content: "" };
     options.onMessage?.(assistant);
 
@@ -77,6 +80,7 @@ export async function runAgent(
       const tool = options.tools.find((t) => t.definition.function.name === call.function.name);
       // An unknown tool is a model mistake, so it counts against the budget.
       if (!tool?.userDriven) userDrivenOnly = false;
+      options.signal?.throwIfAborted();
       options.onTool?.(call.function.name);
       const result = tool
         ? await runTool(tool, call)
@@ -106,7 +110,10 @@ async function streamTurn(
   let content = "";
   const acc = new Map<number, Accum>();
 
-  for await (const event of options.provider.streamChat(messages, { tools })) {
+  for await (const event of options.provider.streamChat(messages, {
+    tools,
+    ...(options.signal ? { signal: options.signal } : {}),
+  })) {
     if (event.type === "text") {
       content += event.delta;
       options.onText?.(event.delta);
