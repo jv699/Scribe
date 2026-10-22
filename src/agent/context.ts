@@ -9,7 +9,7 @@ import { loadInstructions, loadOneshotInstructions, loadPromptOverride } from ".
 import { readSessionNotes, type Session } from "../store/sessions.ts";
 import type { Settings } from "../store/settings.ts";
 import { listSources } from "../store/sources.ts";
-import { CORE_CAMPAIGN_PROMPT, CORE_ONESHOT_PROMPT } from "./prompts.ts";
+import { CORE_BENCH_PROMPT, CORE_CAMPAIGN_PROMPT, CORE_ONESHOT_PROMPT } from "./prompts.ts";
 
 /** Omit the source section when no library is configured or indexed. */
 async function sourcesSection(sourcesDir: string | undefined): Promise<string> {
@@ -149,4 +149,14 @@ export async function buildOneshotSystemPrompt(settings: Settings): Promise<stri
   const sources = await sourcesSection(settings.sourcesDir);
   const instructions = instructionsSection(await loadOneshotInstructions());
   return `${base}${sources}${instructions}`;
+}
+
+/**
+ * ScribeBench shares the one-shot user instructions (house rules apply to any
+ * plan) but takes no override file: every model must see the same core.
+ */
+export async function buildBenchSystemPrompt(settings: Settings): Promise<string> {
+  const sources = await sourcesSection(settings.sourcesDir);
+  const instructions = instructionsSection(await loadOneshotInstructions());
+  return `${CORE_BENCH_PROMPT}${sources}${instructions}`;
 }

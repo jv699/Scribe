@@ -4,11 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
+  buildBenchSystemPrompt,
   buildOneshotSystemPrompt,
   buildPlanningSystemPrompt,
   buildReportSystemPrompt,
 } from "../src/agent/context.ts";
-import { CORE_CAMPAIGN_PROMPT, CORE_ONESHOT_PROMPT } from "../src/agent/prompts.ts";
+import { CORE_BENCH_PROMPT, CORE_CAMPAIGN_PROMPT, CORE_ONESHOT_PROMPT } from "../src/agent/prompts.ts";
 import type { Campaign } from "../src/store/campaigns.ts";
 import { createCharacter } from "../src/store/characters.ts";
 import type { Session } from "../src/store/sessions.ts";
@@ -36,6 +37,7 @@ beforeEach(async () => {
     campaignsDir: join(dir, "Scribe"),
     oneshotsDir: join(dir, "Scribe", "One-Shots"),
     sourcesDir: join(dir, "Scribe", "Sources"),
+    benchDir: join(dir, "Scribe", "Bench"),
   };
 
   campaign = {
@@ -130,6 +132,22 @@ describe("prompt assembly", () => {
     // The campaign instructions layer must not leak into one-shot mode.
     expect(prompt).not.toContain("CAMPAIGN ONLY.");
     expect(prompt).not.toContain("# Campaign");
+  });
+
+  test("bench prompt forbids questions, keeps the one-shot craft and instructions, and ignores overrides", async () => {
+    await writeConfigFile("oneshot-instructions.md", "Prefer four-hour adventures.\n");
+    const overridePath = join(dir, "my-core.md");
+    await Bun.write(overridePath, "You are a terse assistant.\n");
+    const prompt = await buildBenchSystemPrompt({ ...settings, oneshotPromptOverride: overridePath });
+
+    expect(prompt).toContain(CORE_BENCH_PROMPT.trim());
+    expect(prompt).toContain("Do not ask the user anything.");
+    expect(prompt).toContain("Making plans runnable:");
+    expect(prompt).toContain("Prefer four-hour adventures.");
+    expect(prompt).not.toContain("You are a terse assistant.");
+    // Nothing to save with, so none of the saving rules.
+    expect(prompt).not.toContain("save_session");
+    expect(prompt).not.toContain("ask_user");
   });
 
   test("override replaces the core but keeps context and instructions", async () => {

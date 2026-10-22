@@ -4,6 +4,20 @@ All notable changes to Scribe are recorded here. Versions follow
 [Semantic Versioning](https://semver.org/); while Scribe is 0.x, the on-disk
 layout and config format may still change between minor versions.
 
+## Unreleased
+
+### ScribeBench
+
+- A new main-menu destination for comparing models: line up several models
+  from any OpenAI-compatible providers, each checked when you save it, then
+  run one prompt on all of them at once. Live tiles show each model's
+  progress, time, and cost; each model's transcript opens from the sidebar.
+- A confirmation before every run lists each model's pricing (where the
+  provider publishes it) and a minimum cost. Runs can be cancelled one at a
+  time or all at once, stop after 10 minutes, and are stopped if you leave.
+- Results are saved as markdown under `~/Scribe/Bench/` (changeable in
+  Settings), and the Flight Deck shows the run's total cost when it ends.
+
 ## 0.1.0 — 10/08/2026
 
 The first release.
