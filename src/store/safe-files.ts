@@ -64,3 +64,24 @@ export async function atomicReplaceRegularFile(path: string, content: string): P
     await unlink(temporary).catch(() => {});
   }
 }
+
+/**
+ * Create `<stem>.md` in `dir`, or `<stem>-2.md`, `-3`… if taken. Exclusive
+ * creation makes concurrent writers each get their own name and refuses to
+ * follow a symlink planted at the target. Returns the path written.
+ */
+export async function createUniqueMarkdown(dir: string, stem: string, content: string): Promise<string> {
+  for (let suffix = 1; ; suffix++) {
+    const path = join(dir, suffix === 1 ? `${stem}.md` : `${stem}-${suffix}.md`);
+    let file: FileHandle | undefined;
+    try {
+      file = await openRegularFileNoFollow(path, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o666);
+      await file.writeFile(content, "utf8");
+      return path;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    } finally {
+      await file?.close();
+    }
+  }
+}

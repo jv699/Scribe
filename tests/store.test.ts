@@ -109,6 +109,7 @@ describe("settings", () => {
       campaignsDir: join(homedir(), "Scribe"),
       oneshotsDir: join(homedir(), "Scribe", "One-Shots"),
       sourcesDir: join(homedir(), "Scribe", "Sources"),
+      benchDir: join(homedir(), "Scribe", "Bench"),
     });
 
     const written = JSON.parse(await readFile(configPath, "utf8"));
@@ -123,13 +124,22 @@ describe("settings", () => {
       campaignsDir: `${homeRelativeDir}/campaigns`,
       oneshotsDir: `${homeRelativeDir}/one-shots`,
       sourcesDir: `${homeRelativeDir}/sources`,
+      benchDir: `${homeRelativeDir}/bench`,
     }));
     const settings = await loadSettings(configPath);
     expect(settings).toEqual({
       campaignsDir: join(dir, "campaigns"),
       oneshotsDir: join(dir, "one-shots"),
       sourcesDir: join(dir, "sources"),
+      benchDir: join(dir, "bench"),
     });
+  });
+
+  test("a config from before ScribeBench gets the default bench folder", async () => {
+    const configPath = join(dir, "config.json");
+    await Bun.write(configPath, JSON.stringify({ campaignsDir: join(dir, "campaigns") }));
+    const settings = await loadSettings(configPath);
+    expect(settings.benchDir).toBe(join(homedir(), "Scribe", "Bench"));
   });
 
   test("corrupt config falls back to defaults", async () => {
@@ -171,12 +181,15 @@ describe("settings", () => {
       campaignsDir: join(dir, "new", "campaigns"),
       oneshotsDir: join(dir, "new", "oneshots"),
       sourcesDir: join(dir, "new", "sources"),
+      benchDir: join(dir, "new", "bench"),
     };
     await saveSettings(settings, join(dir, "config", "config.json"));
 
     for (const path of [settings.campaignsDir, settings.oneshotsDir, settings.sourcesDir]) {
       expect(await readdir(path)).toEqual([]);
     }
+    // The bench folder is made by the first run that writes to it.
+    expect(await readdir(settings.benchDir).catch(() => null)).toBeNull();
   });
 
   test("well-formed JSON with invalid field types falls back safely", async () => {

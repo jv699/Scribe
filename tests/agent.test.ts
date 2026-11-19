@@ -273,6 +273,42 @@ describe("agent loop", () => {
     ).rejects.toThrow(/exceeded/);
   });
 
+  test("an abort between tool calls stops the run before the next tool starts", async () => {
+    const controller = new AbortController();
+    const provider: ChatProvider = {
+      async *streamChat() {
+        yield toolCallDelta(0, "c1", "echo", '{"word":"a"}');
+        yield toolCallDelta(1, "c2", "echo", '{"word":"b"}');
+      },
+    };
+    const ran: string[] = [];
+    const tool: AgentTool = {
+      ...echoTool,
+      execute: (args) => {
+        ran.push(String(args["word"]));
+        controller.abort();
+        return "ok";
+      },
+    };
+    await expect(
+      runAgent({ provider, tools: [tool], signal: controller.signal }, [{ role: "user", content: "hi" }]),
+    ).rejects.toThrow();
+    expect(ran).toEqual(["a"]);
+  });
+
+  test("passes the abort signal to the provider", async () => {
+    const controller = new AbortController();
+    let seen: AbortSignal | undefined;
+    const provider: ChatProvider = {
+      async *streamChat(_messages, options) {
+        seen = options?.signal;
+        yield text("done");
+      },
+    };
+    await runAgent({ provider, tools: [echoTool], signal: controller.signal }, [{ role: "user", content: "hi" }]);
+    expect(seen).toBe(controller.signal);
+  });
+
   test("reports usage per turn via onUsage", async () => {
     const provider: ChatProvider = {
       async *streamChat(messages) {
@@ -827,6 +863,12 @@ describe("ask_user tool", () => {
     expect(await tool.execute({ question: "Which?", options: [] })).toBe("(provide at least one option)");
     expect(await tool.execute({ question: "Which?" })).toBe("(provide at least one option)");
     expect(channel.asked).toEqual([]);
+  });
+});
+
+describe("bench agent", () => {
+  test("can only read sources: it never asks, saves, or touches a campaign", () => {
+    expect(grantedNames("bench")).toEqual(["list_sources", "search_sources", "read_source_pages"]);
   });
 });
 

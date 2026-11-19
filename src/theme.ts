@@ -4,6 +4,8 @@ export const theme = {
 
   accent: "#CC5500",
   accentHover: "#E86A1C",
+  /** Marks what is open in an unfocused list (the focused cursor uses `accent`). */
+  accentDark: "#8A3A00",
 
   /** Also used on accent backgrounds. */
   text: "#FFFFFF",

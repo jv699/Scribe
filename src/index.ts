@@ -4,11 +4,12 @@ import { makeCampaignDialog } from "./components/campaign-dialog.ts";
 import { makeMainMenuScreen, type MainMenuView } from "./screens/main-menu.ts";
 import { makeCampaignWorkspaceScreen, sessionChatTitle, type SessionChatHost } from "./screens/campaign-workspace.ts";
 import { makeSettingsScreen } from "./screens/settings.ts";
+import { makeBenchScreen } from "./screens/bench.ts";
 import { makeChatScreen, type ChatLogStore } from "./screens/chat.ts";
 import type { Screen } from "./screens/screen.ts";
 import { loadSettings, saveSettings } from "./store/settings.ts";
 import { createCampaign, listCampaigns, loadCampaign, type Campaign } from "./store/campaigns.ts";
-import { createProviderFromSettings, DEFAULT_BASE_URL, DEFAULT_MODEL, listModelInfos } from "./provider/openai.ts";
+import { apiKeyFrom, createProviderFromSettings, DEFAULT_BASE_URL, DEFAULT_MODEL, listModelInfos } from "./provider/openai.ts";
 import type { ChatProvider, ModelInfo } from "./provider/types.ts";
 import { toolsFor } from "./agent/agents.ts";
 import type { ActiveOneshot } from "./agent/tools/types.ts";
@@ -101,6 +102,7 @@ async function showMainMenu(initialView: MainMenuView = "root"): Promise<void> {
       onSelectCampaign: (campaign) => navigate(() => showCampaignWorkspace(campaign)),
       onSettings: () => navigate(showSettingsScreen),
       onOneshotPlanner: () => navigate(showOneshotPlanner),
+      onBench: () => navigate(showBench),
       onQuit: quitApp,
     }),
   );
@@ -125,7 +127,7 @@ async function fetchModelInfo(model: string): Promise<ModelInfo | undefined> {
   try {
     const infos = await listModelInfos({
       baseUrl: settings.baseUrl ?? DEFAULT_BASE_URL,
-      apiKey: settings.apiKeyEnv ? (process.env[settings.apiKeyEnv] ?? "") : "",
+      apiKey: apiKeyFrom(settings.apiKeyEnv),
     });
     return infos.find((info) => info.id === model);
   } catch {
@@ -165,6 +167,10 @@ async function showOneshotPlanner(): Promise<void> {
   });
   activeOneshot.onRead = (oneshot) => screen.setTitle(`Drafting Table • ${oneshot.displayName}`);
   showScreen(screen);
+}
+
+async function showBench(): Promise<void> {
+  showScreen(await makeBenchScreen(renderer, { settings, onBack: () => navigate(showMainMenu) }));
 }
 
 async function showCampaignWorkspace(campaign: Campaign): Promise<void> {

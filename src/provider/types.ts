@@ -27,6 +27,8 @@ export interface ToolDefinition {
 
 export interface ChatOptions {
   tools?: ToolDefinition[];
+  /** Aborting cancels the request, including a stream already under way. */
+  signal?: AbortSignal;
 }
 
 export interface ToolCallDelta {

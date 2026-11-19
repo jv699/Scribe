@@ -42,6 +42,10 @@ export const AGENTS = {
       "read_source_pages",
     ],
   },
+  // ScribeBench: one unattended reply per model, so nothing that asks or writes.
+  bench: {
+    tools: ["list_sources", "search_sources", "read_source_pages"],
+  },
 } as const satisfies Record<string, AgentDefinition>;
 
 export type AgentId = keyof typeof AGENTS;

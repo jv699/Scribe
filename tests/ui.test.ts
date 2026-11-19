@@ -33,7 +33,7 @@ let campaignsDir: string;
 let renderer: TestRenderer;
 let keys: ReturnType<typeof createMockKeys>;
 let captureCharFrame: () => string;
-let captureSpans: Awaited<ReturnType<typeof setupRenderer>>["captureSpans"];
+let cellAt: Awaited<ReturnType<typeof setupRenderer>>["cellAt"];
 let renderOnce: () => Promise<void>;
 let currentScreen: Screen | null = null;
 let campaignDialog: { layer: Parameters<TestRenderer["root"]["add"]>[0]; open: () => void };
@@ -60,6 +60,7 @@ async function showMainMenu(initialView: MainMenuView = "root"): Promise<void> {
       onSelectCampaign: (c) => void showCampaignWorkspace(c),
       onSettings: () => {},
       onOneshotPlanner: () => {},
+      onBench: () => {},
       onQuit: () => {},
     }),
   );
@@ -95,7 +96,7 @@ beforeEach(async () => {
   // ask the new renderer to remove a node belonging to the previous one.
   currentScreen = null;
   campaignsDir = await mkdtemp(join(tmpdir(), "scribe-ui-test-"));
-  ({ renderer, keys, captureCharFrame, captureSpans, renderOnce } = await setupRenderer({ width: 100, height: 30 }));
+  ({ renderer, keys, captureCharFrame, cellAt, renderOnce } = await setupRenderer({ width: 100, height: 30 }));
 
   campaignDialog = makeCampaignDialog(renderer, {
     onSubmit: (input) => {
@@ -652,18 +653,7 @@ describe("campaign workspace flow", () => {
 });
 
 describe("campaign workspace focus and quitting", () => {
-  /** The background color of the cell where `text` starts on screen. */
-  function bgAt(text: string): RGBA {
-    const lines = captureCharFrame().split("\n");
-    const y = lines.findIndex((line) => line.includes(text));
-    const x = lines[y]!.indexOf(text);
-    let column = 0;
-    for (const span of captureSpans().lines[y]!.spans) {
-      if (x < column + span.width) return span.bg;
-      column += span.width;
-    }
-    throw new Error(`no span at ${x},${y}`);
-  }
+  const bgAt = (text: string): RGBA => cellAt(text).bg;
 
   function selects(): SelectRenderable[] {
     const found: SelectRenderable[] = [];
@@ -797,6 +787,7 @@ describe("select mouse support", () => {
         onSelectCampaign: () => {},
         onSettings: () => settings++,
         onOneshotPlanner: () => {},
+        onBench: () => {},
         onQuit: () => quits++,
       }),
     );
@@ -824,6 +815,7 @@ describe("select mouse support", () => {
         onSelectCampaign: () => {},
         onSettings: () => {},
         onOneshotPlanner: () => {},
+        onBench: () => {},
         onQuit: () => {},
       }),
     );
@@ -872,6 +864,7 @@ describe("two-stage main menu", () => {
         onSelectCampaign: () => {},
         onSettings: () => {},
         onOneshotPlanner: () => {},
+        onBench: () => {},
         onQuit: () => {},
       }),
     );
@@ -945,6 +938,7 @@ describe("two-stage main menu", () => {
       onSelectCampaign: (campaign) => selected.push(campaign),
       onSettings: () => {},
       onOneshotPlanner: () => {},
+      onBench: () => {},
       onQuit: () => {},
     }));
     await renderOnce();
@@ -963,6 +957,7 @@ describe("two-stage main menu", () => {
       onSelectCampaign: () => {},
       onSettings: () => {},
       onOneshotPlanner: () => {},
+      onBench: () => {},
       onQuit: () => {},
     });
     renderer.root.add(intro.node);

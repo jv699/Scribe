@@ -11,8 +11,8 @@ export interface PromptOptions {
 export interface Prompt {
   node: BoxRenderable;
   input: TextareaRenderable;
-  /** Omitting `hint` restores the default, shortened to fit a narrow prompt. */
-  setHint(hint?: string): void;
+  /** Omitting `hint` restores the default, shortened to fit a narrow prompt. `danger` shows it in red. */
+  setHint(hint?: string, tone?: "muted" | "danger"): void;
 }
 
 export function makePrompt(ctx: RenderContext, options: PromptOptions): Prompt {
@@ -74,8 +74,9 @@ export function makePrompt(ctx: RenderContext, options: PromptOptions): Prompt {
   return {
     node: promptBox,
     input,
-    setHint: (hint) => {
+    setHint: (hint, tone = "muted") => {
       override = hint;
+      if (!hintText.isDestroyed) hintText.fg = hint !== undefined && tone === "danger" ? theme.danger : theme.textMuted;
       showHint();
     },
   };

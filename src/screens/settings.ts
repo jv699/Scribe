@@ -16,7 +16,8 @@ import { makeModelCombobox } from "../components/model-combobox.ts";
 import { makeButton, tabWalk, TEXT_FIELD_KEYS } from "../components/ui.ts";
 import { theme } from "../theme.ts";
 import { abbreviateHome, defaultConfigDir, expandHome, type Settings } from "../store/settings.ts";
-import { DEFAULT_BASE_URL, DEFAULT_MODEL, listModelInfos, testConnection } from "../provider/openai.ts";
+import { baseUrlProblem, checkProvider, keyVarProblem, looksLikeApiKey } from "../provider/check.ts";
+import { apiKeyFrom, DEFAULT_BASE_URL, listModelInfos } from "../provider/openai.ts";
 import { PROVIDER_PRESETS } from "../provider/presets.ts";
 import type { Screen } from "./screen.ts";
 
@@ -28,21 +29,6 @@ export interface SettingsScreenOptions {
 
 const LABEL_WIDTH = 22;
 const CHECK_WIDTH = 13;
-const TEST_TIMEOUT_MS = 20_000;
-
-const ENV_VAR_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
-const KEY_PREFIX = /^(sk|pk|gsk|xai|key)[-_]/i;
-
-/**
- * Whether the "env var" field holds a pasted key rather than a variable's
- * name. A name that resolves in this environment is always taken as a name.
- */
-export function looksLikeApiKey(value: string): boolean {
-  if (process.env[value] !== undefined) return false;
-  if (KEY_PREFIX.test(value)) return true;
-  return value.length >= 20 && /[a-z]/.test(value) && /\d/.test(value);
-}
-
 export async function makeSettingsScreen(
   renderer: CliRenderer,
   options: SettingsScreenOptions,
@@ -143,10 +129,9 @@ export async function makeSettingsScreen(
     value: options.settings.model ?? "",
     placeholder: "gpt-4o-mini",
     loadModels: () => {
-      const apiKeyEnv = keyInput.value.trim();
       return listModelInfos({
         baseUrl: baseUrlInput.value.trim() || DEFAULT_BASE_URL,
-        apiKey: apiKeyEnv ? (process.env[apiKeyEnv] ?? "") : "",
+        apiKey: apiKeyFrom(keyInput.value),
       });
     },
     onError: (message) => {
@@ -192,6 +177,12 @@ export async function makeSettingsScreen(
     "~/Scribe/Sources",
     "Reference PDFs live here, one folder per system. Changing it does not move them.",
   );
+  const benchInput = addField(
+    "Bench directory",
+    abbreviateHome(options.settings.benchDir),
+    "~/Scribe/Bench",
+    "ScribeBench saves each run's prompt and results here. Changing it does not move them.",
+  );
 
   container.add(hint);
   // Last on the screen, so a long provider error can wrap without moving anything.
@@ -223,7 +214,7 @@ export async function makeSettingsScreen(
   showHintFor(testButton, "Sends a one-line message to the model using the values above, saved or not.");
   showHintFor(cancelButton, "Returns to the menu without saving.");
 
-  const inputs = [baseUrlInput, keyInput, modelInput, dirInput, oneshotsInput, sourcesInput];
+  const inputs = [baseUrlInput, keyInput, modelInput, dirInput, oneshotsInput, sourcesInput, benchInput];
   const focusChain: Renderable[] = [...inputs, saveButton, testButton, cancelButton];
   // What is on disk: the baseline for "unsaved", and what a save builds on.
   const saved = options.settings;
@@ -237,12 +228,12 @@ export async function makeSettingsScreen(
 
   /** The base URL (blank means the default), or null after refusing one no request could use. */
   function readBaseUrl(): string | null {
-    const baseUrl = baseUrlInput.value.trim();
-    if (baseUrl !== "" && !/^https?:\/\/\S+$/i.test(baseUrl)) {
-      reject(baseUrlInput, "The base URL must start with http:// or https://");
+    const problem = baseUrlProblem(baseUrlInput.value);
+    if (problem) {
+      reject(baseUrlInput, problem);
       return null;
     }
-    return baseUrl;
+    return baseUrlInput.value.trim();
   }
 
   /** An absolute directory path, or null after refusing a blank or relative one. */
@@ -263,14 +254,11 @@ export async function makeSettingsScreen(
   /** The key variable's name, or null after refusing one that can't be saved or used. */
   function readKeyVar(): string | null {
     const apiKeyEnv = keyInput.value.trim();
-    if (apiKeyEnv !== "" && looksLikeApiKey(apiKeyEnv)) {
-      // Take it off the screen too; it would only be refused again.
-      keyInput.value = "";
-      reject(keyInput, "That looks like an API key. Export it in your shell and enter the variable's name here.");
-      return null;
-    }
-    if (apiKeyEnv !== "" && !ENV_VAR_NAME.test(apiKeyEnv)) {
-      reject(keyInput, "An environment variable name can only use letters, digits, and underscores");
+    const problem = keyVarProblem(apiKeyEnv);
+    if (problem) {
+      // Take a pasted key off the screen too; it would only be refused again.
+      if (looksLikeApiKey(apiKeyEnv)) keyInput.value = "";
+      reject(keyInput, problem);
       return null;
     }
     return apiKeyEnv;
@@ -325,47 +313,24 @@ export async function makeSettingsScreen(
       // An automatic one never moves focus or edits a field under the user.
       baseUrl = baseUrlInput.value.trim();
       apiKeyEnv = keyInput.value.trim();
-      if (baseUrl !== "" && !/^https?:\/\/\S+$/i.test(baseUrl)) {
-        fail("The base URL must start with http:// or https://");
-        return;
-      }
-      if (apiKeyEnv !== "" && (looksLikeApiKey(apiKeyEnv) || !ENV_VAR_NAME.test(apiKeyEnv))) {
-        fail("The API key env var must be the name of an environment variable.");
+      const problem = baseUrlProblem(baseUrl) ?? keyVarProblem(apiKeyEnv);
+      if (problem) {
+        fail(problem);
         return;
       }
     }
-    const apiKey = apiKeyEnv ? process.env[apiKeyEnv] : "";
-    if (apiKey === undefined) {
+    if (apiKeyEnv && process.env[apiKeyEnv] === undefined) {
       fail(`The environment variable ${apiKeyEnv} is not set. Export it, then restart Scribe.`);
       if (mode === "manual") keyInput.focus();
       return;
     }
 
-    const model = modelInput.value.trim() || DEFAULT_MODEL;
     setCheckMark("checking…", theme.textMuted);
     retractStatus("check");
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      await Promise.race([
-        testConnection({
-          baseUrl: baseUrl || DEFAULT_BASE_URL,
-          model,
-          apiKey,
-          ...(apiKeyEnv ? { apiKeyEnv } : {}),
-        }),
-        new Promise<never>((_, reject) => {
-          timer = setTimeout(
-            () => reject(new Error(`No reply after ${TEST_TIMEOUT_MS / 1000} seconds. Check the base URL.`)),
-            TEST_TIMEOUT_MS,
-          );
-        }),
-      ]);
-      if (mine === checkGeneration) setCheckMark("✓ connected", theme.success);
-    } catch (error) {
-      if (mine === checkGeneration) fail(error instanceof Error ? error.message : "Connection test failed");
-    } finally {
-      clearTimeout(timer);
-    }
+    const failure = await checkProvider({ baseUrl, apiKeyEnv, model: modelInput.value });
+    if (mine !== checkGeneration) return;
+    if (failure === null) setCheckMark("✓ connected", theme.success);
+    else fail(failure);
   }
 
   async function save(): Promise<void> {
@@ -380,7 +345,9 @@ export async function makeSettingsScreen(
     if (oneshotsDir === null) return;
     const sourcesDir = readDir(sourcesInput, "Sources");
     if (sourcesDir === null) return;
-    const next: Settings = { ...saved, campaignsDir, oneshotsDir, sourcesDir };
+    const benchDir = readDir(benchInput, "Bench");
+    if (benchDir === null) return;
+    const next: Settings = { ...saved, campaignsDir, oneshotsDir, sourcesDir, benchDir };
     if (baseUrl !== "") next.baseUrl = baseUrl;
     else delete next.baseUrl;
     const model = modelInput.value.trim();

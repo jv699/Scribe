@@ -8,6 +8,8 @@ export interface Settings {
   oneshotsDir: string;
   /** Source PDFs organized by system folder. */
   sourcesDir: string;
+  /** ScribeBench runs; unlike the others, created by the first run rather than at startup. */
+  benchDir: string;
   baseUrl?: string;
   model?: string;
   /** Name of the env var holding the API key — never the key itself. */
@@ -25,6 +27,7 @@ const DEFAULT_SETTINGS: Settings = {
   campaignsDir: join(homedir(), "Scribe"),
   oneshotsDir: join(homedir(), "Scribe", "One-Shots"),
   sourcesDir: join(homedir(), "Scribe", "Sources"),
+  benchDir: join(homedir(), "Scribe", "Bench"),
 };
 
 const OPTIONAL_STRING_SETTINGS = [
@@ -41,7 +44,7 @@ function settingsFromJson(value: unknown): Settings {
   const raw = value as Record<string, unknown>;
   const settings: Settings = { ...DEFAULT_SETTINGS };
 
-  for (const key of ["campaignsDir", "oneshotsDir", "sourcesDir"] as const) {
+  for (const key of ["campaignsDir", "oneshotsDir", "sourcesDir", "benchDir"] as const) {
     const candidate = raw[key];
     if (typeof candidate === "string" && candidate.trim() !== "") settings[key] = candidate;
   }
@@ -101,6 +104,7 @@ export async function loadSettings(configPath: string = defaultConfigPath()): Pr
   settings.sourcesDir = expandHome(settings.sourcesDir);
   if (settings.systemPromptOverride) settings.systemPromptOverride = expandHome(settings.systemPromptOverride);
   if (settings.oneshotPromptOverride) settings.oneshotPromptOverride = expandHome(settings.oneshotPromptOverride);
+  settings.benchDir = expandHome(settings.benchDir);
 
   if (raw === null) {
     await mkdir(dirname(configPath), { recursive: true });

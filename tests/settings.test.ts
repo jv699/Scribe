@@ -4,7 +4,8 @@ import { type createMockKeys, type TestRenderer } from "@opentui/core/testing";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { setupRenderer, wait } from "./helpers/renderer.ts";
-import { looksLikeApiKey, makeSettingsScreen } from "../src/screens/settings.ts";
+import { looksLikeApiKey } from "../src/provider/check.ts";
+import { makeSettingsScreen } from "../src/screens/settings.ts";
 import type { Screen } from "../src/screens/screen.ts";
 import type { Settings } from "../src/store/settings.ts";
 
@@ -29,12 +30,14 @@ afterEach(() => {
   renderer.destroy();
 });
 
+/** Fixtures may leave out the bench folder; it gets the real default. */
 async function open(
-  settings: Settings,
+  partial: Omit<Settings, "benchDir"> & { benchDir?: string },
   onSaved: (next: Settings) => void | Promise<void> = (next) => {
     saved = next;
   },
 ): Promise<void> {
+  const settings: Settings = { benchDir: join(homedir(), "Scribe", "Bench"), ...partial };
   current = await makeSettingsScreen(renderer, {
     settings,
     onSaved,
@@ -131,7 +134,7 @@ describe("settings screen", () => {
 
     await keys.typeText("https://ollama.local/v1", 5); // base URL
     await keys.pressKeys(["TAB"], 20); // -> key
-    await keys.pressKeys(["TAB", "TAB", "TAB", "TAB", "TAB"], 20); // -> model, dir, one-shots, sources, Save
+    await keys.pressKeys(["TAB", "TAB", "TAB", "TAB", "TAB", "TAB"], 20); // -> model, dir, one-shots, sources, bench, Save
     keys.pressEnter();
     await wait();
 
@@ -144,10 +147,23 @@ describe("settings screen", () => {
     expect(saved?.oneshotPromptOverride).toBe("/tmp/oneshot-core.md");
   });
 
+  test("the bench directory shows its default and saves an edit", async () => {
+    await open({ campaignsDir: "/tmp/x", oneshotsDir: "/tmp/o", sourcesDir: "/tmp/s" });
+    expect(captureCharFrame()).toContain("~/Scribe/Bench");
+
+    await keys.pressKeys(Array(6).fill("TAB"), 10); // -> bench
+    const bench = settingsInputs().find((input) => input.focused)!;
+    bench.value = "/tmp/bench";
+    await keys.pressKeys(["TAB"], 10); // -> Save
+    keys.pressEnter();
+    await wait();
+    expect(saved?.benchDir).toBe("/tmp/bench");
+  });
+
   test("saving returns to the menu", async () => {
     await open({ campaignsDir: "/tmp/x", oneshotsDir: "/tmp/o", sourcesDir: "/tmp/s" });
     await keys.typeText("http://localhost:11434/v1", 5); // base URL
-    await keys.pressKeys(["TAB", "TAB", "TAB", "TAB", "TAB", "TAB"], 20); // -> Save
+    await keys.pressKeys(["TAB", "TAB", "TAB", "TAB", "TAB", "TAB", "TAB"], 20); // -> Save
     keys.pressEnter();
     await wait();
     expect(saved?.baseUrl).toBe("http://localhost:11434/v1");
@@ -158,7 +174,7 @@ describe("settings screen", () => {
     await open({ campaignsDir: "/tmp/x", oneshotsDir: "/tmp/o", sourcesDir: "/tmp/s" }, () => {
       throw new Error("disk full");
     });
-    await keys.pressKeys(Array(6).fill("TAB"), 10);
+    await keys.pressKeys(Array(7).fill("TAB"), 10);
     keys.pressEnter();
     await wait();
     await renderOnce();
@@ -176,7 +192,7 @@ describe("settings screen", () => {
       },
     );
 
-    await keys.pressKeys(["TAB", "TAB", "TAB", "TAB", "TAB", "TAB"], 10);
+    await keys.pressKeys(["TAB", "TAB", "TAB", "TAB", "TAB", "TAB", "TAB"], 10);
     keys.pressEnter();
     await wait(60);
     await renderOnce();
@@ -679,7 +695,7 @@ describe("settings screen", () => {
     const [, keyInput] = settingsInputs();
     keyInput!.value = "sk-proj-abc123DEF456ghi789";
 
-    await keys.pressKeys(["TAB", "TAB", "TAB", "TAB", "TAB", "TAB"], 10); // -> Save
+    await keys.pressKeys(["TAB", "TAB", "TAB", "TAB", "TAB", "TAB", "TAB"], 10); // -> Save
     keys.pressEnter();
     await wait();
     await renderOnce();
@@ -697,7 +713,7 @@ describe("settings screen", () => {
     const [, keyInput] = settingsInputs();
     keyInput!.value = "MY-KEY";
 
-    await keys.pressKeys(["TAB", "TAB", "TAB", "TAB", "TAB", "TAB"], 10);
+    await keys.pressKeys(["TAB", "TAB", "TAB", "TAB", "TAB", "TAB", "TAB"], 10);
     keys.pressEnter();
     await wait();
     await renderOnce();
@@ -726,7 +742,7 @@ describe("settings screen", () => {
     const dirInput = settingsInputs()[3]!;
     dirInput.value = "~Scribe";
 
-    await keys.pressKeys(Array(6).fill("TAB"), 10); // -> Save
+    await keys.pressKeys(Array(7).fill("TAB"), 10); // -> Save
     keys.pressEnter();
     await wait();
     await renderOnce();
@@ -742,7 +758,7 @@ describe("settings screen", () => {
     const dirInput = settingsInputs()[3]!;
     expect(dirInput.value).toBe("~/Scribe");
 
-    await keys.pressKeys(Array(6).fill("TAB"), 10);
+    await keys.pressKeys(Array(7).fill("TAB"), 10);
     keys.pressEnter();
     await wait();
     expect(saved?.campaignsDir).toBe(join(home, "Scribe"));
@@ -751,7 +767,7 @@ describe("settings screen", () => {
   test("a base URL without a scheme is refused", async () => {
     await open({ campaignsDir: "/tmp/x", oneshotsDir: "/tmp/o", sourcesDir: "/tmp/s" });
     await keys.typeText("api.example.com/v1", 5);
-    await keys.pressKeys(Array(6).fill("TAB"), 10);
+    await keys.pressKeys(Array(7).fill("TAB"), 10);
     keys.pressEnter();
     await wait();
     await renderOnce();
@@ -764,7 +780,7 @@ describe("settings screen", () => {
   describe("Test connection", () => {
     /** Tab from the base URL field to the Test connection button and press it. */
     async function pressTest(): Promise<void> {
-      await keys.pressKeys(Array(7).fill("TAB"), 10);
+      await keys.pressKeys(Array(8).fill("TAB"), 10);
       keys.pressEnter();
       await wait();
       await renderOnce();
@@ -985,7 +1001,7 @@ describe("settings screen", () => {
         keys.pressKey("TAB"); // pick: a check starts
         await wait(20);
         settingsInputs()[0]!.value = "not a url"; // stale while in flight
-        await keys.pressKeys(Array(5).fill("TAB"), 10); // -> Test connection
+        await keys.pressKeys(Array(6).fill("TAB"), 10); // -> Test connection
         keys.pressEnter();
         await wait(250);
         await renderOnce();

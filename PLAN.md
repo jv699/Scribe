@@ -75,6 +75,11 @@ A **Session** has three statuses:
       Shadowdark Core Rules.pdf
       extracted/             # text cache, visible: nothing hidden from the user
         shadowdark-core-rules.md
+  Bench/
+    2026-10-21-plan-a-heist-on-a-sky-barge/
+      prompt.md              # frontmatter: date, models; body: the prompt
+      gpt-4o-mini.md         # frontmatter: model, baseUrl, status, durationMs,
+                             # tokens, cost, toolCalls; body: answer or error
 ```
 
 Frontmatter is kept to flat `key: value` lines so a tiny hand-rolled parser
@@ -154,7 +159,10 @@ Chat screen        → shared harness embedded by campaign mode and used full-sc
                      agent questions replace the prompt box until answered;
                      `/` commands and `@` mentions complete in a popup above it
 Settings           → provider, model (inline provider-backed suggestions), key env var,
-                     campaigns/one-shots/sources dirs
+                     campaigns/one-shots/sources/bench dirs
+ScribeBench        → sidebar lineup of models (each checked on save) + flight deck:
+                     one prompt run on every ready model at once, live tiles,
+                     read-only transcript per model
 ```
 
 ## Roadmap
@@ -171,7 +179,10 @@ Each phase leaves the app runnable.
 | **5. Interaction** | `ask_user` question widget (agent asks, turn blocks) + prompt completion popup (`/` commands, `@` campaign mentions) | ✅ done |
 | **6. Source documents** | `~/Scribe/Sources` PDF library, cached as page-marked markdown; `list_sources` / `search_sources` / `read_source_pages` for the planning and one-shot agents | ✅ done |
 
-Roadmap complete through phase 6. Remaining ideas are in **Deferred / future
+Roadmap complete through phase 6. **ScribeBench v1** has shipped since: a
+campaign-less benchmark that runs one prompt on several models (any mix of
+providers) with the same system prompt and the read-only `bench` agent (source
+tools only — it never asks or saves), results written to `~/Scribe/Bench/`. Remaining ideas are in **Deferred / future
 ideas** below.
 
 Campaign workflow note: the current workspace intentionally exposes one planning-capable
@@ -184,6 +195,12 @@ headlessly (`createTestRenderer` + temp dirs). Phases 2–3 are thin once 0–1
 exist.
 
 ## Deferred / future ideas
+
+- **ScribeBench follow-ups:** scoring (the user's ratings, or an LLM-as-judge
+  pass) — the per-model result files' frontmatter is where scores would go; a
+  persisted lineup; a past-runs viewer over `~/Scribe/Bench/`; per-provider
+  concurrency limits (today a 429 just shows as "rate limited"); a campaign
+  context option.
 
 - Running-summary compression when it outgrows the context window.
 - Anthropic-native provider client.
