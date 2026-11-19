@@ -29,6 +29,7 @@ export async function exportActivePdf(oneshotsDir: string, active: ActiveOneshot
   const pdf = renderPlanPdf({
     title: plan.data["title"] || plan.displayName,
     body: plan.body,
+    slug: plan.slug,
     ...(map ? { map } : {}),
     ...(plan.data["system"] ? { subtitle: plan.data["system"] } : {}),
   });

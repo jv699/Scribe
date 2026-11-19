@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { PAGE_HEIGHT, PAGE_WIDTH, parseMapSpec, renderMap } from "../src/map.ts";
-import { parseMarkdown, renderPlanPdf, textWidth, toWinAnsi } from "../src/pdf.ts";
+import { isScribePlanPdf, parseMarkdown, renderPlanPdf, textWidth, toWinAnsi } from "../src/pdf.ts";
 
 /** The PDF as text; Scribe's PDFs are 7-bit throughout. */
 function source(bytes: Uint8Array): string {
@@ -25,17 +25,31 @@ function pages(pdf: string): { width: number; height: number; text: string[] }[]
   return result;
 }
 
+/** Every string drawn, with its page and position, in drawing order. */
+function placed(pdf: string): { page: number; x: number; y: number; text: string }[] {
+  const result: { page: number; x: number; y: number; text: string }[] = [];
+  pages(pdf).forEach((_, page) => {
+    const match = [...pdf.matchAll(/\/Contents (\d+) 0 R/g)][page]!;
+    const body = new RegExp(`(?:^|\\n)${match[1]} 0 obj\\n<< /Length \\d+ >>\\nstream\\n([^]*?)\\nendstream`).exec(pdf)![1]!;
+    for (const shown of body.matchAll(/(-?[\d.]+) (-?[\d.]+) Td \(((?:\\.|[^\\)])*)\) Tj/g)) {
+      result.push({ page, x: Number(shown[1]), y: Number(shown[2]), text: shown[3]! });
+    }
+  });
+  return result;
+}
+
 function render(body: string, extra: { map?: string; subtitle?: string } = {}) {
   const pdf = renderPlanPdf({ title: "The Abbey", body, ...extra });
   const text = source(pdf.bytes);
   return { pdf, text, pages: pages(text) };
 }
 
-const span = (text: string, style: { bold?: boolean; italic?: boolean; code?: boolean } = {}) => ({
+const span = (text: string, style: { bold?: boolean; italic?: boolean; code?: boolean; strike?: boolean } = {}) => ({
   text,
   bold: style.bold ?? false,
   italic: style.italic ?? false,
   code: style.code ?? false,
+  strike: style.strike ?? false,
 });
 
 describe("toWinAnsi", () => {
@@ -216,5 +230,86 @@ describe("renderPlanPdf", () => {
     expect(all.length).toBeGreaterThan(1);
     expect(all[0]!.text.slice(0, 3)).toEqual(["The Abbey", "Creature", "HP"]);
     for (const page of all.slice(1)) expect(page.text.slice(0, 2)).toEqual(["Creature", "HP"]);
+  });
+
+  test("splits a table row taller than a page instead of drawing past the paper", () => {
+    const long = Array.from({ length: 3000 }, (_, index) => `w${index}`).join(" ");
+    const { text, pages: all } = render(`| Name | Notes |\n|---|---|\n| Mira | ${long} |\n| Tom | short |`);
+    expect(all.length).toBeGreaterThan(2);
+    const positions = placed(text);
+    for (const { y } of positions) expect(y).toBeGreaterThanOrEqual(30);
+    // Every word made it onto paper, in order.
+    const words = positions.flatMap((entry) => entry.text.split(" ")).filter((word) => /^w\d+$/.test(word));
+    expect(words).toEqual(long.split(" "));
+    // The header repeats above each continuation.
+    for (const page of all.slice(1)) expect(page.text.slice(0, 2)).toEqual(["Name", "Notes"]);
+  });
+
+  test("never leaves a list marker behind when the item's block moves to the next page", () => {
+    const filler = Array.from({ length: 30 }, (_, index) => `Paragraph ${index}.`).join("\n\n");
+    const code = Array.from({ length: 20 }, (_, index) => `line ${index}`).join("\n");
+    const { text } = render(`${filler}\n\n- \`\`\`text\n  ${code.replaceAll("\n", "\n  ")}\n  \`\`\``);
+    const positions = placed(text);
+    const bullet = positions.find((entry) => entry.text === "\\225")!;
+    const firstLine = positions.find((entry) => entry.text === "line 0")!;
+    expect(bullet.page).toBe(firstLine.page);
+  });
+
+  test("gives empty list items their own line", () => {
+    const { text } = render("-\n- b\n- c");
+    const bullets = placed(text).filter((entry) => entry.text === "\\225");
+    expect(bullets).toHaveLength(3);
+    expect(bullets[0]!.y - bullets[1]!.y).toBeGreaterThanOrEqual(14);
+  });
+
+  test("strikes through struck text", () => {
+    expect(parseMarkdown("Keep ~~ambush~~ parley")).toEqual([
+      { kind: "paragraph", spans: [span("Keep "), span("ambush", { strike: true }), span(" parley")] },
+    ]);
+    const { text, pages: [page] } = render("Keep ~~ambush~~ parley");
+    expect(page!.text.slice(1, 4)).toEqual(["Keep", "ambush", "parley"]);
+    // One stroke through the struck run, on top of the text.
+    const ambush = placed(text).find((entry) => entry.text === "ambush")!;
+    expect(text).toMatch(new RegExp(`${ambush.x} [\\d.]+ m [\\d.]+ [\\d.]+ l S`));
+  });
+
+  test("keeps hard line breaks, outside code and tables only", () => {
+    const { pages: [page] } = render("AC 15  \nHP 22\\\nSpeed 30\nsoft");
+    expect(page!.text.slice(1, 4)).toEqual(["AC 15", "HP 22", "Speed 30 soft"]);
+
+    expect(parseMarkdown("```\na  \nb\\\nc\n```")).toEqual([{ kind: "code", text: "a  \nb\\\nc" }]);
+    expect(parseMarkdown("    a  \n    b")).toEqual([{ kind: "code", text: "a  \nb" }]);
+    const [table] = parseMarkdown("| A |  \n|---|  \n| 1 |  \n");
+    expect(table).toEqual({ kind: "table", rows: [
+      { header: true, cells: [{ spans: [span("A")], align: "left" }] },
+      { header: false, cells: [{ spans: [span("1")], align: "left" }] },
+    ] });
+  });
+
+  test("cuts a long title in the footer so the page number stays on the page", () => {
+    const title = "The Very Long Adventure ".repeat(10).trim();
+    const pdf = renderPlanPdf({ title, body: "Body." });
+    const footer = placed(source(pdf.bytes)).at(-1)!;
+    expect(footer.x).toBeGreaterThanOrEqual(54);
+    expect(footer.text).toEndWith("\\205  \\225  Page 1 of 1");
+  });
+});
+
+describe("isScribePlanPdf", () => {
+  const own = source(renderPlanPdf({ title: "Abbey", body: "Plan.", slug: "abbey" }).bytes);
+
+  test("recognizes Scribe's printout of the same plan only", () => {
+    expect(isScribePlanPdf(own, "abbey")).toBe(true);
+    expect(isScribePlanPdf(own, "crypt")).toBe(false);
+  });
+
+  test("isn't fooled by another tool calling itself Scribe", () => {
+    const other =
+      "%PDF-1.4\n1 0 obj\n<< /Creator (Scribe) /Producer (Scribe) >>\nendobj\n" +
+      "trailer\n<< /Size 2 /Info 1 0 R >>\n%%EOF\n";
+    expect(isScribePlanPdf(other, "abbey")).toBe(false);
+    // The marker only counts inside the Info dictionary.
+    const quoted = other.replace("endobj", "endobj\n% /Creator (Scribe) /ScribePlan (abbey)");
+    expect(isScribePlanPdf(quoted, "abbey")).toBe(false);
   });
 });

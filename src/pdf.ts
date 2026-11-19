@@ -142,10 +142,12 @@ const num = (value: number): string => String(Math.round(value * 100) / 100);
 // Markdown → blocks
 
 interface Span {
+  /** A lone "\n" is a hard line break. */
   text: string;
   bold: boolean;
   italic: boolean;
   code: boolean;
+  strike: boolean;
 }
 
 type Block =
@@ -175,43 +177,109 @@ const ITALIC_ON = "\x03";
 const ITALIC_OFF = "\x04";
 const CODE_ON = "\x05";
 const CODE_OFF = "\x06";
+const STRIKE_ON = "\x16";
+const STRIKE_OFF = "\x17";
+/** Hard line breaks, marked before parsing: Bun reports them as soft ones. */
+const BREAK_SPACES = "\x07";
+const BREAK_BACKSLASH = "\x08";
 const BLOCK_OPEN = "\x0e";
 const BLOCK_CLOSE = "\x0f";
 const BLOCK_REF = /\x0e(\d+)\x0f/g;
 
-/** Inline markup string → styled spans; newlines become spaces. */
+const STYLE_CHANGES: Record<string, [keyof typeof NO_STYLE, number]> = {
+  [BOLD_ON]: ["bold", 1],
+  [BOLD_OFF]: ["bold", -1],
+  [ITALIC_ON]: ["italic", 1],
+  [ITALIC_OFF]: ["italic", -1],
+  [CODE_ON]: ["code", 1],
+  [CODE_OFF]: ["code", -1],
+  [STRIKE_ON]: ["strike", 1],
+  [STRIKE_OFF]: ["strike", -1],
+};
+const NO_STYLE = { bold: 0, italic: 0, code: 0, strike: 0 };
+
+/** Plain text as a span. */
+function plain(text: string, style: Partial<Omit<Span, "text">> = {}): Span {
+  return { text, bold: false, italic: false, code: false, strike: false, ...style };
+}
+
+/** Inline markup string → styled spans; soft breaks become spaces, hard breaks "\n" spans. */
 function toSpans(marked: string): Span[] {
   const spans: Span[] = [];
-  let bold = 0;
-  let italic = 0;
-  let code = 0;
+  const depth = { ...NO_STYLE };
   let text = "";
+  const style = () => ({
+    bold: depth.bold > 0,
+    italic: depth.italic > 0,
+    code: depth.code > 0,
+    strike: depth.strike > 0,
+  });
   const flush = () => {
-    if (text !== "") spans.push({ text, bold: bold > 0, italic: italic > 0, code: code > 0 });
+    if (text !== "") spans.push({ text, ...style() });
     text = "";
   };
-  for (const char of marked.replace(BLOCK_REF, "")) {
-    const change = { [BOLD_ON]: 1, [BOLD_OFF]: -1, [ITALIC_ON]: 2, [ITALIC_OFF]: -2, [CODE_ON]: 3, [CODE_OFF]: -3 }[
-      char
-    ];
+  // The newline after a hard break is the break itself.
+  for (const char of marked.replace(BLOCK_REF, "").replace(/([\x07\x08])\n/g, "$1")) {
+    if (char === BREAK_SPACES || char === BREAK_BACKSLASH) {
+      flush();
+      spans.push({ text: "\n", ...style() });
+      continue;
+    }
+    const change = STYLE_CHANGES[char];
     if (change === undefined) {
       text += char === "\n" ? " " : char;
       continue;
     }
     flush();
-    const delta = Math.sign(change);
-    if (Math.abs(change) === 1) bold += delta;
-    else if (Math.abs(change) === 2) italic += delta;
-    else code += delta;
+    depth[change[0]] += change[1];
   }
   flush();
   return spans;
 }
 
+/** Puts back hard-break markers where they turn out to be literal text (code). */
+function unmarkBreaks(text: string): string {
+  return text.replaceAll(BREAK_SPACES, "  ").replaceAll(BREAK_BACKSLASH, "\\");
+}
+
+/**
+ * Marks hard line breaks (two trailing spaces or a backslash before a line
+ * that continues the paragraph), outside fenced code. Lines with a pipe are
+ * left alone so a table row never grows a stray cell, and headings can't
+ * hold a break anyway. Indented code is fixed up by `unmarkBreaks`.
+ */
+function markHardBreaks(source: string): string {
+  const lines = source.split("\n");
+  let fence: { char: string; length: number } | null = null;
+  return lines
+    .map((line, index) => {
+      const fenceMatch = /^ {0,3}(`{3,}|~{3,})/.exec(line);
+      if (fence) {
+        if (fenceMatch && fenceMatch[1]![0] === fence.char && fenceMatch[1]!.length >= fence.length && /^ {0,3}[`~]+\s*$/.test(line)) {
+          fence = null;
+        }
+        return line;
+      }
+      if (fenceMatch) {
+        fence = { char: fenceMatch[1]![0]!, length: fenceMatch[1]!.length };
+        return line;
+      }
+      const next = lines[index + 1];
+      if (next === undefined || next.trim() === "" || line.trim() === "" || line.includes("|") || /^ {0,3}#/.test(line)) {
+        return line;
+      }
+      const backslashes = /\\+$/.exec(line)?.[0].length ?? 0;
+      if (backslashes % 2 === 1) return line.slice(0, -1) + BREAK_BACKSLASH;
+      if (/\S {2,}$/.test(line)) return line.trimEnd() + BREAK_SPACES;
+      return line;
+    })
+    .join("\n");
+}
+
 /** Parses a plan's markdown body into the blocks the layout understands. */
 export function parseMarkdown(markdown: string): Block[] {
   // Keep \t and \n; everything else below 0x20 is reserved for the markers.
-  const source = markdown.replace(/[\x00-\x08\x0b-\x1f]/g, "");
+  const source = markHardBreaks(markdown.replace(/[\x00-\x08\x0b-\x1f]/g, ""));
   const registry: Block[] = [];
   const cells: TableRow["cells"][number][] = [];
   const rows: TableRow[] = [];
@@ -239,8 +307,8 @@ export function parseMarkdown(markdown: string): Block[] {
     heading: (children, meta) => add({ kind: "heading", level: meta.level, spans: toSpans(children) }),
     paragraph: (children) => add({ kind: "paragraph", spans: toSpans(children) }),
     blockquote: (children) => add({ kind: "quote", blocks: blocksOf(children) }),
-    code: (children) => add({ kind: "code", text: children.replace(/\n$/, "") }),
-    html: (children) => add({ kind: "code", text: children.replace(/\n$/, "") }),
+    code: (children) => add({ kind: "code", text: unmarkBreaks(children).replace(/\n$/, "") }),
+    html: (children) => add({ kind: "code", text: unmarkBreaks(children).replace(/\n$/, "") }),
     hr: () => add({ kind: "rule" }),
     listItem: (children, meta) => {
       const index = items.push({ checked: meta.checked, blocks: blocksOf(children) }) - 1;
@@ -266,10 +334,11 @@ export function parseMarkdown(markdown: string): Block[] {
       add({ kind: "table", rows: [...children.matchAll(/\x14(\d+)\x15/g)].map((match) => rows[Number(match[1])]!) }),
     strong: (children) => BOLD_ON + children + BOLD_OFF,
     emphasis: (children) => ITALIC_ON + children + ITALIC_OFF,
-    codespan: (children) => CODE_ON + children + CODE_OFF,
+    codespan: (children) => CODE_ON + unmarkBreaks(children) + CODE_OFF,
+    strikethrough: (children) => STRIKE_ON + children + STRIKE_OFF,
     link: (children, meta) => {
       const href = meta.href;
-      const shown = children.replace(/[\x01-\x06]/g, "");
+      const shown = children.replace(/[\x01-\x08\x16\x17]/g, "");
       return /^https?:\/\//i.test(href) && shown !== href ? `${children} (${href})` : children;
     },
     image: (children) => `${ITALIC_ON}[Image: ${children}]${ITALIC_OFF}`,
@@ -329,6 +398,9 @@ interface Piece {
   font: FontId;
   width: number;
   space: boolean;
+  strike: boolean;
+  /** A hard line break; has no text. */
+  break?: boolean;
 }
 
 function fontFor(span: Span, base: { bold?: boolean; italic?: boolean }): FontId {
@@ -348,14 +420,21 @@ function wrapSpans(
   const pieces: Piece[] = [];
   for (const span of spans) {
     const font = fontFor(span, base);
+    if (span.text === "\n") {
+      pieces.push({ text: "", font, width: 0, space: false, strike: false, break: true });
+      continue;
+    }
     for (const part of toWinAnsi(span.text).split(/( +)/)) {
       if (part === "") continue;
       const space = part.trim() === "";
       const text = space ? " " : part;
-      pieces.push({ text, font, width: textWidth(text, font, size), space });
+      pieces.push({ text, font, width: textWidth(text, font, size), space, strike: span.strike });
     }
   }
 
+  // Column widths are sums of these same measurements; don't let float
+  // rounding break a word that fits exactly.
+  width += 0.01;
   const lines: Piece[][] = [];
   let line: Piece[] = [];
   let used = 0;
@@ -366,6 +445,12 @@ function wrapSpans(
     used = 0;
   };
   for (const piece of pieces) {
+    if (piece.break) {
+      // Two breaks in a row leave a blank line.
+      if (line.length === 0) lines.push([]);
+      else finish();
+      continue;
+    }
     if (piece.space) {
       if (line.length > 0 && !line[line.length - 1]!.space) {
         line.push(piece);
@@ -400,21 +485,29 @@ function lineWidth(line: Piece[]): number {
   return line.reduce((sum, piece) => sum + piece.width, 0);
 }
 
-/** Draws a line, one string per run of same-font pieces so copied text keeps its spaces. */
+/**
+ * Draws a line, one string per run of same-styled pieces so copied text keeps
+ * its spaces. Struck-through runs get a line through them.
+ */
 function drawPieces(page: Page, x: number, y: number, line: Piece[], size: number, gray = INK): void {
   let cursor = x;
   let index = 0;
   while (index < line.length) {
-    const font = line[index]!.font;
+    const { font, strike } = line[index]!;
     let text = "";
     let width = 0;
     // A space joins whichever run it follows.
-    while (index < line.length && (line[index]!.font === font || line[index]!.space)) {
+    while (index < line.length && ((line[index]!.font === font && line[index]!.strike === strike) || line[index]!.space)) {
       text += line[index]!.text;
       width += line[index]!.width;
       index++;
     }
-    drawText(page, cursor, y, font, size, text.trimEnd(), gray);
+    const shown = text.trimEnd();
+    drawText(page, cursor, y, font, size, shown, gray);
+    if (strike && shown !== "") {
+      const through = y + size * 0.3;
+      drawLine(page, cursor, through, cursor + textWidth(shown, font, size), through, Math.max(0.5, size * 0.06), gray);
+    }
     cursor += width;
   }
 }
@@ -487,13 +580,9 @@ class Layout {
   }
 
   heading(level: number, spans: Span[], x: number, width: number): void {
-    const size = [20, 15, 12.5, 11, 10.5, 10.5][level - 1] ?? 10.5;
-    const leading = size * 1.25;
-    const before = [0, 14, 10, 8, 8, 8][level - 1] ?? 8;
-    const lines = wrapSpans(spans, size, width, { bold: true });
+    const { size, leading, before, lines, keep } = headingMetrics(level, spans, width);
     this.space(before);
-    // Keep the heading with the first lines that follow it.
-    this.ensure(lines.length * leading + (level <= 2 ? 6 : 3) + BODY_LEADING * 3);
+    this.ensure(keep - before);
     for (const line of lines) {
       drawPieces(this.page, x, this.y - size, line, size);
       this.y -= leading;
@@ -511,7 +600,9 @@ class Layout {
     const indent = list.ordered ? 22 : 16;
     list.items.forEach((item, index) => {
       if (index > 0) this.space(tight ? 2 : 3);
-      this.ensure(BODY_LEADING);
+      // The marker goes wherever the item's first block will start.
+      const first = item.blocks[0];
+      this.ensure(first ? this.keepHeight(first, width - indent) : BODY_LEADING);
       const markerY = this.y - BODY_SIZE;
       const page = this.page;
       if (item.checked !== undefined) {
@@ -527,8 +618,35 @@ class Layout {
       } else {
         drawText(page, x + indent - 10, markerY, "regular", BODY_SIZE, "\x95");
       }
-      this.blocks(item.blocks, x + indent, width - indent, true);
+      if (item.blocks.length === 0) this.y -= BODY_LEADING;
+      else this.blocks(item.blocks, x + indent, width - indent, true);
     });
+  }
+
+  /**
+   * How much room `block` insists on before it starts: what it passes to its
+   * own first page check. A list marker asks for the same, so it can't be
+   * left behind when the block moves to the next page.
+   */
+  keepHeight(block: Block, width: number): number {
+    switch (block.kind) {
+      case "heading":
+        return headingMetrics(block.level, block.spans, width).keep;
+      case "code": {
+        const { whole, leading, pad } = codeMetrics(block.text, width);
+        return whole <= LETTER.height - 2 * MARGIN ? whole : pad + leading;
+      }
+      case "table":
+        return measureTable(block.rows, width)?.keep ?? 0;
+      case "quote":
+        return block.blocks[0] ? this.keepHeight(block.blocks[0], width - 14) : BODY_LEADING;
+      case "list": {
+        const first = block.items[0]?.blocks[0];
+        return first ? this.keepHeight(first, width - (block.ordered ? 22 : 16)) : BODY_LEADING;
+      }
+      default:
+        return BODY_LEADING;
+    }
   }
 
   quote(blocks: Block[], x: number, width: number): void {
@@ -554,23 +672,8 @@ class Layout {
   }
 
   code(text: string, x: number, width: number): void {
-    const pad = 6;
-    const inner = width - 2 * pad;
-    const lines = text.split("\n").map((line) => toWinAnsi(line));
-    const longest = Math.max(1, ...lines.map((line) => line.length));
-    // Shrink to keep diagrams intact; past the minimum, wrap.
-    const size = Math.max(MIN_CODE_SIZE, Math.min(CODE_SIZE, inner / (longest * 0.6)));
-    const leading = size * 1.25;
-    const perLine = Math.max(1, Math.floor(inner / (size * 0.6)));
-    const wrapped = lines.flatMap((line) => {
-      if (line.length <= perLine) return [line];
-      const parts: string[] = [];
-      for (let i = 0; i < line.length; i += perLine) parts.push(line.slice(i, i + perLine));
-      return parts;
-    });
-
+    const { pad, size, leading, wrapped, whole } = codeMetrics(text, width);
     // Keep short blocks (like a ## Map schematic) whole on one page.
-    const whole = wrapped.length * leading + 2 * pad;
     if (whole <= LETTER.height - 2 * MARGIN) this.ensure(whole);
 
     let segmentTop = this.y;
@@ -590,53 +693,11 @@ class Layout {
   }
 
   table(rows: TableRow[], x: number, width: number): void {
-    const columns = Math.max(0, ...rows.map((row) => row.cells.length));
-    if (columns === 0) return;
-    const pad = 4;
-    const size = TABLE_SIZE;
-    const leading = size * 1.3;
+    const measured = measureTable(rows, width);
+    if (!measured) return;
+    const { widths, laid, header, keep, pad, size, leading } = measured;
 
-    // Natural (unwrapped) and minimum (longest word) widths per column.
-    const natural = new Array<number>(columns).fill(0);
-    const minimum = new Array<number>(columns).fill(0);
-    for (const row of rows) {
-      row.cells.forEach((cell, column) => {
-        const base = { bold: row.header };
-        let total = 0;
-        for (const span of cell.spans) {
-          const font = fontFor(span, base);
-          const text = toWinAnsi(span.text);
-          total += textWidth(text, font, size);
-          for (const word of text.split(/ +/)) minimum[column] = Math.max(minimum[column]!, textWidth(word, font, size));
-        }
-        natural[column] = Math.max(natural[column]!, total);
-      });
-    }
-    const content = width - columns * 2 * pad;
-    const sum = (values: number[]) => values.reduce((a, b) => a + b, 0);
-    let widths: number[];
-    if (sum(natural) <= content) {
-      widths = natural.map((value) => value + (content - sum(natural)) / columns);
-    } else if (sum(minimum) >= content) {
-      widths = minimum.map((value) => (value / sum(minimum)) * content);
-    } else {
-      const slack = content - sum(minimum);
-      const want = sum(natural.map((value, i) => value - minimum[i]!));
-      widths = minimum.map((value, i) => value + ((natural[i]! - value) / want) * slack);
-    }
-    widths = widths.map((value) => value + 2 * pad);
-
-    const laid = rows.map((row) => {
-      const cellLines = widths.map((cellWidth, column) => {
-        const cell = row.cells[column];
-        return cell ? wrapSpans(cell.spans, size, cellWidth - 2 * pad, { bold: row.header }) : [];
-      });
-      const height = Math.max(1, ...cellLines.map((lines) => lines.length)) * leading + 2 * pad - 2;
-      return { row, cellLines, height };
-    });
-    const header = laid.filter((entry) => entry.row.header);
-
-    const drawRow = (entry: (typeof laid)[number]) => {
+    const drawRow = (entry: TableEntry) => {
       const page = this.page;
       const top = this.y;
       if (entry.row.header) fillRect(page, x, top - entry.height, width, entry.height, SHADE);
@@ -652,25 +713,135 @@ class Layout {
         cellX += cellWidth;
       });
       this.y -= entry.height;
-      drawLine(page, x, this.y, x + width, this.y, entry.row.header ? 0.9 : 0.4, entry.row.header ? INK : RULE);
+      // A row split across pages gets its rule only where it really ends.
+      if (entry.ends) {
+        drawLine(page, x, this.y, x + width, this.y, entry.row.header ? 0.9 : 0.4, entry.row.header ? INK : RULE);
+      }
     };
 
-    this.ensure((header[0]?.height ?? 0) + (laid.find((entry) => !entry.row.header)?.height ?? 0));
+    this.ensure(keep);
     drawLine(this.page, x, this.y, x + width, this.y, 0.9, INK);
     for (const entry of laid) {
       if (this.y - entry.height < MARGIN && !this.atTop) {
         this.newPage();
+        drawLine(this.page, x, this.y, x + width, this.y, 0.9, INK);
         // Repeat the header so a continued table still reads.
-        if (!entry.row.header && header.length > 0) {
-          drawLine(this.page, x, this.y, x + width, this.y, 0.9, INK);
-          header.forEach(drawRow);
-        } else {
-          drawLine(this.page, x, this.y, x + width, this.y, 0.9, INK);
-        }
+        if (!entry.row.header) header.forEach(drawRow);
       }
       drawRow(entry);
     }
   }
+}
+
+function headingMetrics(level: number, spans: Span[], width: number) {
+  const size = [20, 15, 12.5, 11, 10.5, 10.5][level - 1] ?? 10.5;
+  const leading = size * 1.25;
+  const before = [0, 14, 10, 8, 8, 8][level - 1] ?? 8;
+  const lines = wrapSpans(spans, size, width, { bold: true });
+  // Keep the heading with the first lines that follow it.
+  const keep = before + lines.length * leading + (level <= 2 ? 8 : 3) + BODY_LEADING * 3;
+  return { size, leading, before, lines, keep };
+}
+
+function codeMetrics(text: string, width: number) {
+  const pad = 6;
+  const inner = width - 2 * pad;
+  const lines = text.split("\n").map((line) => toWinAnsi(line));
+  const longest = Math.max(1, ...lines.map((line) => line.length));
+  // Shrink to keep diagrams intact; past the minimum, wrap.
+  const size = Math.max(MIN_CODE_SIZE, Math.min(CODE_SIZE, inner / (longest * 0.6)));
+  const leading = size * 1.25;
+  const perLine = Math.max(1, Math.floor(inner / (size * 0.6)));
+  const wrapped = lines.flatMap((line) => {
+    if (line.length <= perLine) return [line];
+    const parts: string[] = [];
+    for (let i = 0; i < line.length; i += perLine) parts.push(line.slice(i, i + perLine));
+    return parts;
+  });
+  return { pad, size, leading, wrapped, whole: wrapped.length * leading + 2 * pad };
+}
+
+interface TableEntry {
+  row: TableRow;
+  cellLines: Piece[][][];
+  height: number;
+  /** False for every piece of a split row but the last. */
+  ends: boolean;
+}
+
+/**
+ * Column widths and wrapped rows for a table. A row too tall for a page (with
+ * the header repeated above it) is split into page-sized pieces, so no text
+ * is ever drawn past the bottom of the paper.
+ */
+function measureTable(rows: TableRow[], width: number) {
+  const columns = Math.max(0, ...rows.map((row) => row.cells.length));
+  if (columns === 0) return null;
+  const pad = 4;
+  const size = TABLE_SIZE;
+  const leading = size * 1.3;
+
+  // Natural (unwrapped) and minimum (longest word) widths per column.
+  const natural = new Array<number>(columns).fill(0);
+  const minimum = new Array<number>(columns).fill(0);
+  for (const row of rows) {
+    row.cells.forEach((cell, column) => {
+      const base = { bold: row.header };
+      let total = 0;
+      for (const span of cell.spans) {
+        const font = fontFor(span, base);
+        const text = toWinAnsi(span.text);
+        total += textWidth(text, font, size);
+        for (const word of text.split(/ +/)) minimum[column] = Math.max(minimum[column]!, textWidth(word, font, size));
+      }
+      natural[column] = Math.max(natural[column]!, total);
+    });
+  }
+  const content = width - columns * 2 * pad;
+  const sum = (values: number[]) => values.reduce((a, b) => a + b, 0);
+  let widths: number[];
+  if (sum(natural) <= content) {
+    widths = natural.map((value) => value + (content - sum(natural)) / columns);
+  } else if (sum(minimum) >= content) {
+    widths = minimum.map((value) => (value / sum(minimum)) * content);
+  } else {
+    const slack = content - sum(minimum);
+    const want = sum(natural.map((value, i) => value - minimum[i]!));
+    widths = minimum.map((value, i) => value + ((natural[i]! - value) / want) * slack);
+  }
+  widths = widths.map((value) => value + 2 * pad);
+
+  const heightOf = (lineCount: number) => Math.max(1, lineCount) * leading + 2 * pad - 2;
+  const wrapped = rows.map((row) => ({
+    row,
+    cellLines: widths.map((cellWidth, column) => {
+      const cell = row.cells[column];
+      return cell ? wrapSpans(cell.spans, size, cellWidth - 2 * pad, { bold: row.header }) : [];
+    }),
+  }));
+  const header: TableEntry[] = wrapped
+    .filter((entry) => entry.row.header)
+    .map((entry) => ({ ...entry, height: heightOf(Math.max(...entry.cellLines.map((lines) => lines.length))), ends: true }));
+  const headerHeight = header.reduce((total, entry) => total + entry.height, 0);
+  // Lines that fit one page under the repeated header (at least one).
+  const room = LETTER.height - 2 * MARGIN - headerHeight;
+  const perPage = Math.max(1, Math.floor((room - 2 * pad + 2) / leading));
+
+  const laid: TableEntry[] = [];
+  for (const entry of wrapped) {
+    if (entry.row.header) {
+      laid.push(header.find((head) => head.row === entry.row)!);
+      continue;
+    }
+    const tallest = Math.max(1, ...entry.cellLines.map((lines) => lines.length));
+    for (let start = 0; start < tallest; start += perPage) {
+      const cellLines = entry.cellLines.map((lines) => lines.slice(start, start + perPage));
+      const count = Math.min(perPage, tallest - start);
+      laid.push({ row: entry.row, cellLines, height: heightOf(count), ends: start + perPage >= tallest });
+    }
+  }
+  const keep = headerHeight + (laid.find((entry) => !entry.row.header)?.height ?? 0);
+  return { widths, laid, header, keep, pad, size, leading };
 }
 
 /**
@@ -711,6 +882,8 @@ export interface PlanPdfInput {
   map?: string;
   /** A short line under the generated title, e.g. the game system. */
   subtitle?: string;
+  /** The plan's identity, recorded in the PDF so the store can recognize its own printout. */
+  slug?: string;
 }
 
 export interface PlanPdf {
@@ -718,20 +891,37 @@ export interface PlanPdf {
   pages: number;
 }
 
-/** Marks a PDF as Scribe's, so the store only ever replaces its own printouts. */
-export const PDF_CREATOR_MARKER = "/Creator (Scribe)";
+const CREATOR = "/Creator (Scribe)";
+/** Custom Info key naming the plan a PDF prints. */
+const PLAN_KEY = "/ScribePlan";
+
+/**
+ * Whether `pdf` (a file's text) is Scribe's printout of the plan `slug`: its
+ * trailer's Info dictionary must name Scribe as creator and carry the plan's
+ * `/ScribePlan` key — the PDF counterpart of a map file's `plan:` marker.
+ */
+export function isScribePlanPdf(pdf: string, slug: string): boolean {
+  const info = [...pdf.matchAll(/trailer\s*<<[^]*?\/Info (\d+) 0 R/g)].at(-1)?.[1];
+  if (info === undefined) return false;
+  const dict = new RegExp(`(?:^|\\n)${info} 0 obj\\s*(<<[^]*?>>)\\s*endobj`).exec(pdf)?.[1];
+  return dict !== undefined && dict.includes(CREATOR) && dict.includes(`${PLAN_KEY} ${pdfString(toWinAnsi(slug))}`);
+}
+
+/** `text` cut to `width`, ending in an ellipsis when anything was cut. */
+function fitText(text: string, font: FontId, size: number, width: number): string {
+  if (textWidth(text, font, size) <= width) return text;
+  let cut = text;
+  while (cut !== "" && textWidth(cut.trimEnd() + "\x85", font, size) > width) cut = cut.slice(0, -1);
+  return cut.trimEnd() + "\x85";
+}
 
 export function renderPlanPdf(input: PlanPdfInput): PlanPdf {
   const layout = new Layout();
   const width = LETTER.width - 2 * MARGIN;
   const blocks = parseMarkdown(input.body);
   if (blocks[0]?.kind !== "heading" || blocks[0].level !== 1) {
-    layout.heading(1, [{ text: input.title, bold: true, italic: false, code: false }], MARGIN, width);
-    if (input.subtitle) {
-      layout.paragraph([{ text: input.subtitle, bold: false, italic: false, code: false }], MARGIN, width, {
-        gray: MUTED,
-      });
-    }
+    layout.heading(1, [plain(input.title)], MARGIN, width);
+    if (input.subtitle) layout.paragraph([plain(input.subtitle)], MARGIN, width, { gray: MUTED });
     layout.space(6);
   }
   layout.blocks(blocks, MARGIN, width);
@@ -739,18 +929,20 @@ export function renderPlanPdf(input: PlanPdfInput): PlanPdf {
   const pages = [...layout.pages];
   if (input.map && input.map.trim() !== "") pages.push(mapPage(input.map));
 
-  const footerTitle = toWinAnsi(input.title);
   pages.forEach((page, index) => {
-    const label = `${footerTitle}  \x95  Page ${index + 1} of ${pages.length}`;
     const size = 8;
+    const suffix = `  \x95  Page ${index + 1} of ${pages.length}`;
+    // A long title is cut to fit, so the page number always shows.
+    const room = page.width - 2 * MARGIN - textWidth(suffix, "regular", size);
+    const label = fitText(toWinAnsi(input.title), "regular", size, room) + suffix;
     const y = page.width > page.height ? 16 : FOOTER_Y;
     drawText(page, (page.width - textWidth(label, "regular", size)) / 2, y, "regular", size, label, MUTED);
   });
-  return { bytes: serialize(pages, input.title), pages: pages.length };
+  return { bytes: serialize(pages, input.title, input.slug ?? ""), pages: pages.length };
 }
 
 /** Writes pages as a PDF 1.4 file. Everything is 7-bit, so offsets are char counts. */
-function serialize(pages: Page[], title: string): Uint8Array {
+function serialize(pages: Page[], title: string, slug: string): Uint8Array {
   const fontIds = Object.keys(FONTS) as FontId[];
   // 1 catalog, 2 pages, 3 info, then fonts, then a page + contents pair each.
   const fontBase = 4;
@@ -759,7 +951,9 @@ function serialize(pages: Page[], title: string): Uint8Array {
   objects[1] = "<< /Type /Catalog /Pages 2 0 R >>";
   const kids = pages.map((_, index) => `${pageBase + index * 2} 0 R`).join(" ");
   objects[2] = `<< /Type /Pages /Kids [${kids}] /Count ${pages.length} >>`;
-  objects[3] = `<< /Title ${pdfUnicodeString(title)} ${PDF_CREATOR_MARKER} /Producer (Scribe) >>`;
+  objects[3] =
+    `<< /Title ${pdfUnicodeString(title)} ${CREATOR} /Producer (Scribe) ` +
+    `${PLAN_KEY} ${pdfString(toWinAnsi(slug))} >>`;
   const fontResources = fontIds
     .map((id, index) => {
       objects[fontBase + index] =
