@@ -60,8 +60,8 @@ describe("/save", () => {
     });
   });
 
-  test("lists before /map", () => {
-    expect(oneshotCommands(dir, { current: null }).map((command) => command.name)).toEqual(["save", "map"]);
+  test("lists before /map and /pdf", () => {
+    expect(oneshotCommands(dir, { current: null }).map((command) => command.name)).toEqual(["save", "map", "pdf"]);
   });
 });
 
@@ -96,5 +96,45 @@ describe("/map", () => {
     const result = await runMap(active);
     expect(result.sent).toEqual([]);
     expect(result.notices).toEqual([{ text: '"Abbey" is no longer in the one-shots folder.', tone: "danger" }]);
+  });
+});
+
+describe("/pdf", () => {
+  test("saves the PDF beside the open plan without a model turn", async () => {
+    await saveOneshot(dir, { title: "Abbey", content: "## Hook\n\nBells at midnight." });
+    const result = await runCommand("pdf", { current: await findOneshot(dir, "abbey") });
+    expect(result).toEqual({
+      sent: [],
+      notices: [{ text: `Saved a PDF to ${join(dir, "abbey.pdf")} (1 page).`, tone: undefined }],
+    });
+    expect(await Bun.file(join(dir, "abbey.pdf")).text()).toStartWith("%PDF-1.4");
+  });
+
+  test("says to save first when no plan is active", async () => {
+    expect(await runCommand("pdf", { current: null })).toEqual({
+      sent: [],
+      notices: [{ text: "Save the plan first — /pdf prints the saved plan.", tone: undefined }],
+    });
+  });
+
+  test("reports a plan deleted outside the app", async () => {
+    const path = await saveOneshot(dir, { title: "Abbey", content: "plan" });
+    const active: ActiveOneshot = { current: await findOneshot(dir, "abbey") };
+    await unlink(path);
+    expect((await runCommand("pdf", active)).notices).toEqual([
+      { text: '"Abbey" is no longer in the one-shots folder.', tone: "danger" },
+    ]);
+  });
+
+  test("reports a file in the way as a danger notice", async () => {
+    await saveOneshot(dir, { title: "Abbey", content: "plan" });
+    await Bun.write(join(dir, "abbey.pdf"), "not ours");
+    const result = await runCommand("pdf", { current: await findOneshot(dir, "abbey") });
+    expect(result.notices).toEqual([
+      {
+        text: "Couldn't save the PDF: abbey.pdf already exists and wasn't made by Scribe; rename or move it to export a PDF",
+        tone: "danger",
+      },
+    ]);
   });
 });

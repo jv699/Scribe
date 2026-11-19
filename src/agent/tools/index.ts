@@ -2,6 +2,7 @@
 import { appendCampaignSummaryTool } from "./append-campaign-summary.ts";
 import { askUserTool } from "./ask-user.ts";
 import { drawMapTool } from "./draw-map.ts";
+import { exportPdfTool } from "./export-pdf.ts";
 import { listSessionsTool } from "./list-sessions.ts";
 import { listOneshotsTool } from "./list-oneshots.ts";
 import { listSourcesTool } from "./list-sources.ts";
@@ -26,6 +27,7 @@ export const registry = {
   read_oneshot: readOneshotTool,
   update_oneshot: updateOneshotTool,
   draw_map: drawMapTool,
+  export_pdf: exportPdfTool,
   ask_user: askUserTool,
   list_sources: listSourcesTool,
   search_sources: searchSourcesTool,

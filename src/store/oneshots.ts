@@ -1,5 +1,6 @@
 import { basename, dirname, join } from "node:path";
 import { mkdir, readdir } from "node:fs/promises";
+import { PDF_CREATOR_MARKER } from "../pdf.ts";
 import { parseFrontmatter, serializeFrontmatter, updateFrontmatterFile } from "./frontmatter.ts";
 import { slugify, today } from "./naming.ts";
 import { atomicReplaceRegularFile, createUniqueMarkdown, readRegularFileNoFollow } from "./safe-files.ts";
@@ -109,6 +110,44 @@ export async function writeOneshotMap(saved: SavedOneshot, title: string, map: s
   }
   const content = serializeFrontmatter({ title, plan: saved.slug, updated: today() }, `\`\`\`text\n${map}\n\`\`\`\n`);
   if (!(await atomicReplaceRegularFile(path, content))) throw new Error("the one-shots folder is not a directory");
+  return path;
+}
+
+/**
+ * The plan's map page, if `<slug>.map.md` is this plan's map (by its `plan:`
+ * marker): the fenced text `writeOneshotMap` wrote, or null.
+ */
+export async function readOneshotMap(saved: SavedOneshot): Promise<string | null> {
+  const path = join(dirname(saved.path), `${saved.slug}${ONESHOT_MAP_SUFFIX}`);
+  let content: string;
+  try {
+    content = await readRegularFileNoFollow(path);
+  } catch {
+    return null;
+  }
+  const { data, body } = parseFrontmatter(content);
+  if (!isOneshotMap(basename(path), data)) return null;
+  const fenced = /^```[^\n]*\n([\s\S]*?)\n```/m.exec(body);
+  return fenced ? fenced[1]! : null;
+}
+
+/**
+ * A plan's printable copy lives beside it as `<slug>.pdf`. Like the map, it
+ * is only ever replaced when it is Scribe's own: a PDF the user put there
+ * under that name is refused rather than overwritten.
+ */
+export async function writeOneshotPdf(saved: SavedOneshot, bytes: Uint8Array): Promise<string> {
+  const path = join(dirname(saved.path), `${saved.slug}.pdf`);
+  let existing: string | null = null;
+  try {
+    existing = await readRegularFileNoFollow(path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") existing = "";
+  }
+  if (existing !== null && !existing.includes(PDF_CREATOR_MARKER)) {
+    throw new Error(`${basename(path)} already exists and wasn't made by Scribe; rename or move it to export a PDF`);
+  }
+  if (!(await atomicReplaceRegularFile(path, bytes))) throw new Error("the one-shots folder is not a directory");
   return path;
 }
 
