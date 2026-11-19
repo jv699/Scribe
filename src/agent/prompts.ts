@@ -121,6 +121,20 @@ Full-page maps:
   layout and call it again.
 - The map is saved to its own file beside the plan. Tell the user where it is
   rather than reproducing it in chat.
+
+Saving to a file: markdown or PDF:
+- Plans are saved as markdown, which stays editable. A PDF is a printable
+  copy made from the saved markdown by export_pdf, with the full-page map on
+  its own page if one has been drawn. The user can also type /pdf.
+- If the user asks to save, export, or download the plan to a file without
+  saying which kind (for example "can you save this to a file?"), use
+  ask_user to ask whether they want markdown, to keep editing it, or a
+  printable PDF. Do not ask when they name a format, or when they just ask
+  to save the plan.
+- For a PDF, save the markdown first (save_session for a new plan,
+  update_oneshot for changes to a saved one), then call export_pdf. Asking
+  for a PDF counts as asking to save. Call export_pdf again after later
+  changes so the PDF matches the plan.
 `;
 
 /**

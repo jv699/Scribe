@@ -578,11 +578,75 @@ describe("saved one-shot tools", () => {
   });
 
   test("the saved-document tools are granted only to the one-shot agent", () => {
-    const names = ["list_oneshots", "read_oneshot", "update_oneshot", "draw_map"];
+    const names = ["list_oneshots", "read_oneshot", "update_oneshot", "draw_map", "export_pdf"];
     expect(grantedNames("oneshot")).toEqual(expect.arrayContaining(names));
     for (const agent of ["planning", "report"] as const) {
       for (const name of names) expect(grantedNames(agent)).not.toContain(name);
     }
+  });
+});
+
+describe("export_pdf tool", () => {
+  const schematic = "## Map\n\n```text\n[1 Gate]---[2 Hall]\n```\n\n### 1. Gate\n\n### 2. Hall";
+  const layout = {
+    title: "Abbey",
+    locations: [
+      { id: 1, name: "Gate", column: 1, row: 1 },
+      { id: 2, name: "Hall", column: 2, row: 1 },
+    ],
+    connections: [{ from: 1, to: 2, type: "door" }],
+  };
+
+  function oneshotTools(active: ActiveOneshot) {
+    const tools = toolsFor("oneshot", { oneshotsDir, activeOneshot: active });
+    return (name: string) => tools.find((tool) => tool.definition.function.name === name)!;
+  }
+
+  test("needs a saved or opened plan", async () => {
+    const pick = oneshotTools({ current: null });
+    expect(await pick("export_pdf").execute({})).toBe(
+      "(no PDF made: save the plan with save_session, or open one with read_oneshot, first)",
+    );
+    expect(await readdir(oneshotsDir).catch(() => [])).toEqual([]);
+  });
+
+  test("writes <slug>.pdf beside the plan, adding the map page once one is drawn", async () => {
+    const pick = oneshotTools({ current: null });
+    await pick("save_session").execute({ title: "Abbey", content: schematic });
+
+    expect(await pick("export_pdf").execute({})).toBe(
+      `Saved a PDF of "Abbey" to ${join(oneshotsDir, "abbey.pdf")} (1 page). Tell the user where it is.`,
+    );
+    const pdf = await readFile(join(oneshotsDir, "abbey.pdf"), "latin1");
+    expect(pdf).toStartWith("%PDF-1.4");
+
+    await pick("draw_map").execute(layout);
+    expect(String(await pick("export_pdf").execute({}))).toContain("(2 pages, including the map)");
+    expect((await readdir(oneshotsDir)).sort()).toEqual(["abbey.map.md", "abbey.md", "abbey.pdf"]);
+  });
+
+  test("won't replace a PDF Scribe didn't make", async () => {
+    await saveOneshot(oneshotsDir, { title: "Abbey", content: "plan" });
+    await writeFile(join(oneshotsDir, "abbey.pdf"), "%PDF-1.7 the user's own scan", "latin1");
+    const pick = oneshotTools({ current: null });
+    await pick("read_oneshot").execute({ document: "abbey" });
+
+    expect(await pick("export_pdf").execute({})).toBe(
+      "(no PDF made: abbey.pdf already exists and wasn't made by Scribe; rename or move it to export a PDF)",
+    );
+    expect(await readFile(join(oneshotsDir, "abbey.pdf"), "latin1")).toBe("%PDF-1.7 the user's own scan");
+  });
+
+  test("prints the plan as it is on disk", async () => {
+    await saveOneshot(oneshotsDir, { title: "Abbey", content: "Old text." });
+    const pick = oneshotTools({ current: null });
+    await pick("read_oneshot").execute({ document: "abbey" });
+    await writeFile(join(oneshotsDir, "abbey.md"), "---\ntitle: Abbey\n---\nEdited outside.", "utf8");
+
+    await pick("export_pdf").execute({});
+    const pdf = await readFile(join(oneshotsDir, "abbey.pdf"), "latin1");
+    expect(pdf).toContain("(Edited outside.)");
+    expect(pdf).not.toContain("Old text");
   });
 });
 
@@ -911,7 +975,7 @@ describe("agent gateway", () => {
       toolsFor("oneshot", { oneshotsDir, activeOneshot: { current: null } }).map(
         (t) => t.definition.function.name,
       ),
-    ).toEqual(["save_session", "list_oneshots", "read_oneshot", "update_oneshot", "draw_map"]);
+    ).toEqual(["save_session", "list_oneshots", "read_oneshot", "update_oneshot", "draw_map", "export_pdf"]);
     // Declines without a dir — plain streaming remains the fallback.
     expect(toolsFor("oneshot", {})).toEqual([]);
     expect(toolsFor("oneshot", { campaign })).toEqual([]);

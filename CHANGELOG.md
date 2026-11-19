@@ -6,6 +6,19 @@ layout and config format may still change between minor versions.
 
 ## Unreleased
 
+### Printable PDFs
+
+- `/pdf` in the Drafting Table saves a print-ready US Letter PDF beside the
+  saved plan (`<plan>.pdf`). Headings, lists, checkboxes, tables, and the
+  `## Map` schematic keep their layout, and a drawn full-page map gets its
+  own landscape page sized to fit, so it no longer wraps or breaks the way
+  it does in online converters.
+- Asking Scribe to "save this to a file" without naming a format now gets a
+  question: markdown to keep editing, or a printable PDF. Asking for a PDF
+  saves the markdown plan too, which stays the real copy.
+- Scribe only ever replaces PDFs it made; a PDF of your own with the same
+  name is left alone.
+
 ### ScribeBench
 
 - A new main-menu destination for comparing models: line up several models

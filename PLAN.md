@@ -219,6 +219,12 @@ exist.
   (which has save/continue tools and `ask_user` today). Plan export shipped as
   `save_session`: the Drafting Table saves a one-shot to the configured
   one-shots directory, only on the user's explicit request.
+- **PDF export for campaign sessions.** `/pdf` and `export_pdf` print
+  Drafting Table plans only today (`src/pdf.ts` → `<slug>.pdf`). Session notes
+  would need a session-scoped PDF beside `sessions/00N-slug.md`, a
+  planning-agent variant of the tool that resolves the session by identity,
+  and `/pdf` passed to the workspace's session chat; the renderer needs no
+  change.
 - File-watching for external edits to campaign files while the app is open.
 - **Full-page maps for campaign sessions.** `draw_map` and `/map` are
   Drafting Table only today. Bringing them to campaign sessions needs: the
