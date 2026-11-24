@@ -23,7 +23,9 @@ import { loadChatLog, saveChatLog } from "./store/chat-log.ts";
 import { indexSources } from "./store/sources.ts";
 import { campaignCompletions, oneshotCompletions } from "./completions.ts";
 import { oneshotCommands } from "./commands.ts";
-import { cliExit } from "./cli.ts";
+import { cliExit, logsDir } from "./cli.ts";
+import { configureLogging, log, logError, logLevelFrom } from "./log.ts";
+import { VERSION } from "./version.ts";
 
 // Answer --help/--version and refuse non-terminals before taking over the screen.
 const exit = cliExit(Bun.argv.slice(2), process.stdout.isTTY === true && process.stdin.isTTY === true);
@@ -31,6 +33,8 @@ if (exit) {
   (exit.exitCode === 0 ? console.log : console.error)(exit.output);
   process.exit(exit.exitCode);
 }
+
+const logFile = configureLogging({ level: logLevelFrom(Bun.argv.slice(2), process.env), dir: logsDir() });
 
 const renderer = await createCliRenderer({
   // Chat requires a second Ctrl+C to quit; other screens quit immediately.
@@ -41,15 +45,57 @@ renderer.setBackgroundColor(theme.background);
 renderer.setTerminalTitle("Scribe");
 
 let settings = await loadSettings();
+logStart();
+
+/** What a bug report needs to know about this setup: names of key variables and whether they are set, never keys. */
+function logStart(): void {
+  if (!logFile) return;
+  const isSet = (name: string | undefined): boolean => !!name && !!process.env[name];
+  const namesKeyEnv = settings.namesApiKeyEnv ?? DEFAULT_NAMES_KEY_ENV;
+  log("app.start", {
+    version: VERSION,
+    bun: Bun.version,
+    platform: `${process.platform}-${process.arch}`,
+    terminal: `${renderer.width}x${renderer.height}`,
+    baseUrl: settings.baseUrl ?? DEFAULT_BASE_URL,
+    model: settings.model ?? DEFAULT_MODEL,
+    apiKeyEnv: settings.apiKeyEnv ?? null,
+    apiKeySet: isSet(settings.apiKeyEnv),
+    namesKeyEnv,
+    namesKeySet: isSet(namesKeyEnv),
+    campaignsDir: settings.campaignsDir,
+    oneshotsDir: settings.oneshotsDir,
+    sourcesDir: settings.sourcesDir,
+  });
+  // A crash would otherwise vanish with the screen. Record it, give the
+  // terminal back, and exit as the crash would have.
+  const crash = (kind: string) => (error: unknown) => {
+    logError(kind, error, { stack: error instanceof Error ? error.stack : undefined });
+    try {
+      renderer.destroy();
+    } catch {
+      // Already torn down; the error still needs printing.
+    }
+    console.error(error);
+    console.error(`Debug log: ${logFile}`);
+    process.exit(1);
+  };
+  process.on("uncaughtException", crash("app.crash"));
+  process.on("unhandledRejection", crash("app.unhandled-rejection"));
+}
 
 // Warm the cache without letting indexing failures block startup.
-void indexSources(settings.sourcesDir).catch(() => {});
+void indexSources(settings.sourcesDir).catch((error: unknown) => logError("sources.index-failed", error));
 
 let currentScreen: Screen | null = null;
 
 function quitApp(): void {
   currentScreen?.dispose?.();
   renderer.destroy();
+  if (logFile) {
+    log("app.quit");
+    console.log(`Debug log: ${logFile}`);
+  }
   process.exit(0);
 }
 

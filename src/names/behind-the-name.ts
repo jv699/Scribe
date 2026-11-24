@@ -12,6 +12,7 @@
  * 4,000 a day. Requests are spaced to respect the first; the others are far
  * beyond what planning uses, and a refusal falls back to the offline generator.
  */
+import { log, registerSecret, since } from "../log.ts";
 import type { NameGender } from "./generator.ts";
 
 export const DEFAULT_NAMES_KEY_ENV = "BEHINDTHENAME_API_KEY";
@@ -93,6 +94,7 @@ export function parseRandomNames(body: unknown, request: RandomNamesRequest): Ra
 }
 
 export function makeBehindTheNameClient(options: BehindTheNameOptions): BehindTheNameClient {
+  registerSecret(options.apiKey);
   const fetchImpl: FetchLike = options.fetch ?? ((url, init) => fetch(url, init));
   const minIntervalMs = options.minIntervalMs ?? MIN_INTERVAL_MS;
 
@@ -108,14 +110,39 @@ export function makeBehindTheNameClient(options: BehindTheNameOptions): BehindTh
       if (request.surname) params.set("randomsurname", "yes");
 
       await waitForSlot(minIntervalMs);
+      // Everything in the request but the key, so a log shows exactly what was asked.
+      const asked = { usage: request.usage, number: params.get("number"), gender: params.get("gender") ?? "any", surname: request.surname };
+      const started = performance.now();
+      let response: Response;
       try {
-        const response = await fetchImpl(`${ENDPOINT}?${params}`, { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
-        if (!response.ok) return null;
-        return parseRandomNames(await response.json(), request);
-      } catch {
-        // Offline, timed out, or not JSON: all mean "use the generator".
+        response = await fetchImpl(`${ENDPOINT}?${params}`, { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+      } catch (error) {
+        // Offline or timed out: either way, use the generator.
+        const outcome = error instanceof Error && error.name === "TimeoutError" ? "timeout" : "unreachable";
+        log("names.btn", { ...asked, outcome, ms: since(started) });
         return null;
       }
+      let body: unknown;
+      try {
+        body = await response.json();
+      } catch {
+        log("names.btn", { ...asked, outcome: "not-json", status: response.status, ms: since(started) });
+        return null;
+      }
+      const result = response.ok ? parseRandomNames(body, request) : null;
+      // The raw names (public data, not campaign text) and Behind the Name's
+      // own error are what tell a wrong usage code or response shape apart.
+      const raw = body && typeof body === "object" ? (body as { names?: unknown; error?: unknown; error_code?: unknown }) : {};
+      log("names.btn", {
+        ...asked,
+        outcome: result ? "ok" : response.ok ? "unexpected-body" : "http-error",
+        status: response.status,
+        ms: since(started),
+        names: raw.names,
+        error: raw.error,
+        errorCode: raw.error_code,
+      });
+      return result;
     },
   };
 }

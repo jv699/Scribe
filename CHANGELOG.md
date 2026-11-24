@@ -6,6 +6,13 @@ layout and config format may still change between minor versions.
 
 ## Unreleased
 
+### Debug logs
+
+- `scribe --debug` (or `SCRIBE_DEBUG=1`) writes a log of model requests,
+  tool calls, name sources, and crashes to `~/.config/scribe/logs/`, one file
+  per day, kept for a week. It never holds API keys or campaign text;
+  `--debug=verbose` adds shortened tool arguments and results.
+
 ### Names
 
 - Scribe now asks a name generator for NPCs, places, taverns, and factions

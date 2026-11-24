@@ -4,6 +4,7 @@
  * Behind the Name can't answer. One service per chat, so it can remember what
  * it has already handed out and not offer the same name twice.
  */
+import { log } from "../log.ts";
 import { apiKeyFrom } from "../provider/openai.ts";
 import { makeBehindTheNameClient, MAX_PER_REQUEST, type BehindTheNameClient } from "./behind-the-name.ts";
 import type { Culture } from "./cultures.ts";
@@ -113,16 +114,33 @@ export function makeNameService(options: NameServiceOptions = {}): NameService {
     return names.slice(0, wanted);
   }
 
+  async function choose(request: NameRequest): Promise<NameBatch> {
+    const usage = request.culture.usage;
+    if (!usage) return offline(request, false, "no-usage");
+    // Behind the Name has people, not places.
+    if (request.kind === "place") return offline(request, false, "places");
+    if (!client) return offline(request, false, "no-key");
+    const names = await online(client, usage, request);
+    if (names === null) return offline(request, true);
+    return { names: remember(names), source: "behindthename", fellBack: false };
+  }
+
   return {
     async generate(request) {
-      const usage = request.culture.usage;
-      if (!usage) return offline(request, false, "no-usage");
-      // Behind the Name has people, not places.
-      if (request.kind === "place") return offline(request, false, "places");
-      if (!client) return offline(request, false, "no-key");
-      const names = await online(client, usage, request);
-      if (names === null) return offline(request, true);
-      return { names: remember(names), source: "behindthename", fellBack: false };
+      const batch = await choose(request);
+      log("names.batch", {
+        culture: request.culture.label,
+        kind: request.kind,
+        gender: request.gender,
+        surnames: request.surnames,
+        asked: request.count,
+        returned: batch.names.length,
+        source: batch.source,
+        style: batch.style,
+        fellBack: batch.fellBack,
+        skipped: batch.skipped,
+      });
+      return batch;
     },
     exclude(names) {
       for (const name of names) used.add(name.toLowerCase());

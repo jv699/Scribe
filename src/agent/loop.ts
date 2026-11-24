@@ -1,4 +1,5 @@
 import type { ChatMessage, ChatProvider, ToolCall, ToolDefinition, UsageInfo } from "../provider/types.ts";
+import { log, logContent, since } from "../log.ts";
 
 export interface AgentTool {
   definition: ToolDefinition;
@@ -65,7 +66,15 @@ export async function runAgent(
     const assistant: ChatMessage = { role: "assistant", content: "" };
     options.onMessage?.(assistant);
 
-    const { content, toolCalls } = await streamTurn(options, messages, toolDefs);
+    const turnStarted = performance.now();
+    const { content, toolCalls, usage } = await streamTurn(options, messages, toolDefs);
+    log("agent.turn", {
+      turn: turns + 1,
+      ms: since(turnStarted),
+      replyChars: content.length,
+      toolCalls: toolCalls.map((call) => call.function.name),
+      ...(usage ? { usage } : {}),
+    });
     // Assign because a mirroring caller may already hold the streamed content.
     assistant.content = content;
     if (toolCalls.length > 0) assistant.tool_calls = toolCalls;
@@ -82,10 +91,12 @@ export async function runAgent(
       if (!tool?.userDriven) userDrivenOnly = false;
       options.signal?.throwIfAborted();
       options.onTool?.(call.function.name);
+      const toolStarted = performance.now();
       const result = tool
         ? await runTool(tool, call)
         : `Unknown tool: ${call.function.name}`;
       options.onToolEnd?.();
+      logTool(call, result, since(toolStarted), tool !== undefined);
       const toolMessage: ChatMessage = { role: "tool", tool_call_id: call.id, content: result };
       messages.push(toolMessage);
       options.onMessage?.(toolMessage);
@@ -93,7 +104,34 @@ export async function runAgent(
     if (!userDrivenOnly) spent++;
   }
 
+  log("agent.limit", { maxIterations });
   throw new Error(`Agent exceeded ${maxIterations} tool iterations`);
+}
+
+/**
+ * One line per tool call. By default only what can't hold campaign text: the
+ * tool, its argument names, sizes, and whether it failed (with Scribe's own
+ * error wording). Verbose logging adds the shortened arguments and result.
+ */
+function logTool(call: ToolCall, result: string, ms: number, known: boolean): void {
+  let argNames: string[] = [];
+  try {
+    const parsed = call.function.arguments.trim() === "" ? {} : (JSON.parse(call.function.arguments) as unknown);
+    if (parsed && typeof parsed === "object") argNames = Object.keys(parsed);
+  } catch {
+    argNames = ["(unparseable)"];
+  }
+  const failed = !known || result.startsWith("Tool error:");
+  log("agent.tool", {
+    tool: call.function.name,
+    ms,
+    args: argNames,
+    argsChars: call.function.arguments.length,
+    resultChars: result.length,
+    failed,
+    ...(failed ? { error: result } : {}),
+    ...(logContent() ? { arguments: call.function.arguments, result } : {}),
+  });
 }
 
 interface Accum {
@@ -106,8 +144,9 @@ async function streamTurn(
   options: AgentOptions,
   messages: ChatMessage[],
   tools: ToolDefinition[],
-): Promise<{ content: string; toolCalls: ToolCall[] }> {
+): Promise<{ content: string; toolCalls: ToolCall[]; usage?: UsageInfo }> {
   let content = "";
+  let usage: UsageInfo | undefined;
   const acc = new Map<number, Accum>();
 
   for await (const event of options.provider.streamChat(messages, {
@@ -120,6 +159,7 @@ async function streamTurn(
       continue;
     }
     if (event.type === "usage") {
+      usage = event.usage;
       options.onUsage?.(event.usage);
       continue;
     }
@@ -135,7 +175,7 @@ async function streamTurn(
     .filter((c) => c.id !== "" && c.name !== "")
     .map((c) => ({ id: c.id, type: "function", function: { name: c.name, arguments: c.args } }));
 
-  return { content, toolCalls };
+  return usage ? { content, toolCalls, usage } : { content, toolCalls };
 }
 
 async function runTool(tool: AgentTool, call: ToolCall): Promise<string> {
