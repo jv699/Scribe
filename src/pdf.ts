@@ -244,9 +244,11 @@ function unmarkBreaks(text: string): string {
 
 /**
  * Marks hard line breaks (two trailing spaces or a backslash before a line
- * that continues the paragraph), outside fenced code. Lines with a pipe are
- * left alone so a table row never grows a stray cell, and headings can't
- * hold a break anyway. Indented code is fixed up by `unmarkBreaks`.
+ * that continues the paragraph), outside fenced code. Lines with a pipe never
+ * get a break, so a table row can't grow a stray cell; their trailing
+ * whitespace is dropped instead, because Bun 1.4.2 stops reading a table
+ * whose lines end in spaces (1.4.4 doesn't). Headings can't hold a break
+ * anyway. Indented code is fixed up by `unmarkBreaks`.
  */
 function markHardBreaks(source: string): string {
   const lines = source.split("\n");
@@ -264,8 +266,9 @@ function markHardBreaks(source: string): string {
         fence = { char: fenceMatch[1]![0]!, length: fenceMatch[1]!.length };
         return line;
       }
+      if (line.includes("|")) return line.trimEnd();
       const next = lines[index + 1];
-      if (next === undefined || next.trim() === "" || line.trim() === "" || line.includes("|") || /^ {0,3}#/.test(line)) {
+      if (next === undefined || next.trim() === "" || line.trim() === "" || /^ {0,3}#/.test(line)) {
         return line;
       }
       const backslashes = /\\+$/.exec(line)?.[0].length ?? 0;

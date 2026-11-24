@@ -279,13 +279,13 @@ describe("renderPlanPdf", () => {
 
     expect(parseMarkdown("```\na  \nb\\\nc\n```")).toEqual([{ kind: "code", text: "a  \nb\\\nc" }]);
     expect(parseMarkdown("    a  \n    b")).toEqual([{ kind: "code", text: "a  \nb" }]);
-    // Trailing spaces on table lines must not be marked as breaks. Compare
-    // against the same table without them rather than a fixed tree: Bun
-    // versions disagree on edge cases like a one-column table (1.4.2 reads it
-    // as a paragraph, 1.4.4 as a table), and that's the parser's call.
+    // Trailing spaces on table lines are never breaks, and are dropped: Bun
+    // 1.4.2 (CI's version) reads a table whose lines end in spaces as a
+    // paragraph, while 1.4.4 reads it as a table.
     for (const table of ["| A |\n|---|\n| 1 |\n", "| A | B |\n|---|---|\n| 1 | 2 |\n"]) {
-      const trailing = table.replaceAll("\n", "  \n");
-      expect(parseMarkdown(trailing)).toEqual(parseMarkdown(table));
+      const trailing = parseMarkdown(table.replaceAll("\n", "  \n"));
+      expect(trailing).toEqual(parseMarkdown(table));
+      expect(trailing[0]?.kind).toBe("table");
     }
   });
 
