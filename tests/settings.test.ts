@@ -134,7 +134,7 @@ describe("settings screen", () => {
 
     await keys.typeText("https://ollama.local/v1", 5); // base URL
     await keys.pressKeys(["TAB"], 20); // -> key
-    await keys.pressKeys(["TAB", "TAB", "TAB", "TAB", "TAB", "TAB"], 20); // -> model, dir, one-shots, sources, bench, Save
+    await keys.pressKeys(Array(7).fill("TAB"), 20); // -> model, dir, one-shots, sources, bench, names key, Save
     keys.pressEnter();
     await wait();
 
@@ -154,16 +154,56 @@ describe("settings screen", () => {
     await keys.pressKeys(Array(6).fill("TAB"), 10); // -> bench
     const bench = settingsInputs().find((input) => input.focused)!;
     bench.value = "/tmp/bench";
-    await keys.pressKeys(["TAB"], 10); // -> Save
+    await keys.pressKeys(["TAB", "TAB"], 10); // -> names key -> Save
     keys.pressEnter();
     await wait();
     expect(saved?.benchDir).toBe("/tmp/bench");
   });
 
+  test("the names key variable shows its default and saves an edit", async () => {
+    await open({ campaignsDir: "/tmp/x", oneshotsDir: "/tmp/o", sourcesDir: "/tmp/s" });
+    expect(captureCharFrame()).toContain("BEHINDTHENAME_API_KEY");
+
+    await keys.pressKeys(Array(7).fill("TAB"), 10); // -> names key
+    const names = settingsInputs().find((input) => input.focused)!;
+    names.value = "MY_NAMES_KEY";
+    await keys.pressKeys(["TAB"], 10); // -> Save
+    keys.pressEnter();
+    await wait();
+    expect(saved?.namesApiKeyEnv).toBe("MY_NAMES_KEY");
+  });
+
+  test("a blank names key variable saves as the default", async () => {
+    await open({ campaignsDir: "/tmp/x", oneshotsDir: "/tmp/o", sourcesDir: "/tmp/s", namesApiKeyEnv: "OLD_KEY" });
+    await keys.pressKeys(Array(7).fill("TAB"), 10); // -> names key
+    settingsInputs().find((input) => input.focused)!.value = "";
+    await keys.pressKeys(["TAB"], 10); // -> Save
+    keys.pressEnter();
+    await wait();
+    expect(saved).not.toBeNull();
+    expect(saved?.namesApiKeyEnv).toBeUndefined();
+  });
+
+  test("a names key pasted in place of its variable is refused and taken off the screen", async () => {
+    await open({ campaignsDir: "/tmp/x", oneshotsDir: "/tmp/o", sourcesDir: "/tmp/s" });
+    await keys.pressKeys(Array(7).fill("TAB"), 10); // -> names key
+    const names = settingsInputs().find((input) => input.focused)!;
+    names.value = "sk-abcdef1234567890abcdef1234567890";
+    await keys.pressKeys(["TAB"], 10); // -> Save
+    keys.pressEnter();
+    await wait();
+    await renderOnce();
+
+    expect(saved).toBeNull();
+    expect(names.value).toBe("");
+    expect(names.focused).toBe(true);
+    expect(captureCharFrame()).toContain("That looks like an API key");
+  });
+
   test("saving returns to the menu", async () => {
     await open({ campaignsDir: "/tmp/x", oneshotsDir: "/tmp/o", sourcesDir: "/tmp/s" });
     await keys.typeText("http://localhost:11434/v1", 5); // base URL
-    await keys.pressKeys(["TAB", "TAB", "TAB", "TAB", "TAB", "TAB", "TAB"], 20); // -> Save
+    await keys.pressKeys(Array(8).fill("TAB"), 20); // -> Save
     keys.pressEnter();
     await wait();
     expect(saved?.baseUrl).toBe("http://localhost:11434/v1");
@@ -174,7 +214,7 @@ describe("settings screen", () => {
     await open({ campaignsDir: "/tmp/x", oneshotsDir: "/tmp/o", sourcesDir: "/tmp/s" }, () => {
       throw new Error("disk full");
     });
-    await keys.pressKeys(Array(7).fill("TAB"), 10);
+    await keys.pressKeys(Array(8).fill("TAB"), 10);
     keys.pressEnter();
     await wait();
     await renderOnce();
@@ -192,7 +232,7 @@ describe("settings screen", () => {
       },
     );
 
-    await keys.pressKeys(["TAB", "TAB", "TAB", "TAB", "TAB", "TAB", "TAB"], 10);
+    await keys.pressKeys(Array(8).fill("TAB"), 10);
     keys.pressEnter();
     await wait(60);
     await renderOnce();
@@ -695,7 +735,7 @@ describe("settings screen", () => {
     const [, keyInput] = settingsInputs();
     keyInput!.value = "sk-proj-abc123DEF456ghi789";
 
-    await keys.pressKeys(["TAB", "TAB", "TAB", "TAB", "TAB", "TAB", "TAB"], 10); // -> Save
+    await keys.pressKeys(Array(8).fill("TAB"), 10); // -> Save
     keys.pressEnter();
     await wait();
     await renderOnce();
@@ -713,7 +753,7 @@ describe("settings screen", () => {
     const [, keyInput] = settingsInputs();
     keyInput!.value = "MY-KEY";
 
-    await keys.pressKeys(["TAB", "TAB", "TAB", "TAB", "TAB", "TAB", "TAB"], 10);
+    await keys.pressKeys(Array(8).fill("TAB"), 10);
     keys.pressEnter();
     await wait();
     await renderOnce();
@@ -742,7 +782,7 @@ describe("settings screen", () => {
     const dirInput = settingsInputs()[3]!;
     dirInput.value = "~Scribe";
 
-    await keys.pressKeys(Array(7).fill("TAB"), 10); // -> Save
+    await keys.pressKeys(Array(8).fill("TAB"), 10); // -> Save
     keys.pressEnter();
     await wait();
     await renderOnce();
@@ -758,7 +798,7 @@ describe("settings screen", () => {
     const dirInput = settingsInputs()[3]!;
     expect(dirInput.value).toBe("~/Scribe");
 
-    await keys.pressKeys(Array(7).fill("TAB"), 10);
+    await keys.pressKeys(Array(8).fill("TAB"), 10);
     keys.pressEnter();
     await wait();
     expect(saved?.campaignsDir).toBe(join(home, "Scribe"));
@@ -767,7 +807,7 @@ describe("settings screen", () => {
   test("a base URL without a scheme is refused", async () => {
     await open({ campaignsDir: "/tmp/x", oneshotsDir: "/tmp/o", sourcesDir: "/tmp/s" });
     await keys.typeText("api.example.com/v1", 5);
-    await keys.pressKeys(Array(7).fill("TAB"), 10);
+    await keys.pressKeys(Array(8).fill("TAB"), 10);
     keys.pressEnter();
     await wait();
     await renderOnce();
@@ -780,7 +820,7 @@ describe("settings screen", () => {
   describe("Test connection", () => {
     /** Tab from the base URL field to the Test connection button and press it. */
     async function pressTest(): Promise<void> {
-      await keys.pressKeys(Array(8).fill("TAB"), 10);
+      await keys.pressKeys(Array(9).fill("TAB"), 10);
       keys.pressEnter();
       await wait();
       await renderOnce();
@@ -1001,7 +1041,7 @@ describe("settings screen", () => {
         keys.pressKey("TAB"); // pick: a check starts
         await wait(20);
         settingsInputs()[0]!.value = "not a url"; // stale while in flight
-        await keys.pressKeys(Array(6).fill("TAB"), 10); // -> Test connection
+        await keys.pressKeys(Array(7).fill("TAB"), 10); // -> Test connection
         keys.pressEnter();
         await wait(250);
         await renderOnce();
@@ -1052,6 +1092,7 @@ describe("settings screen", () => {
     const lines = captureCharFrame().split("\n");
     const row = (text: string): number => lines.findIndex((line) => line.includes(text));
     expect(row("Sources directory")).toBeGreaterThan(row("Base URL"));
+    expect(row("Names key env var")).toBeGreaterThan(row("Bench directory"));
     // Buttons keep all three rows: border, label, border.
     expect(lines[row("Save") - 1]).toContain("┌");
     expect(lines[row("Save")]).toContain("│  Save  │");

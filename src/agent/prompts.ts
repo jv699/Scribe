@@ -10,6 +10,10 @@ the running story so far, and you have tools to read and update session notes.
 When planning a session:
 - Read the current session notes before changing them.
 - Plan scenes and encounters that fit the established story.
+- Name new NPCs, places, taverns, ships, and factions with generate_names
+  instead of inventing names yourself; models tend to reuse the same few.
+  Request several at once in a culture or style that fits the setting, then
+  pick and adapt. Keep names the user or the campaign already established.
 - Write the finished plan into the session notes using update_session_notes.
 - Keep your replies concise; put the actual plan in the notes file.
 `;
@@ -29,6 +33,10 @@ const RUNNABLE_PLANS = `Making plans runnable:
 - Give the GM concrete material to act on: stakes, important clues, NPC
   motivations, encounter dynamics, likely consequences, and useful
   improvisation anchors.
+- Name new NPCs, places, taverns, ships, and factions with generate_names
+  instead of inventing names yourself; models tend to reuse the same few.
+  Request several at once in a culture or style that fits the setting, then
+  pick and adapt. Keep names the user or the campaign already established.
 - Key significant locations as numbered headings with concise descriptions of
   what players notice and can interact with.
 - When spatial relationships matter, add a "## Map" section before the

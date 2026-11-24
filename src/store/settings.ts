@@ -15,6 +15,11 @@ export interface Settings {
   /** Name of the env var holding the API key — never the key itself. */
   apiKeyEnv?: string;
   /**
+   * Name of the env var holding a Behind the Name key, for real-world names.
+   * Unset means DEFAULT_NAMES_KEY_ENV; an unset variable means offline names.
+   */
+  namesApiKeyEnv?: string;
+  /**
    * Advanced, config-file only: path to a file replacing the built-in campaign
    * core prompt. Campaign context and the user's instructions still apply.
    */
@@ -34,6 +39,7 @@ const OPTIONAL_STRING_SETTINGS = [
   "baseUrl",
   "model",
   "apiKeyEnv",
+  "namesApiKeyEnv",
   "systemPromptOverride",
   "oneshotPromptOverride",
 ] as const satisfies readonly (keyof Settings)[];

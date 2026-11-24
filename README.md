@@ -88,6 +88,15 @@ export OPENAI_API_KEY=sk-...
 scribe
 ```
 
+**Optional: real-world names.** Scribe gives the agent a name generator so
+plans don't keep reusing the same handful of names. Fantasy styles (elvish,
+dwarvish, orcish, …) are generated offline. For real and historical cultures
+(Welsh, Japanese, Ancient Roman, Norse mythology, …), get a free key from
+[Behind the Name](https://www.behindthename.com/api/) and export it as
+`BEHINDTHENAME_API_KEY`, or name a different variable under **Names key env
+var** in Settings. Without a key, cultures close to an offline style (Irish,
+Icelandic, Italian, …) are generated in that style instead.
+
 ### 2. Run a campaign
 
 1. **Campaigns → create a campaign.** Give it a name and a system.

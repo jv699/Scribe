@@ -19,6 +19,7 @@ import { abbreviateHome, defaultConfigDir, expandHome, type Settings } from "../
 import { baseUrlProblem, checkProvider, keyVarProblem, looksLikeApiKey } from "../provider/check.ts";
 import { apiKeyFrom, DEFAULT_BASE_URL, listModelInfos } from "../provider/openai.ts";
 import { PROVIDER_PRESETS } from "../provider/presets.ts";
+import { DEFAULT_NAMES_KEY_ENV } from "../names/behind-the-name.ts";
 import type { Screen } from "./screen.ts";
 
 export interface SettingsScreenOptions {
@@ -42,6 +43,8 @@ export async function makeSettingsScreen(
     width: "100%",
     height: "100%",
     padding: 1,
+    // The status line is last and can wrap; the bottom row is its room, not padding.
+    paddingBottom: 0,
     flexDirection: "column",
   });
   const titleRow = new BoxRenderable(renderer, {
@@ -183,6 +186,12 @@ export async function makeSettingsScreen(
     "~/Scribe/Bench",
     "ScribeBench saves each run's prompt and results here. Changing it does not move them.",
   );
+  const namesKeyInput = addField(
+    "Names key env var",
+    options.settings.namesApiKeyEnv ?? "",
+    DEFAULT_NAMES_KEY_ENV,
+    "Optional: the variable with your Behind the Name key, for real-world names.",
+  );
 
   container.add(hint);
   // Last on the screen, so a long provider error can wrap without moving anything.
@@ -214,7 +223,7 @@ export async function makeSettingsScreen(
   showHintFor(testButton, "Sends a one-line message to the model using the values above, saved or not.");
   showHintFor(cancelButton, "Returns to the menu without saving.");
 
-  const inputs = [baseUrlInput, keyInput, modelInput, dirInput, oneshotsInput, sourcesInput, benchInput];
+  const inputs = [baseUrlInput, keyInput, modelInput, dirInput, oneshotsInput, sourcesInput, benchInput, namesKeyInput];
   const focusChain: Renderable[] = [...inputs, saveButton, testButton, cancelButton];
   // What is on disk: the baseline for "unsaved", and what a save builds on.
   const saved = options.settings;
@@ -251,17 +260,17 @@ export async function makeSettingsScreen(
     return dir;
   }
 
-  /** The key variable's name, or null after refusing one that can't be saved or used. */
-  function readKeyVar(): string | null {
-    const apiKeyEnv = keyInput.value.trim();
-    const problem = keyVarProblem(apiKeyEnv);
+  /** A key variable's name, or null after refusing one that can't be saved or used. */
+  function readKeyVar(input: InputRenderable = keyInput): string | null {
+    const name = input.value.trim();
+    const problem = keyVarProblem(name);
     if (problem) {
       // Take a pasted key off the screen too; it would only be refused again.
-      if (looksLikeApiKey(apiKeyEnv)) keyInput.value = "";
-      reject(keyInput, problem);
+      if (looksLikeApiKey(name)) input.value = "";
+      reject(input, problem);
       return null;
     }
-    return apiKeyEnv;
+    return name;
   }
 
   // A connection check sends the request a chat would make, with what is in
@@ -347,6 +356,8 @@ export async function makeSettingsScreen(
     if (sourcesDir === null) return;
     const benchDir = readDir(benchInput, "Bench");
     if (benchDir === null) return;
+    const namesApiKeyEnv = readKeyVar(namesKeyInput);
+    if (namesApiKeyEnv === null) return;
     const next: Settings = { ...saved, campaignsDir, oneshotsDir, sourcesDir, benchDir };
     if (baseUrl !== "") next.baseUrl = baseUrl;
     else delete next.baseUrl;
@@ -355,6 +366,9 @@ export async function makeSettingsScreen(
     else delete next.model;
     if (apiKeyEnv !== "") next.apiKeyEnv = apiKeyEnv;
     else delete next.apiKeyEnv;
+    // Blank means the default variable name, so only a different one is stored.
+    if (namesApiKeyEnv !== "") next.namesApiKeyEnv = namesApiKeyEnv;
+    else delete next.namesApiKeyEnv;
 
     saving = true;
     setStatus("Saving...", "info");
