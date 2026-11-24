@@ -279,11 +279,14 @@ describe("renderPlanPdf", () => {
 
     expect(parseMarkdown("```\na  \nb\\\nc\n```")).toEqual([{ kind: "code", text: "a  \nb\\\nc" }]);
     expect(parseMarkdown("    a  \n    b")).toEqual([{ kind: "code", text: "a  \nb" }]);
-    const [table] = parseMarkdown("| A |  \n|---|  \n| 1 |  \n");
-    expect(table).toEqual({ kind: "table", rows: [
-      { header: true, cells: [{ spans: [span("A")], align: "left" }] },
-      { header: false, cells: [{ spans: [span("1")], align: "left" }] },
-    ] });
+    // Trailing spaces on table lines must not be marked as breaks. Compare
+    // against the same table without them rather than a fixed tree: Bun
+    // versions disagree on edge cases like a one-column table (1.4.2 reads it
+    // as a paragraph, 1.4.4 as a table), and that's the parser's call.
+    for (const table of ["| A |\n|---|\n| 1 |\n", "| A | B |\n|---|---|\n| 1 | 2 |\n"]) {
+      const trailing = table.replaceAll("\n", "  \n");
+      expect(parseMarkdown(trailing)).toEqual(parseMarkdown(table));
+    }
   });
 
   test("cuts a long title in the footer so the page number stays on the page", () => {
