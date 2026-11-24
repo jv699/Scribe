@@ -5,7 +5,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { setupRenderer, wait } from "./helpers/renderer.ts";
 import { looksLikeApiKey } from "../src/provider/check.ts";
-import { makeSettingsScreen } from "../src/screens/settings.ts";
+import { HELP, HELP_WIDTH, makeSettingsScreen } from "../src/screens/settings.ts";
 import type { Screen } from "../src/screens/screen.ts";
 import type { Settings } from "../src/store/settings.ts";
 
@@ -1097,5 +1097,37 @@ describe("settings screen", () => {
     expect(lines[row("Save") - 1]).toContain("┌");
     expect(lines[row("Save")]).toContain("│  Save  │");
     expect(lines[row("Save") + 1]).toContain("└");
+  });
+
+  test("every help line fits the one-row hint at 80 columns", () => {
+    for (const [key, text] of Object.entries(HELP)) {
+      expect({ key, length: text.length }).toEqual({ key, length: Math.min(text.length, HELP_WIDTH) });
+    }
+  });
+
+  test("a two-line error at 80x24 leaves every row where it was", async () => {
+    renderer.destroy();
+    ({ renderer, keys, captureCharFrame, renderOnce } = await setupRenderer({ width: 80, height: 24 }));
+    const message = "The provider refused the request: " + "this explanation keeps going for a while. ".repeat(2);
+    expect(message.length).toBeGreaterThan(HELP_WIDTH);
+    await open({ campaignsDir: "/tmp/x", oneshotsDir: "/tmp/o", sourcesDir: "/tmp/s" }, () => {
+      throw new Error(message);
+    });
+    const labels = ["Base URL", "Model", "Campaigns directory", "Names key env var", "│  Save  │"];
+    const rows = (): number[] => {
+      const lines = captureCharFrame().split("\n");
+      return labels.map((label) => lines.findIndex((line) => line.includes(label)));
+    };
+    const before = rows();
+
+    await keys.pressKeys(Array(8).fill("TAB"), 10); // -> Save
+    keys.pressEnter();
+    await wait();
+    await renderOnce();
+
+    const frame = captureCharFrame();
+    expect(frame).toContain("The provider refused the request");
+    expect(frame).toContain("keeps going for a while.");
+    expect(rows()).toEqual(before);
   });
 });

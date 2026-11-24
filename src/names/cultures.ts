@@ -84,6 +84,8 @@ function normalize(text: string): string {
     .replace(/[^a-z\s-]/g, "")
     .replace(/[\s-]+/g, " ")
     .replace(/\b(names?|style|culture|people)\b/g, "")
+    // Again: a filler word in the middle leaves two spaces behind.
+    .replace(/\s+/g, " ")
     .trim();
 }
 

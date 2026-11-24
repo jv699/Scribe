@@ -12,6 +12,7 @@
  */
 import { cultureLabels, findCulture } from "../../names/cultures.ts";
 import type { NameGender, NameKind } from "../../names/generator.ts";
+import type { ChatMessage } from "../../provider/types.ts";
 import { boolArg, numberArg, stringArg } from "./shared.ts";
 import type { ToolSpec } from "./types.ts";
 
@@ -75,9 +76,16 @@ export const generateNamesTool: ToolSpec = {
         const batch = await names.generate({ culture, count, gender, kind, surnames });
 
         if (batch.source === "none") {
+          const what = kind === "place" ? "place names" : "names";
+          const why =
+            batch.skipped === "places"
+              ? "Behind the Name has only people's names"
+              : batch.skipped === "no-key"
+                ? "real-world names need a Behind the Name key, which isn't set"
+                : "Behind the Name didn't answer";
           return (
-            `(no ${culture.label} names are available right now: Behind the Name isn't reachable and there is no offline style for it. ` +
-            `Write ${culture.label} names yourself, varying them, or use a fantasy style.)`
+            `(no ${culture.label} ${what} available: ${why}, and there is no offline style for ${culture.label}. ` +
+            `Write them yourself, varying them, or use a fantasy style.)`
           );
         }
         if (batch.names.length === 0) return `(no new ${culture.label} names this time; call again or try a related culture)`;
@@ -96,3 +104,26 @@ export const generateNamesTool: ToolSpec = {
     };
   },
 };
+
+/**
+ * Every name earlier generate_names results in a conversation handed out, so
+ * a resumed chat can tell a fresh NameService what not to repeat. Results are
+ * found by call id, as the transcript finds ask_user's, and names are the
+ * result's "- " lines; notes in parentheses are not names.
+ */
+export function namesInConversation(messages: readonly ChatMessage[]): string[] {
+  const callIds = new Set<string>();
+  for (const message of messages) {
+    for (const call of message.tool_calls ?? []) {
+      if (call.function.name === generateNamesTool.name) callIds.add(call.id);
+    }
+  }
+  const names: string[] = [];
+  for (const message of messages) {
+    if (message.role !== "tool" || !message.tool_call_id || !callIds.has(message.tool_call_id)) continue;
+    for (const line of message.content.split("\n")) {
+      if (line.startsWith("- ")) names.push(line.slice(2).trim());
+    }
+  }
+  return names;
+}

@@ -14,7 +14,8 @@ import type { ChatProvider, ModelInfo } from "./provider/types.ts";
 import { toolsFor } from "./agent/agents.ts";
 import type { ActiveOneshot } from "./agent/tools/types.ts";
 import { makeAskChannel } from "./agent/ask.ts";
-import { makeNameService } from "./names/index.ts";
+import { makeNameService, type NameService } from "./names/index.ts";
+import { namesInConversation } from "./agent/tools/generate-names.ts";
 import { DEFAULT_NAMES_KEY_ENV } from "./names/behind-the-name.ts";
 import { buildOneshotSystemPrompt, buildPlanningSystemPrompt } from "./agent/context.ts";
 import type { Session } from "./store/sessions.ts";
@@ -147,7 +148,7 @@ function makeChatOptions(): { provider: ChatProvider; model: string; modelInfo: 
 }
 
 /** A chat's name source: Behind the Name when its key variable is set, the offline generator otherwise. */
-function makeNames(): ReturnType<typeof makeNameService> {
+function makeNames(): NameService {
   return makeNameService({ apiKeyEnv: settings.namesApiKeyEnv ?? DEFAULT_NAMES_KEY_ENV });
 }
 
@@ -221,7 +222,7 @@ async function makeCampaignSessionChat(
         }),
       };
     },
-    chatLog: makeChatLog(campaign, session),
+    chatLog: makeChatLog(campaign, session, names),
     ask,
     completions: campaignCompletions(campaign, settings.sourcesDir),
     isInputActive: host.isInputActive,
@@ -231,9 +232,14 @@ async function makeCampaignSessionChat(
   });
 }
 
-function makeChatLog(campaign: Campaign, session: Session): ChatLogStore {
+function makeChatLog(campaign: Campaign, session: Session, names: NameService): ChatLogStore {
   return {
-    load: () => loadChatLog(campaign.dir, session.number, "plan"),
+    load: async () => {
+      const messages = await loadChatLog(campaign.dir, session.number, "plan");
+      // A resumed chat still shouldn't offer names it already offered.
+      names.exclude(namesInConversation(messages));
+      return messages;
+    },
     save: (messages) => saveChatLog(campaign.dir, session.number, "plan", messages),
   };
 }

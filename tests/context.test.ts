@@ -122,6 +122,14 @@ describe("prompt assembly", () => {
     expect(planning).toContain("search_sources");
   });
 
+  test("only the planning prompt tells the model to use generate_names", async () => {
+    const report = await buildReportSystemPrompt(campaign, session, settings);
+    const planning = await buildPlanningSystemPrompt(campaign, session, settings);
+
+    expect(planning).toContain("generate_names");
+    expect(report).not.toContain("generate_names");
+  });
+
   test("one-shot prompt uses the one-shot core and its own instructions file", async () => {
     await writeConfigFile("instructions.md", "CAMPAIGN ONLY.\n");
     await writeConfigFile("oneshot-instructions.md", "Prefer four-hour adventures.\n");

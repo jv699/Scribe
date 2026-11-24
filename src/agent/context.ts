@@ -9,7 +9,7 @@ import { loadInstructions, loadOneshotInstructions, loadPromptOverride } from ".
 import { readSessionNotes, type Session } from "../store/sessions.ts";
 import type { Settings } from "../store/settings.ts";
 import { listSources } from "../store/sources.ts";
-import { CORE_BENCH_PROMPT, CORE_CAMPAIGN_PROMPT, CORE_ONESHOT_PROMPT } from "./prompts.ts";
+import { CORE_BENCH_PROMPT, CORE_CAMPAIGN_PROMPT, CORE_ONESHOT_PROMPT, NAMING_RULE } from "./prompts.ts";
 
 /** Omit the source section when no library is configured or indexed. */
 async function sourcesSection(sourcesDir: string | undefined): Promise<string> {
@@ -120,6 +120,7 @@ export async function buildPlanningSystemPrompt(
 You are planning session ${session.number} — "${session.title}".
 Its notes file is ${basename(session.path)}.
 
+${NAMING_RULE}
 Current notes:
 ${notes.trim() || "(empty)"}
 ${instructions}`;

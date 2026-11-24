@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { toolsFor } from "../src/agent/agents.ts";
-import { CORE_BENCH_PROMPT, CORE_CAMPAIGN_PROMPT, CORE_ONESHOT_PROMPT } from "../src/agent/prompts.ts";
-import { generateNamesTool, MAX_NAMES } from "../src/agent/tools/generate-names.ts";
+import { CORE_BENCH_PROMPT, CORE_CAMPAIGN_PROMPT, CORE_ONESHOT_PROMPT, NAMING_RULE } from "../src/agent/prompts.ts";
+import { generateNamesTool, MAX_NAMES, namesInConversation } from "../src/agent/tools/generate-names.ts";
+import type { ChatMessage } from "../src/provider/types.ts";
 import type { AgentTool } from "../src/agent/loop.ts";
 import {
   cleanName,
@@ -98,6 +99,9 @@ describe("cultures", () => {
     expect(findCulture("  dwarf names ")?.label).toBe("Dwarvish");
     expect(findCulture("Half-Orc")?.label).toBe("Orcish");
     expect(findCulture("viking")?.label).toBe("Scandinavian");
+    // A filler word in the middle doesn't leave a gap that breaks the match.
+    expect(findCulture("Fantasy style human")?.label).toBe("Common");
+    expect(findCulture("Norse  style   mythology")?.label).toBe("Norse Mythology");
     expect(findCulture("Klingon")).toBeNull();
   });
 
@@ -189,7 +193,7 @@ describe("name service", () => {
   test("without a key, a culture with no stand-in style has no source", async () => {
     const service = makeNameService({ client: null });
     const batch = await service.generate({ culture: japanese, count: 5, gender: "any", kind: "person", surnames: false });
-    expect(batch).toEqual({ names: [], source: "none", fellBack: false });
+    expect(batch).toEqual({ names: [], source: "none", fellBack: false, skipped: "no-key" });
   });
 
   test("an unset key variable means offline", async () => {
@@ -239,6 +243,14 @@ describe("name service", () => {
     const batch = await service.generate({ culture: welsh, count: 10, gender: "any", kind: "person", surnames: false });
     expect(batch.source).toBe("behindthename");
     expect(batch.names).toEqual(["Alys", "Bryn", "Cerys", "Dylan", "Elin", "Ffion"]);
+  });
+
+  test("exclude seeds the memory, as a resumed chat does", async () => {
+    const { client } = scriptedClient([{ given: ["Alys", "Bryn", "Cerys"] }]);
+    const service = makeNameService({ client });
+    service.exclude(["ALYS", "Bryn"]);
+    const batch = await service.generate({ culture: welsh, count: 3, gender: "any", kind: "person", surnames: false });
+    expect(batch.names).toEqual(["Cerys"]);
   });
 
   test("invented cultures and places never touch the network", async () => {
@@ -294,9 +306,36 @@ describe("generate_names tool", () => {
     expect(asked).toEqual([]);
   });
 
-  test("a culture with no source asks the model to write names itself", async () => {
-    const result = await tool(makeNameService({ client: null })).execute({ culture: "Japanese" });
-    expect(result).toContain("no Japanese names are available");
+  test("a culture with no source asks the model to write names itself, and says why", async () => {
+    const noKey = await tool(makeNameService({ client: null })).execute({ culture: "Japanese" });
+    expect(noKey).toContain("no Japanese names available");
+    expect(noKey).toContain("need a Behind the Name key, which isn't set");
+    expect(noKey).not.toContain("didn't answer");
+
+    const places = await tool(makeNameService({ client: scriptedClient([]).client })).execute({ culture: "French", kind: "place" });
+    expect(places).toContain("no French place names available");
+    expect(places).toContain("only people's names");
+
+    const failed = await tool(makeNameService({ client: scriptedClient([null]).client })).execute({ culture: "Japanese" });
+    expect(failed).toContain("Behind the Name didn't answer");
+  });
+
+  test("names handed out earlier are recovered from a saved conversation", () => {
+    const messages: ChatMessage[] = [
+      { role: "user", content: "Some Welsh NPCs please" },
+      {
+        role: "assistant",
+        content: "",
+        tool_calls: [
+          { id: "n1", type: "function", function: { name: "generate_names", arguments: "{\"culture\":\"Welsh\"}" } },
+          { id: "s1", type: "function", function: { name: "search_sources", arguments: "{}" } },
+        ],
+      },
+      { role: "tool", tool_call_id: "n1", content: "Welsh names from Behind the Name:\n- Alys\n- Bryn Morgan\n(2 of 8; call again for more.)" },
+      { role: "tool", tool_call_id: "s1", content: "- not a name, a search hit" },
+      { role: "assistant", content: "How about:\n- Cerys" },
+    ];
+    expect(namesInConversation(messages)).toEqual(["Alys", "Bryn Morgan"]);
   });
 
   test("count is clamped, and junk arguments fall back to defaults", async () => {
@@ -324,9 +363,9 @@ describe("generate_names tool", () => {
     expect(toolsFor("planning", {}).map((t) => t.definition.function.name)).not.toContain("generate_names");
   });
 
-  test("every core prompt that gets the tool tells the model to use it", () => {
-    for (const prompt of [CORE_CAMPAIGN_PROMPT, CORE_ONESHOT_PROMPT, CORE_BENCH_PROMPT]) {
-      expect(prompt).toContain("generate_names");
-    }
+  test("the cores with the tool tell the model to use it; the campaign core, shared with report, doesn't", () => {
+    expect(CORE_ONESHOT_PROMPT).toContain(NAMING_RULE);
+    expect(CORE_BENCH_PROMPT).toContain(NAMING_RULE);
+    expect(CORE_CAMPAIGN_PROMPT).not.toContain("generate_names");
   });
 });

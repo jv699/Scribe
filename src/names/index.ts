@@ -21,6 +21,12 @@ export interface NameBatch {
   names: string[];
   /** "none": no source could serve this culture (offline, with no stand-in style). */
   source: "behindthename" | "generated" | "none";
+  /**
+   * Why Behind the Name wasn't used, when it wasn't: no key set, a request
+   * for places (it has only people), or a culture it doesn't cover. Absent
+   * when it was used, or when it failed (`fellBack`).
+   */
+  skipped?: "no-key" | "places" | "no-usage";
   /** The offline style used, when generated. */
   style?: StyleId;
   /** Behind the Name was tried and failed, so these came from the generator instead. */
@@ -29,6 +35,8 @@ export interface NameBatch {
 
 export interface NameService {
   generate(request: NameRequest): Promise<NameBatch>;
+  /** Count these as already handed out: how a resumed chat keeps its memory. */
+  exclude(names: Iterable<string>): void;
 }
 
 export interface NameServiceOptions {
@@ -58,9 +66,10 @@ export function makeNameService(options: NameServiceOptions = {}): NameService {
     return names;
   }
 
-  function offline(request: NameRequest, fellBack: boolean): NameBatch {
+  function offline(request: NameRequest, fellBack: boolean, skipped?: NameBatch["skipped"]): NameBatch {
     const style = request.culture.style;
-    if (!style) return { names: [], source: "none", fellBack };
+    const why = skipped ? { skipped } : {};
+    if (!style) return { names: [], source: "none", fellBack, ...why };
     const names = generateNames({
       style,
       count: request.count,
@@ -70,7 +79,7 @@ export function makeNameService(options: NameServiceOptions = {}): NameService {
       exclude: used,
       ...(options.random ? { random: options.random } : {}),
     });
-    return { names: remember(names), source: "generated", style, fellBack };
+    return { names: remember(names), source: "generated", style, fellBack, ...why };
   }
 
   async function online(client: BehindTheNameClient, usage: string, request: NameRequest): Promise<string[] | null> {
@@ -107,11 +116,16 @@ export function makeNameService(options: NameServiceOptions = {}): NameService {
   return {
     async generate(request) {
       const usage = request.culture.usage;
+      if (!usage) return offline(request, false, "no-usage");
       // Behind the Name has people, not places.
-      if (!client || !usage || request.kind === "place") return offline(request, false);
+      if (request.kind === "place") return offline(request, false, "places");
+      if (!client) return offline(request, false, "no-key");
       const names = await online(client, usage, request);
       if (names === null) return offline(request, true);
       return { names: remember(names), source: "behindthename", fellBack: false };
+    },
+    exclude(names) {
+      for (const name of names) used.add(name.toLowerCase());
     },
   };
 }
