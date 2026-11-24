@@ -4,6 +4,7 @@
  * a renderer, and keeps the chat screen ignorant of the store.
  */
 import { mapReadiness } from "./agent/tools/draw-map.ts";
+import { describePdf, exportActivePdf } from "./agent/tools/export-pdf.ts";
 import type { ActiveOneshot } from "./agent/tools/types.ts";
 import type { ChatCommand } from "./screens/chat.ts";
 import { findOneshot } from "./store/oneshots.ts";
@@ -16,9 +17,10 @@ export function saveUpdateRequest(displayName: string): string {
 }
 
 /**
- * The Drafting Table's commands. Each turns into a plain-language request the
- * agent acts on with its tools, after checking locally whatever it can, so a
- * request that can't succeed costs no model turn.
+ * The Drafting Table's commands. /save and /map turn into plain-language
+ * requests the agent acts on with its tools, after checking locally whatever
+ * they can, so a request that can't succeed costs no model turn. /pdf needs no
+ * agent at all and runs here.
  */
 export function oneshotCommands(oneshotsDir: string, active: ActiveOneshot): ChatCommand[] {
   return [
@@ -63,6 +65,28 @@ export function oneshotCommands(oneshotsDir: string, active: ActiveOneshot): Cha
           case "no-schematic":
             chat.notice(`"${readiness.name}" has no ## Map schematic yet — ask Scribe to add one, then try /map again.`);
             return;
+        }
+      },
+    },
+    {
+      name: "pdf",
+      description: "Save a printable PDF of the saved plan",
+      /**
+       * Runs here rather than as a model turn: the PDF is a printout of the
+       * saved markdown, so there is nothing for the agent to decide.
+       */
+      run: async (chat) => {
+        try {
+          const result = await exportActivePdf(oneshotsDir, active);
+          if (result.ok) {
+            chat.notice(`Saved a PDF to ${describePdf(result)}.`);
+          } else if (result.problem === "unsaved") {
+            chat.notice("Save the plan first — /pdf prints the saved plan.");
+          } else {
+            chat.notice(`"${result.name}" is no longer in the one-shots folder.`, "danger");
+          }
+        } catch (error) {
+          chat.notice(`Couldn't save the PDF: ${(error as Error).message}`, "danger");
         }
       },
     },

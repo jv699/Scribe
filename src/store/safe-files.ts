@@ -39,7 +39,7 @@ export async function isDirectoryNoFollow(path: string): Promise<boolean> {
  * Atomically replace a file via an exclusively-created sibling temporary.
  * Returns false when the immediate parent is not a real directory.
  */
-export async function atomicReplaceRegularFile(path: string, content: string): Promise<boolean> {
+export async function atomicReplaceRegularFile(path: string, content: string | Uint8Array): Promise<boolean> {
   const parent = dirname(path);
   await mkdir(parent, { recursive: true });
   if (!(await isDirectoryNoFollow(parent))) return false;
@@ -52,7 +52,7 @@ export async function atomicReplaceRegularFile(path: string, content: string): P
       constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL,
       0o666,
     );
-    await file.writeFile(content, "utf8");
+    await (typeof content === "string" ? file.writeFile(content, "utf8") : file.writeFile(content));
     await file.close();
     file = undefined;
 
