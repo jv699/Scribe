@@ -5,6 +5,8 @@
  */
 import { buildBenchSystemPrompt } from "../agent/context.ts";
 import { toolsFor } from "../agent/agents.ts";
+import { makeNameService } from "../names/index.ts";
+import { log, logContent, logError } from "../log.ts";
 import { runAgent } from "../agent/loop.ts";
 import { toolLabel, toolPastLabel } from "../agent/tools/index.ts";
 import { apiKeyFrom, createOpenAIProvider, DEFAULT_BASE_URL, DEFAULT_MODEL, ProviderHttpError } from "../provider/openai.ts";
@@ -185,6 +187,16 @@ function makeRun(model: BenchModel, settings: Settings, timeoutMs: number, now: 
     endActivity();
     status = next;
     endedAt = now();
+    log("bench.run", {
+      model: modelLabel(model),
+      status: next,
+      ms: startedAt !== null ? endedAt - startedAt : null,
+      promptTokens,
+      completionTokens,
+      toolCalls,
+      // A provider's message can quote the prompt, so the text is verbose-only.
+      ...(error && logContent() ? { error } : {}),
+    });
   }
 
   const run: MutableRun = {
@@ -256,7 +268,9 @@ function makeRun(model: BenchModel, settings: Settings, timeoutMs: number, now: 
           {
             provider,
             systemPrompt,
-            tools: toolsFor("bench", { sourcesDir: settings.sourcesDir }),
+            // Offline names only: every model draws from the same source, with no
+            // network or rate limit in the comparison.
+            tools: toolsFor("bench", { sourcesDir: settings.sourcesDir, names: makeNameService() }),
             signal: controller.signal,
             onMessage: (message) => {
               messages.push(message);
@@ -332,6 +346,7 @@ function makeRun(model: BenchModel, settings: Settings, timeoutMs: number, now: 
           body: run.status === "done" ? answer : (error ?? ""),
         });
       } catch (err) {
+        logError("bench.save-failed", err, { model: modelLabel(model) });
         timeline.push({
           kind: "notice",
           text: `Couldn't save this result: ${err instanceof Error ? err.message : String(err)}`,

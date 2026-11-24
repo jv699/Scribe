@@ -8,6 +8,7 @@ import type {
   ToolCallDelta,
   UsageInfo,
 } from "./types.ts";
+import { log, logContent, logError, registerSecret, since } from "../log.ts";
 
 export interface OpenAIProviderOptions {
   baseUrl: string;
@@ -141,8 +142,18 @@ function authHint(options: OpenAIProviderOptions): string {
   return `The provider rejected the API key from ${options.apiKeyEnv}. Check the key, or change it in Settings.`;
 }
 
+/** A base URL's host, for the log: enough to tell providers apart without the path. */
+function hostOf(baseUrl: string): string {
+  try {
+    return new URL(baseUrl).host;
+  } catch {
+    return "(invalid base URL)";
+  }
+}
+
 export function createOpenAIProvider(options: OpenAIProviderOptions): ChatProvider {
   const baseUrl = options.baseUrl.replace(/\/+$/, "");
+  if (options.apiKey) registerSecret(options.apiKey);
 
   return {
     async *streamChat(messages: ChatMessage[], chatOptions?: ChatOptions): AsyncGenerator<ChatEvent> {
@@ -154,6 +165,11 @@ export function createOpenAIProvider(options: OpenAIProviderOptions): ChatProvid
         stream_options: { include_usage: true },
       };
       if (chatOptions?.tools?.length) body["tools"] = chatOptions.tools;
+
+      // Never the URL with a query, never the headers: just enough to tell requests apart.
+      const where = { host: hostOf(baseUrl), model: options.model };
+      const started = performance.now();
+      log("chat.request", { ...where, messages: messages.length, tools: chatOptions?.tools?.length ?? 0 });
 
       let response: Response;
       try {
@@ -167,7 +183,11 @@ export function createOpenAIProvider(options: OpenAIProviderOptions): ChatProvid
           ...(chatOptions?.signal ? { signal: chatOptions.signal } : {}),
         });
       } catch (err) {
-        if (chatOptions?.signal?.aborted) throw err;
+        if (chatOptions?.signal?.aborted) {
+          log("chat.aborted", { ...where, ms: since(started) });
+          throw err;
+        }
+        logError("chat.unreachable", err, { ...where, ms: since(started) });
         throw new Error(
           `Couldn't reach ${baseUrl}. Check the base URL in Settings and that the provider is running.`,
         );
@@ -175,13 +195,17 @@ export function createOpenAIProvider(options: OpenAIProviderOptions): ChatProvid
 
       if (!response.ok) {
         const failure = `Chat request failed (${response.status}): ${await errorDetail(response)}`;
+        // The provider's message can quote the prompt back (a moderation error), so it is content.
+        log("chat.failed", { ...where, status: response.status, ms: since(started), ...(logContent() ? { detail: failure } : {}) });
         if (response.status === 401 || response.status === 403) {
           throw new ProviderHttpError(`${authHint(options)} ${failure}`, response.status);
         }
         throw new ProviderHttpError(failure, response.status);
       }
 
-      if (response.headers.get("content-type")?.includes("text/event-stream")) {
+      const streaming = response.headers.get("content-type")?.includes("text/event-stream") ?? false;
+      log("chat.response", { ...where, status: response.status, streaming, ms: since(started) });
+      if (streaming) {
         yield* streamSSE(response);
       } else {
         // Support older endpoints and proxies without SSE.
@@ -250,7 +274,9 @@ export async function listModelInfos(options: { baseUrl: string; apiKey: string 
   });
 
   if (!response.ok) {
-    throw new Error(`Failed to list models (${response.status}): ${await errorDetail(response)}`);
+    const failure = `Failed to list models (${response.status}): ${await errorDetail(response)}`;
+    log("models.failed", { host: hostOf(baseUrl), status: response.status, ...(logContent() ? { detail: failure } : {}) });
+    throw new Error(failure);
   }
 
   const json = (await response.json()) as { data?: RawModel[] };
@@ -281,6 +307,9 @@ export async function listModels(options: { baseUrl: string; apiKey: string }): 
 /** The key a named env var holds; no name, or an unset variable, is no key. */
 export function apiKeyFrom(apiKeyEnv: string | undefined): string {
   const name = apiKeyEnv?.trim();
+  // Not registered with the log here: Settings reads whatever variable is
+  // typed (even HOME), and masking its value would blank paths. The provider
+  // registers the key it actually sends.
   return name ? (process.env[name] ?? "") : "";
 }
 

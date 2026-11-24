@@ -50,7 +50,8 @@ A **Session** has three statuses:
   span multiple sittings.
 - **Settings** — provider (base URL), model (a free-form field with inline
   suggestions from the configured provider), API key env var name, campaigns
-  directory, one-shots directory, sources directory.
+  directory, one-shots directory, sources directory, bench directory, names
+  key env var name.
 
 ## On-disk layout
 
@@ -109,8 +110,19 @@ tools.**
   safely continue a saved plan with wholesale body replacement), `draw_map`
   (one-shot only; a full-page map of a saved plan with a `## Map` schematic),
   and the source-document tools `list_sources` / `search_sources` /
-  `read_source_pages` (granted to planning and one-shot, not report). See
+  `read_source_pages` (granted to planning and one-shot, not report), and
+  `generate_names` (planning, one-shot, and bench; see below). See
   `CLAUDE.md` for the full current tool list and per-agent grants.
+- **Names** — models reach for the same few names, so `generate_names(culture,
+  count, gender, kind, surnames)` supplies them instead. Real and historical
+  cultures come from the Behind the Name API when the user has a key (env var
+  named by the `namesApiKeyEnv` setting, default `BEHINDTHENAME_API_KEY`);
+  invented cultures (elvish, dwarvish, orcish, halfling, infernal, draconic,
+  common) and everything without a key come from an offline syllable
+  generator (`src/names/`), which is also the fallback when Behind the Name
+  fails. The model's culture is looked up in a fixed table, so only Scribe's
+  own usage codes reach the URL. ScribeBench gets the offline generator only,
+  so every model draws from the same source.
 - **Asking the user** — `ask_user(question, options)` blocks the turn on a
   multiple-choice question shown where the prompt box was, so the agent
   resolves a genuine fork by asking rather than guessing. Granted to every
@@ -212,10 +224,10 @@ exist.
   scan indexes as an empty document.
 - A sources browser screen (list indexed documents, force a re-index). The
   library is agent-and-Finder-managed for now.
-- Extra agent tools: dice roller, stat-block lookup, name generators. These
-  now have a defined landing spot — add a `ToolSpec` file under
-  `src/agent/tools/`, register it, and grant it in `src/agent/agents.ts`. The
-  context-free ones (dice, names) are candidates for the `oneshot` agent
+- Extra agent tools: dice roller, stat-block lookup (names shipped as
+  `generate_names`). These have a defined landing spot — add a `ToolSpec` file
+  under `src/agent/tools/`, register it, and grant it in `src/agent/agents.ts`.
+  The context-free ones (dice) are candidates for the `oneshot` agent
   (which has save/continue tools and `ask_user` today). Plan export shipped as
   `save_session`: the Drafting Table saves a one-shot to the configured
   one-shots directory, only on the user's explicit request.

@@ -14,13 +14,18 @@ import type { ChatProvider, ModelInfo } from "./provider/types.ts";
 import { toolsFor } from "./agent/agents.ts";
 import type { ActiveOneshot } from "./agent/tools/types.ts";
 import { makeAskChannel } from "./agent/ask.ts";
+import { makeNameService, type NameService } from "./names/index.ts";
+import { namesInConversation } from "./agent/tools/generate-names.ts";
+import { DEFAULT_NAMES_KEY_ENV } from "./names/behind-the-name.ts";
 import { buildOneshotSystemPrompt, buildPlanningSystemPrompt } from "./agent/context.ts";
 import type { Session } from "./store/sessions.ts";
 import { loadChatLog, saveChatLog } from "./store/chat-log.ts";
 import { indexSources } from "./store/sources.ts";
 import { campaignCompletions, oneshotCompletions } from "./completions.ts";
 import { oneshotCommands } from "./commands.ts";
-import { cliExit } from "./cli.ts";
+import { cliExit, logsDir } from "./cli.ts";
+import { configureLogging, log, logError, loggingEnabled, logLevelFrom } from "./log.ts";
+import { VERSION } from "./version.ts";
 
 // Answer --help/--version and refuse non-terminals before taking over the screen.
 const exit = cliExit(Bun.argv.slice(2), process.stdout.isTTY === true && process.stdin.isTTY === true);
@@ -28,6 +33,11 @@ if (exit) {
   (exit.exitCode === 0 ? console.log : console.error)(exit.output);
   process.exit(exit.exitCode);
 }
+
+const logLevel = logLevelFrom(Bun.argv.slice(2), process.env);
+const logFile = configureLogging({ level: logLevel, dir: logsDir() });
+// Said now, while the terminal is still ours to print to.
+if (logLevel !== "off" && !logFile) console.error(`Couldn't start the debug log in ${logsDir()}; continuing without it.`);
 
 const renderer = await createCliRenderer({
   // Chat requires a second Ctrl+C to quit; other screens quit immediately.
@@ -38,15 +48,49 @@ renderer.setBackgroundColor(theme.background);
 renderer.setTerminalTitle("Scribe");
 
 let settings = await loadSettings();
+logStart();
+
+/** What a bug report needs to know about this setup: names of key variables and whether they are set, never keys. */
+function logStart(): void {
+  if (!logFile) return;
+  const isSet = (name: string | undefined): boolean => !!name && !!process.env[name];
+  const namesKeyEnv = settings.namesApiKeyEnv ?? DEFAULT_NAMES_KEY_ENV;
+  log("app.start", {
+    version: VERSION,
+    bun: Bun.version,
+    platform: `${process.platform}-${process.arch}`,
+    terminal: `${renderer.width}x${renderer.height}`,
+    baseUrl: settings.baseUrl ?? DEFAULT_BASE_URL,
+    model: settings.model ?? DEFAULT_MODEL,
+    apiKeyEnv: settings.apiKeyEnv ?? null,
+    apiKeySet: isSet(settings.apiKeyEnv),
+    namesKeyEnv,
+    namesKeySet: isSet(namesKeyEnv),
+    campaignsDir: settings.campaignsDir,
+    oneshotsDir: settings.oneshotsDir,
+    sourcesDir: settings.sourcesDir,
+  });
+  // OpenTUI already catches these and keeps the app running, where they
+  // vanish with the screen. Record them only: debugging must not change
+  // what happens to an error, or it changes the bug being chased.
+  const record = (kind: string) => (error: unknown) => {
+    logError(kind, error, { stack: error instanceof Error ? error.stack : undefined });
+  };
+  process.on("uncaughtException", record("app.uncaught-error"));
+  process.on("unhandledRejection", record("app.unhandled-rejection"));
+}
 
 // Warm the cache without letting indexing failures block startup.
-void indexSources(settings.sourcesDir).catch(() => {});
+void indexSources(settings.sourcesDir).catch((error: unknown) => logError("sources.index-failed", error));
 
 let currentScreen: Screen | null = null;
 
 function quitApp(): void {
   currentScreen?.dispose?.();
   renderer.destroy();
+  log("app.quit");
+  // Only if it is still running: a failed write switches logging off.
+  if (logFile && loggingEnabled()) console.log(`Debug log: ${logFile}`);
   process.exit(0);
 }
 
@@ -144,6 +188,11 @@ function makeChatOptions(): { provider: ChatProvider; model: string; modelInfo: 
   };
 }
 
+/** A chat's name source: Behind the Name when its key variable is set, the offline generator otherwise. */
+function makeNames(): NameService {
+  return makeNameService({ apiKeyEnv: settings.namesApiKeyEnv ?? DEFAULT_NAMES_KEY_ENV });
+}
+
 async function showOneshotPlanner(): Promise<void> {
   const ask = makeAskChannel();
   const activeOneshot: ActiveOneshot = { current: null };
@@ -159,6 +208,7 @@ async function showOneshotPlanner(): Promise<void> {
       activeOneshot,
       sourcesDir: settings.sourcesDir,
       ask,
+      names: makeNames(),
     }),
     ask,
     completions: oneshotCompletions(settings.oneshotsDir, settings.sourcesDir),
@@ -191,6 +241,8 @@ async function makeCampaignSessionChat(
   host: SessionChatHost,
 ): Promise<Awaited<ReturnType<typeof makeChatScreen>>> {
   const ask = makeAskChannel();
+  // Made once per chat, outside loadTurnContext, so it remembers names across turns.
+  const names = makeNames();
   return makeChatScreen(renderer, {
     ...makeChatOptions(),
     title: sessionChatTitle(session),
@@ -207,10 +259,11 @@ async function makeCampaignSessionChat(
           ask,
           sourcesDir: settings.sourcesDir,
           defaultSystem: fresh.system,
+          names,
         }),
       };
     },
-    chatLog: makeChatLog(campaign, session),
+    chatLog: makeChatLog(campaign, session, names),
     ask,
     completions: campaignCompletions(campaign, settings.sourcesDir),
     isInputActive: host.isInputActive,
@@ -220,9 +273,14 @@ async function makeCampaignSessionChat(
   });
 }
 
-function makeChatLog(campaign: Campaign, session: Session): ChatLogStore {
+function makeChatLog(campaign: Campaign, session: Session, names: NameService): ChatLogStore {
   return {
-    load: () => loadChatLog(campaign.dir, session.number, "plan"),
+    load: async () => {
+      const messages = await loadChatLog(campaign.dir, session.number, "plan");
+      // A resumed chat still shouldn't offer names it already offered.
+      names.exclude(namesInConversation(messages));
+      return messages;
+    },
     save: (messages) => saveChatLog(campaign.dir, session.number, "plan", messages),
   };
 }

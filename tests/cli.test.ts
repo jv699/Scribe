@@ -31,3 +31,13 @@ test("a non-terminal fails instead of hanging", () => {
   expect(exit?.exitCode).toBe(1);
   expect(exit?.output).toContain("terminal");
 });
+
+test("--debug and --debug=verbose start the app, and help says where logs go", () => {
+  expect(cliExit(["--debug"], true)).toBeNull();
+  expect(cliExit(["--debug=verbose"], true)).toBeNull();
+  expect(cliExit(["--debug", "--nope"], true)?.output).toContain("--nope");
+  expect(cliExit(["--debug=loud"], true)?.exitCode).toBe(1);
+  const help = cliExit(["--help"], false)?.output ?? "";
+  expect(help).toContain("--debug");
+  expect(help).toContain("logs/<date>.log");
+});

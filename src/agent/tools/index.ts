@@ -3,6 +3,7 @@ import { appendCampaignSummaryTool } from "./append-campaign-summary.ts";
 import { askUserTool } from "./ask-user.ts";
 import { drawMapTool } from "./draw-map.ts";
 import { exportPdfTool } from "./export-pdf.ts";
+import { generateNamesTool } from "./generate-names.ts";
 import { listSessionsTool } from "./list-sessions.ts";
 import { listOneshotsTool } from "./list-oneshots.ts";
 import { listSourcesTool } from "./list-sources.ts";
@@ -32,6 +33,7 @@ export const registry = {
   list_sources: listSourcesTool,
   search_sources: searchSourcesTool,
   read_source_pages: readSourcePagesTool,
+  generate_names: generateNamesTool,
 } as const satisfies Record<string, ToolSpec>;
 
 export type ToolName = keyof typeof registry;

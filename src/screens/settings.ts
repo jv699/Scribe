@@ -19,6 +19,7 @@ import { abbreviateHome, defaultConfigDir, expandHome, type Settings } from "../
 import { baseUrlProblem, checkProvider, keyVarProblem, looksLikeApiKey } from "../provider/check.ts";
 import { apiKeyFrom, DEFAULT_BASE_URL, listModelInfos } from "../provider/openai.ts";
 import { PROVIDER_PRESETS } from "../provider/presets.ts";
+import { DEFAULT_NAMES_KEY_ENV } from "../names/behind-the-name.ts";
 import type { Screen } from "./screen.ts";
 
 export interface SettingsScreenOptions {
@@ -26,6 +27,25 @@ export interface SettingsScreenOptions {
   onSaved: (next: Settings) => void | Promise<void>;
   onBack: () => void;
 }
+
+/**
+ * The help line under the form, per focused control. It is one row high, so
+ * each must fit an 80-column terminal less the screen's padding.
+ */
+export const HELP_WIDTH = 78;
+export const HELP = {
+  baseUrl: "Any OpenAI-compatible endpoint. Type a provider name, or press ↓ to browse.",
+  apiKeyEnv: "The name of the environment variable holding your key, never the key itself.",
+  model: "Type to search the provider's models, or ↓ to browse. Picking one tests it.",
+  campaignsDir: "One folder per campaign lives here. Changing it does not move existing ones.",
+  oneshotsDir: "Plans saved from the Drafting Table live here. Changing it does not move them.",
+  sourcesDir: "Reference PDFs live here, one folder per system. Changing it won't move them.",
+  benchDir: "ScribeBench saves each run here. Changing it does not move earlier runs.",
+  namesApiKeyEnv: "Optional: the variable with your Behind the Name key, for real-world names.",
+  save: "Saves these settings and returns to the menu.",
+  test: "Sends a one-line message to the model using the values above, saved or not.",
+  cancel: "Returns to the menu without saving.",
+} as const;
 
 const LABEL_WIDTH = 22;
 const CHECK_WIDTH = 13;
@@ -42,13 +62,15 @@ export async function makeSettingsScreen(
     width: "100%",
     height: "100%",
     padding: 1,
+    // The status line is last and can wrap; the bottom row is its room, not padding.
+    paddingBottom: 0,
     flexDirection: "column",
   });
   const titleRow = new BoxRenderable(renderer, {
     flexDirection: "row",
     justifyContent: "space-between",
     width: "100%",
-    marginBottom: 1,
+    // No gap below: at 80×24 that row is the status line's second line.
   });
   titleRow.add(new TextRenderable(renderer, { content: "Settings", fg: theme.accent }));
   titleRow.add(new TextRenderable(renderer, { content: abbreviateHome(defaultConfigDir()), fg: theme.textMuted }));
@@ -114,7 +136,7 @@ export async function makeSettingsScreen(
     "Base URL",
     baseUrlCombobox.node,
     baseUrlInput,
-    "Any OpenAI-compatible endpoint. Type a provider name, or press ↓ to browse.",
+    HELP.baseUrl,
   );
 
   // The key comes before the model: listing models needs it.
@@ -122,7 +144,7 @@ export async function makeSettingsScreen(
     "API key env var",
     options.settings.apiKeyEnv ?? "",
     "OPENAI_API_KEY",
-    "The name of the environment variable holding your key, never the key itself.",
+    HELP.apiKeyEnv,
   );
 
   const modelCombobox = makeModelCombobox(renderer, {
@@ -155,7 +177,7 @@ export async function makeSettingsScreen(
     "Model",
     modelCombobox.node,
     modelInput,
-    "Type to search the provider's models, or ↓ to browse. Picking one tests it.",
+    HELP.model,
     checkMark,
   );
 
@@ -163,25 +185,31 @@ export async function makeSettingsScreen(
     "Campaigns directory",
     abbreviateHome(options.settings.campaignsDir),
     "~/Scribe",
-    "One folder per campaign lives here. Changing it does not move existing campaigns.",
+    HELP.campaignsDir,
   );
   const oneshotsInput = addField(
     "One-shots directory",
     abbreviateHome(options.settings.oneshotsDir),
     "~/Scribe/One-Shots",
-    "Plans saved from the Drafting Table live here. Changing it does not move them.",
+    HELP.oneshotsDir,
   );
   const sourcesInput = addField(
     "Sources directory",
     abbreviateHome(options.settings.sourcesDir),
     "~/Scribe/Sources",
-    "Reference PDFs live here, one folder per system. Changing it does not move them.",
+    HELP.sourcesDir,
   );
   const benchInput = addField(
     "Bench directory",
     abbreviateHome(options.settings.benchDir),
     "~/Scribe/Bench",
-    "ScribeBench saves each run's prompt and results here. Changing it does not move them.",
+    HELP.benchDir,
+  );
+  const namesKeyInput = addField(
+    "Names key env var",
+    options.settings.namesApiKeyEnv ?? "",
+    DEFAULT_NAMES_KEY_ENV,
+    HELP.namesApiKeyEnv,
   );
 
   container.add(hint);
@@ -210,11 +238,11 @@ export async function makeSettingsScreen(
   buttonRow.add(cancelButton);
   container.add(buttonRow);
   container.add(status);
-  showHintFor(saveButton, "Saves these settings and returns to the menu.");
-  showHintFor(testButton, "Sends a one-line message to the model using the values above, saved or not.");
-  showHintFor(cancelButton, "Returns to the menu without saving.");
+  showHintFor(saveButton, HELP.save);
+  showHintFor(testButton, HELP.test);
+  showHintFor(cancelButton, HELP.cancel);
 
-  const inputs = [baseUrlInput, keyInput, modelInput, dirInput, oneshotsInput, sourcesInput, benchInput];
+  const inputs = [baseUrlInput, keyInput, modelInput, dirInput, oneshotsInput, sourcesInput, benchInput, namesKeyInput];
   const focusChain: Renderable[] = [...inputs, saveButton, testButton, cancelButton];
   // What is on disk: the baseline for "unsaved", and what a save builds on.
   const saved = options.settings;
@@ -251,17 +279,17 @@ export async function makeSettingsScreen(
     return dir;
   }
 
-  /** The key variable's name, or null after refusing one that can't be saved or used. */
-  function readKeyVar(): string | null {
-    const apiKeyEnv = keyInput.value.trim();
-    const problem = keyVarProblem(apiKeyEnv);
+  /** A key variable's name, or null after refusing one that can't be saved or used. */
+  function readKeyVar(input: InputRenderable = keyInput): string | null {
+    const name = input.value.trim();
+    const problem = keyVarProblem(name);
     if (problem) {
       // Take a pasted key off the screen too; it would only be refused again.
-      if (looksLikeApiKey(apiKeyEnv)) keyInput.value = "";
-      reject(keyInput, problem);
+      if (looksLikeApiKey(name)) input.value = "";
+      reject(input, problem);
       return null;
     }
-    return apiKeyEnv;
+    return name;
   }
 
   // A connection check sends the request a chat would make, with what is in
@@ -347,6 +375,8 @@ export async function makeSettingsScreen(
     if (sourcesDir === null) return;
     const benchDir = readDir(benchInput, "Bench");
     if (benchDir === null) return;
+    const namesApiKeyEnv = readKeyVar(namesKeyInput);
+    if (namesApiKeyEnv === null) return;
     const next: Settings = { ...saved, campaignsDir, oneshotsDir, sourcesDir, benchDir };
     if (baseUrl !== "") next.baseUrl = baseUrl;
     else delete next.baseUrl;
@@ -355,6 +385,9 @@ export async function makeSettingsScreen(
     else delete next.model;
     if (apiKeyEnv !== "") next.apiKeyEnv = apiKeyEnv;
     else delete next.apiKeyEnv;
+    // Blank means the default variable name, so only a different one is stored.
+    if (namesApiKeyEnv !== "") next.namesApiKeyEnv = namesApiKeyEnv;
+    else delete next.namesApiKeyEnv;
 
     saving = true;
     setStatus("Saving...", "info");

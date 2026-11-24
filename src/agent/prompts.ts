@@ -15,6 +15,17 @@ When planning a session:
 `;
 
 /**
+ * Only for agents granted generate_names: the one-shot and bench cores (via
+ * RUNNABLE_PLANS) and the planning section in context.ts. Not the campaign
+ * core, which report mode shares and which has no generate_names.
+ */
+export const NAMING_RULE = `- Name new NPCs, places, taverns, ships, and factions with generate_names
+  instead of inventing names yourself; models tend to reuse the same few.
+  Request several at once in a culture or style that fits the setting, then
+  pick and adapt. Keep names the user or the campaign already established.
+`;
+
+/**
  * How a plan should read at the table — shared by the Drafting Table and
  * ScribeBench so a benchmark measures the same craft the user gets.
  */
@@ -29,7 +40,7 @@ const RUNNABLE_PLANS = `Making plans runnable:
 - Give the GM concrete material to act on: stakes, important clues, NPC
   motivations, encounter dynamics, likely consequences, and useful
   improvisation anchors.
-- Key significant locations as numbered headings with concise descriptions of
+${NAMING_RULE}- Key significant locations as numbered headings with concise descriptions of
   what players notice and can interact with.
 - When spatial relationships matter, add a "## Map" section before the
   locations containing a fenced text block in this format:

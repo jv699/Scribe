@@ -8,6 +8,7 @@ import type { Campaign } from "../../store/campaigns.ts";
 import type { Session } from "../../store/sessions.ts";
 import type { SavedOneshot } from "../../store/oneshots.ts";
 import type { AskChannel } from "../ask.ts";
+import type { NameService } from "../../names/index.ts";
 import type { AgentTool } from "../loop.ts";
 
 export type { AgentTool, ToolDefinition };
@@ -28,6 +29,8 @@ export interface ToolContext {
   defaultSystem?: string;
   /** Without a channel, ask_user is omitted. */
   ask?: AskChannel;
+  /** Without a service, generate_names is omitted. One per chat: it remembers names already given. */
+  names?: NameService;
 }
 
 export interface ToolSpec {

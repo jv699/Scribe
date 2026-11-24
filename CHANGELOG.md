@@ -6,6 +6,24 @@ layout and config format may still change between minor versions.
 
 ## Unreleased
 
+### Debug logs
+
+- `scribe --debug` (or `SCRIBE_DEBUG=1`) writes a log of model requests,
+  tool calls, name sources, and unhandled errors to `~/.config/scribe/logs/`, one file
+  per day, kept for a week. It never holds API keys or campaign text;
+  `--debug=verbose` adds shortened tool arguments and results.
+
+### Names
+
+- Scribe now asks a name generator for NPCs, places, taverns, and factions
+  instead of inventing them, so plans stop reusing the same few names. Fantasy
+  styles (elvish, dwarvish, orcish, halfling, infernal, draconic, and a
+  generic common style) work offline, and no name is offered twice in a chat.
+- With a free [Behind the Name](https://www.behindthename.com/api/) key in
+  `BEHINDTHENAME_API_KEY` (or a variable you name in Settings), real and
+  historical cultures get real names. If Behind the Name can't be reached,
+  Scribe falls back to the offline generator and says so.
+
 ### Printable PDFs
 
 - `/pdf` in the Drafting Table saves a print-ready US Letter PDF beside the
