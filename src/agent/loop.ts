@@ -110,8 +110,8 @@ export async function runAgent(
 
 /**
  * One line per tool call. By default only what can't hold campaign text: the
- * tool, its argument names, sizes, and whether it failed (with Scribe's own
- * error wording). Verbose logging adds the shortened arguments and result.
+ * tool, its argument names, sizes, and whether it failed. Verbose logging adds
+ * the shortened arguments and result, which is where a failure's text is.
  */
 function logTool(call: ToolCall, result: string, ms: number, known: boolean): void {
   let argNames: string[] = [];
@@ -129,7 +129,7 @@ function logTool(call: ToolCall, result: string, ms: number, known: boolean): vo
     argsChars: call.function.arguments.length,
     resultChars: result.length,
     failed,
-    ...(failed ? { error: result } : {}),
+    // A tool error can quote the model's arguments (a JSON parse error), so even it is content.
     ...(logContent() ? { arguments: call.function.arguments, result } : {}),
   });
 }

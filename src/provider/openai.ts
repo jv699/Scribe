@@ -8,7 +8,7 @@ import type {
   ToolCallDelta,
   UsageInfo,
 } from "./types.ts";
-import { log, logError, registerSecret, since } from "../log.ts";
+import { log, logContent, logError, registerSecret, since } from "../log.ts";
 
 export interface OpenAIProviderOptions {
   baseUrl: string;
@@ -195,7 +195,8 @@ export function createOpenAIProvider(options: OpenAIProviderOptions): ChatProvid
 
       if (!response.ok) {
         const failure = `Chat request failed (${response.status}): ${await errorDetail(response)}`;
-        log("chat.failed", { ...where, status: response.status, ms: since(started), detail: failure });
+        // The provider's message can quote the prompt back (a moderation error), so it is content.
+        log("chat.failed", { ...where, status: response.status, ms: since(started), ...(logContent() ? { detail: failure } : {}) });
         if (response.status === 401 || response.status === 403) {
           throw new ProviderHttpError(`${authHint(options)} ${failure}`, response.status);
         }
@@ -274,7 +275,7 @@ export async function listModelInfos(options: { baseUrl: string; apiKey: string 
 
   if (!response.ok) {
     const failure = `Failed to list models (${response.status}): ${await errorDetail(response)}`;
-    log("models.failed", { host: hostOf(baseUrl), status: response.status, detail: failure });
+    log("models.failed", { host: hostOf(baseUrl), status: response.status, ...(logContent() ? { detail: failure } : {}) });
     throw new Error(failure);
   }
 
@@ -306,10 +307,10 @@ export async function listModels(options: { baseUrl: string; apiKey: string }): 
 /** The key a named env var holds; no name, or an unset variable, is no key. */
 export function apiKeyFrom(apiKeyEnv: string | undefined): string {
   const name = apiKeyEnv?.trim();
-  const key = name ? (process.env[name] ?? "") : "";
-  // Every key passes through here, so this is where the log learns to mask it.
-  if (key) registerSecret(key);
-  return key;
+  // Not registered with the log here: Settings reads whatever variable is
+  // typed (even HOME), and masking its value would blank paths. The provider
+  // registers the key it actually sends.
+  return name ? (process.env[name] ?? "") : "";
 }
 
 export function createProviderFromSettings(settings: Settings): ChatProvider {

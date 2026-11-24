@@ -24,7 +24,7 @@ import { indexSources } from "./store/sources.ts";
 import { campaignCompletions, oneshotCompletions } from "./completions.ts";
 import { oneshotCommands } from "./commands.ts";
 import { cliExit, logsDir } from "./cli.ts";
-import { configureLogging, log, logError, logLevelFrom } from "./log.ts";
+import { configureLogging, log, logError, loggingEnabled, logLevelFrom } from "./log.ts";
 import { VERSION } from "./version.ts";
 
 // Answer --help/--version and refuse non-terminals before taking over the screen.
@@ -34,7 +34,10 @@ if (exit) {
   process.exit(exit.exitCode);
 }
 
-const logFile = configureLogging({ level: logLevelFrom(Bun.argv.slice(2), process.env), dir: logsDir() });
+const logLevel = logLevelFrom(Bun.argv.slice(2), process.env);
+const logFile = configureLogging({ level: logLevel, dir: logsDir() });
+// Said now, while the terminal is still ours to print to.
+if (logLevel !== "off" && !logFile) console.error(`Couldn't start the debug log in ${logsDir()}; continuing without it.`);
 
 const renderer = await createCliRenderer({
   // Chat requires a second Ctrl+C to quit; other screens quit immediately.
@@ -67,21 +70,14 @@ function logStart(): void {
     oneshotsDir: settings.oneshotsDir,
     sourcesDir: settings.sourcesDir,
   });
-  // A crash would otherwise vanish with the screen. Record it, give the
-  // terminal back, and exit as the crash would have.
-  const crash = (kind: string) => (error: unknown) => {
+  // OpenTUI already catches these and keeps the app running, where they
+  // vanish with the screen. Record them only: debugging must not change
+  // what happens to an error, or it changes the bug being chased.
+  const record = (kind: string) => (error: unknown) => {
     logError(kind, error, { stack: error instanceof Error ? error.stack : undefined });
-    try {
-      renderer.destroy();
-    } catch {
-      // Already torn down; the error still needs printing.
-    }
-    console.error(error);
-    console.error(`Debug log: ${logFile}`);
-    process.exit(1);
   };
-  process.on("uncaughtException", crash("app.crash"));
-  process.on("unhandledRejection", crash("app.unhandled-rejection"));
+  process.on("uncaughtException", record("app.uncaught-error"));
+  process.on("unhandledRejection", record("app.unhandled-rejection"));
 }
 
 // Warm the cache without letting indexing failures block startup.
@@ -92,10 +88,9 @@ let currentScreen: Screen | null = null;
 function quitApp(): void {
   currentScreen?.dispose?.();
   renderer.destroy();
-  if (logFile) {
-    log("app.quit");
-    console.log(`Debug log: ${logFile}`);
-  }
+  log("app.quit");
+  // Only if it is still running: a failed write switches logging off.
+  if (logFile && loggingEnabled()) console.log(`Debug log: ${logFile}`);
   process.exit(0);
 }
 

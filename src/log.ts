@@ -12,8 +12,9 @@
  *   log then holds pieces of your campaign.
  *
  * Keys never reach the file. Callers don't log them, and as a second line of
- * defence every key Scribe reads (`apiKeyFrom`) is registered with
- * `registerSecret`, and any string containing one is masked before writing.
+ * defence every key Scribe actually sends (the chat provider and the Behind
+ * the Name client register theirs with `registerSecret`) is masked in any
+ * string before writing.
  *
  * Logging must never break the app: a failed write turns logging off.
  */
@@ -35,14 +36,13 @@ const secrets = new Set<string>();
 
 /** The level asked for on the command line, or else by SCRIBE_DEBUG. */
 export function logLevelFrom(args: readonly string[], env: Record<string, string | undefined>): LogLevel {
-  for (const arg of args) {
-    if (arg === "--debug") return "debug";
-    if (arg === "--debug=verbose") return "verbose";
-  }
-  const value = env["SCRIBE_DEBUG"]?.trim().toLowerCase();
+  // Any flag beats the environment, and verbose beats plain debug.
+  if (args.includes("--debug=verbose")) return "verbose";
+  if (args.includes("--debug")) return "debug";
+  const value = env["SCRIBE_DEBUG"]?.trim().toLowerCase() ?? "";
   if (value === "verbose") return "verbose";
-  if (value && value !== "0" && value !== "false" && value !== "off") return "debug";
-  return "off";
+  // Only values that clearly mean "on": SCRIBE_DEBUG=no must not start a log.
+  return ["1", "true", "yes", "on", "debug"].includes(value) ? "debug" : "off";
 }
 
 function localDate(date: Date): string {
@@ -50,10 +50,10 @@ function localDate(date: Date): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
-/** Delete `<date>.log` files older than the retention window; leave anything else alone. */
+/** Keep the last LOG_RETENTION_DAYS days of `<date>.log` files, today included; leave anything else alone. */
 function prune(dir: string, now: Date): void {
   const cutoff = new Date(now);
-  cutoff.setDate(cutoff.getDate() - LOG_RETENTION_DAYS);
+  cutoff.setDate(cutoff.getDate() - (LOG_RETENTION_DAYS - 1));
   const oldest = localDate(cutoff);
   for (const name of readdirSync(dir)) {
     const date = LOG_NAME.exec(name)?.[1];
@@ -115,10 +115,17 @@ export function shorten(text: string, max = MAX_STRING): string {
   return text.length <= max ? text : `${text.slice(0, max)}… (${text.length} chars)`;
 }
 
+/**
+ * Make a value safe to write: strings masked and shortened at every depth,
+ * arrays capped, nothing JSON can't hold, and nothing deeper than a few
+ * levels (which also stops a circular value).
+ */
 function clean(value: unknown, depth = 0): unknown {
   if (typeof value === "string") return shorten(mask(value));
+  if (value === null || typeof value === "number" || typeof value === "boolean") return value;
   if (value instanceof Error) return clean({ name: value.name, message: value.message }, depth);
-  if (depth > 4 || value === null || typeof value !== "object") return value;
+  if (typeof value !== "object") return shorten(mask(String(value))); // bigint, symbol, function
+  if (depth >= 4) return "[nested]";
   if (Array.isArray(value)) return value.slice(0, 50).map((item) => clean(item, depth + 1));
   const out: Record<string, unknown> = {};
   for (const [key, item] of Object.entries(value)) {
@@ -130,8 +137,14 @@ function clean(value: unknown, depth = 0): unknown {
 /** Append one event. A no-op unless logging is on. */
 export function log(event: string, fields: Record<string, unknown> = {}): void {
   if (level === "off" || file === null) return;
+  let line: string;
   try {
-    const line = JSON.stringify({ time: new Date().toISOString(), event, ...(clean(fields) as object) });
+    line = JSON.stringify({ time: new Date().toISOString(), event, ...(clean(fields) as object) });
+  } catch {
+    // One unwritable value costs its own event, not the rest of the log.
+    line = JSON.stringify({ time: new Date().toISOString(), event, unloggable: true });
+  }
+  try {
     write(file, line + "\n");
   } catch {
     // A full disk or a vanished folder must not take the app down with it.

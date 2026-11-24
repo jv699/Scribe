@@ -125,8 +125,11 @@ export function makeBehindTheNameClient(options: BehindTheNameOptions): BehindTh
       let body: unknown;
       try {
         body = await response.json();
-      } catch {
-        log("names.btn", { ...asked, outcome: "not-json", status: response.status, ms: since(started) });
+      } catch (error) {
+        // The timeout covers the body too: a stalled reply is slow, not malformed.
+        const name = error instanceof Error ? error.name : "";
+        const outcome = name === "TimeoutError" ? "timeout" : name === "SyntaxError" ? "not-json" : "unreachable";
+        log("names.btn", { ...asked, outcome, status: response.status, ms: since(started) });
         return null;
       }
       const result = response.ok ? parseRandomNames(body, request) : null;

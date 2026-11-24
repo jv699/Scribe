@@ -151,12 +151,14 @@ else.
 When something misbehaves, run `scribe --debug` (or set `SCRIBE_DEBUG=1`).
 Scribe then writes what it does to `~/.config/scribe/logs/<date>.log`: each
 model request and how it ended, each tool call and how long it took, which
-source the name generator used and why, and any crash. The path is printed
+source the name generator used and why, and any error the app didn't handle. The path is printed
 when you quit. Logs are kept for a week.
 
 The debug log never contains API keys or your campaign text, so it is safe to
-attach to a bug report. `--debug=verbose` also records shortened tool
-arguments and results. That is useful when the content is the question, but
+attach to a bug report. Error messages that could quote your text (a
+provider's moderation error, a failed tool call) are left out too.
+`--debug=verbose` also records shortened tool arguments and results, and those
+messages. That is useful when the content is the question, but
 it puts pieces of your campaign in the file.
 
 ## Known limitations

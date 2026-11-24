@@ -67,9 +67,13 @@ describe("log level", () => {
     expect(logLevelFrom(["--debug=verbose"], {})).toBe("verbose");
     expect(logLevelFrom([], { SCRIBE_DEBUG: "1" })).toBe("debug");
     expect(logLevelFrom([], { SCRIBE_DEBUG: "Verbose" })).toBe("verbose");
-    for (const off of ["0", "false", "off", ""]) expect(logLevelFrom([], { SCRIBE_DEBUG: off })).toBe("off");
-    // The flag wins over the environment.
+    for (const on of ["true", "yes", "on", "debug"]) expect(logLevelFrom([], { SCRIBE_DEBUG: on })).toBe("debug");
+    // Only values that clearly mean "on" start a log.
+    for (const off of ["0", "false", "off", "no", "disabled", ""]) expect(logLevelFrom([], { SCRIBE_DEBUG: off })).toBe("off");
+    // The flag wins over the environment, and verbose wins over plain debug.
     expect(logLevelFrom(["--debug"], { SCRIBE_DEBUG: "verbose" })).toBe("debug");
+    expect(logLevelFrom(["--debug", "--debug=verbose"], {})).toBe("verbose");
+    expect(logLevelFrom(["--debug=verbose", "--debug"], {})).toBe("verbose");
   });
 });
 
@@ -95,12 +99,12 @@ describe("log file", () => {
     expect(written[1]).toMatchObject({ event: "second", where: "here", error: "boom", errorName: "Error" });
   });
 
-  test("only dated logs past the retention window are deleted", async () => {
-    for (const name of ["2026-11-10.log", "2026-11-17.log", "2026-11-23.log", "notes.txt"]) {
+  test("exactly seven days of dated logs are kept, today included, and nothing else is touched", async () => {
+    for (const name of ["2026-11-10.log", "2026-11-17.log", "2026-11-18.log", "2026-11-23.log", "notes.txt"]) {
       await writeFile(join(dir, name), "x");
     }
     configureLogging({ level: "debug", dir, now: new Date(2026, 10, 24, 9) });
-    expect((await readdir(dir)).sort()).toEqual(["2026-11-17.log", "2026-11-23.log", "notes.txt"]);
+    expect((await readdir(dir)).sort()).toEqual(["2026-11-18.log", "2026-11-23.log", "notes.txt"]);
   });
 
   test("a failed write turns logging off instead of throwing", () => {
@@ -113,6 +117,30 @@ describe("log file", () => {
     });
     expect(() => log("x")).not.toThrow();
     expect(loggingEnabled()).toBe(false);
+  });
+
+  test("deep, circular, and odd values are made safe instead of ending the log", () => {
+    capture();
+    registerSecret("deep-secret-value-42");
+    const circular: Record<string, unknown> = { name: "loop" };
+    circular["self"] = circular;
+    log("odd", {
+      deep: { a: { b: { c: { d: "deep-secret-value-42" } } } },
+      shallow: { a: "deep-secret-value-42" },
+      big: 10n,
+      circular,
+    });
+    log("after", { ok: true });
+
+    const odd = event("odd")!;
+    expect(odd["deep"]).toEqual({ a: { b: { c: "[nested]" } } });
+    // Masked (other test files register secrets too, so only check it's gone).
+    expect(String((odd["shallow"] as { a: string }).a)).toContain("[redacted]");
+    expect(odd["big"]).toBe("10");
+    expect(lines.join("")).not.toContain("deep-secret-value-42");
+    // Still logging afterwards.
+    expect(event("after")).toMatchObject({ ok: true });
+    expect(loggingEnabled()).toBe(true);
   });
 
   test("long strings are shortened, saying how long they were", () => {
@@ -132,16 +160,19 @@ describe("secrets", () => {
     expect(lines.join("")).toContain("[redacted]");
   });
 
-  test("any key read through apiKeyFrom is masked", () => {
+  test("a key the provider sends is masked; a variable merely read is not", () => {
     capture();
-    process.env["SCRIBE_TEST_LOG_KEY"] = "or-live-ffffeeeeddddcccc";
+    createOpenAIProvider({ baseUrl: "http://localhost:1/v1", model: "m", apiKey: "or-live-ffffeeeeddddcccc" });
+    process.env["SCRIBE_TEST_NOT_A_KEY"] = "/home/someone/projects";
     try {
-      apiKeyFrom("SCRIBE_TEST_LOG_KEY");
-      log("leak", { text: "key=or-live-ffffeeeeddddcccc" });
+      // Settings reads whatever variable is typed into the key field, even HOME.
+      apiKeyFrom("SCRIBE_TEST_NOT_A_KEY");
     } finally {
-      delete process.env["SCRIBE_TEST_LOG_KEY"];
+      delete process.env["SCRIBE_TEST_NOT_A_KEY"];
     }
+    log("paths", { text: "key=or-live-ffffeeeeddddcccc dir=/home/someone/projects" });
     expect(lines.join("")).not.toContain("or-live-ffffeeeeddddcccc");
+    expect(lines.join("")).toContain("/home/someone/projects");
   });
 
   test("a Behind the Name request is logged without the key or URL", async () => {
@@ -156,6 +187,24 @@ describe("secrets", () => {
     expect(event("names.btn")).toMatchObject({ usage: "iri", gender: "f", surname: true, outcome: "ok", names: ["Aoife", "Kelly"] });
     expect(lines.join("")).not.toContain("btn-secret-key-1234");
     expect(lines.join("")).not.toContain("behindthename.com");
+  });
+
+  test("a Behind the Name reply that stalls mid-body is a timeout, not a format problem", async () => {
+    capture();
+    const timeout = new DOMException("The operation timed out.", "TimeoutError");
+    const client = makeBehindTheNameClient({
+      apiKey: "k-1111111111",
+      minIntervalMs: 0,
+      // Headers arrived; the body never finished.
+      fetch: async () => ({ ok: true, status: 200, json: () => Promise.reject(timeout) }) as unknown as Response,
+    });
+    expect(await client.random({ usage: "iri", gender: "any", number: 6, surname: false })).toBeNull();
+    expect(event("names.btn")).toMatchObject({ outcome: "timeout", status: 200 });
+
+    lines = [];
+    const garbled = makeBehindTheNameClient({ apiKey: "k-2222222222", minIntervalMs: 0, fetch: async () => new Response("<html>") });
+    await garbled.random({ usage: "iri", gender: "any", number: 6, surname: false });
+    expect(event("names.btn")).toMatchObject({ outcome: "not-json" });
   });
 
   test("Behind the Name's own error is logged, which is how a bad usage code shows up", async () => {
@@ -198,37 +247,52 @@ describe("what gets logged", () => {
     });
   });
 
-  test("a failed tool records Scribe's error even at the debug level", async () => {
-    capture("debug");
+  test("a failed tool is marked at the debug level, with its text only in verbose", async () => {
     const broken: AgentTool = {
       ...updateNotes,
       execute: () => {
         throw new Error("no session 9");
       },
     };
+    capture("debug");
     await runAgent({ provider: toolThenAnswer("{}"), tools: [broken] }, [{ role: "user", content: "x" }]);
-    expect(event("agent.tool")).toMatchObject({ failed: true, error: "Tool error: no session 9" });
+    expect(event("agent.tool")).toMatchObject({ failed: true });
+    expect(lines.join("")).not.toContain("no session 9");
+
+    capture("verbose");
+    lines = [];
+    await runAgent({ provider: toolThenAnswer("{}"), tools: [broken] }, [{ role: "user", content: "x" }]);
+    expect(event("agent.tool")).toMatchObject({ failed: true, result: "Tool error: no session 9" });
   });
 
-  test("a failed chat request logs its status and the provider's message, with the key masked", async () => {
-    capture();
+  test("a failed chat request logs its status, and the provider's message only in verbose", async () => {
     const server = Bun.serve({
       port: 0,
-      fetch: () => Response.json({ error: { message: "Rate limit reached for gpt-x" } }, { status: 429 }),
+      // A moderation-style error that quotes the prompt back.
+      fetch: () => Response.json({ error: { message: 'Flagged: "the vampire drinks"' } }, { status: 400 }),
     });
-    try {
+    const fail = async (): Promise<void> => {
       const provider = createOpenAIProvider({ baseUrl: `http://localhost:${server.port}/v1`, model: "gpt-x", apiKey: "sk-provider-key-998877" });
       await expect(async () => {
-        for await (const _ of provider.streamChat([{ role: "user", content: "hi" }])) {
+        for await (const _ of provider.streamChat([{ role: "user", content: "the vampire drinks" }])) {
           // drain
         }
       }).toThrow();
+    };
+    try {
+      capture("debug");
+      await fail();
+      expect(event("chat.request")).toMatchObject({ model: "gpt-x", messages: 1, host: expect.stringContaining("localhost") });
+      expect(event("chat.failed")).toMatchObject({ status: 400 });
+      expect(lines.join("")).not.toContain("vampire");
+
+      capture("verbose");
+      lines = [];
+      await fail();
+      expect(event("chat.failed")).toMatchObject({ status: 400, detail: expect.stringContaining("Flagged") });
+      expect(lines.join("")).not.toContain("sk-provider-key-998877");
     } finally {
       server.stop();
     }
-    expect(event("chat.request")).toMatchObject({ model: "gpt-x", messages: 1, host: expect.stringContaining("localhost") });
-    expect(event("chat.failed")).toMatchObject({ status: 429, detail: expect.stringContaining("Rate limit reached") });
-    expect(lines.join("")).not.toContain("sk-provider-key-998877");
-    expect(lines.join("")).not.toContain('"content":"hi"');
   });
 });

@@ -6,7 +6,7 @@
 import { buildBenchSystemPrompt } from "../agent/context.ts";
 import { toolsFor } from "../agent/agents.ts";
 import { makeNameService } from "../names/index.ts";
-import { log, logError } from "../log.ts";
+import { log, logContent, logError } from "../log.ts";
 import { runAgent } from "../agent/loop.ts";
 import { toolLabel, toolPastLabel } from "../agent/tools/index.ts";
 import { apiKeyFrom, createOpenAIProvider, DEFAULT_BASE_URL, DEFAULT_MODEL, ProviderHttpError } from "../provider/openai.ts";
@@ -194,7 +194,8 @@ function makeRun(model: BenchModel, settings: Settings, timeoutMs: number, now: 
       promptTokens,
       completionTokens,
       toolCalls,
-      ...(error ? { error } : {}),
+      // A provider's message can quote the prompt, so the text is verbose-only.
+      ...(error && logContent() ? { error } : {}),
     });
   }
 
